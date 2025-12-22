@@ -1,0 +1,10 @@
+[package]
+name = "wispers_connect_client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rand = { version = "0.8", features = ["std"] }
+thiserror = "1.0"
+urlencoding = "2.1"
+zeroize = "1.8"
