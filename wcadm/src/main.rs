@@ -112,7 +112,7 @@ impl ApiKey {
     /// Map the environment to a base URL.
     fn base_url(&self) -> String {
         match self.env.as_str() {
-            "local" => "http://localhost:16363".to_string(),
+            "local" => "http://localhost:3000".to_string(),
             "staging" => "https://staging.connect.wispers.dev".to_string(),
             "prod" => "https://connect.wispers.dev".to_string(),
             other => {
