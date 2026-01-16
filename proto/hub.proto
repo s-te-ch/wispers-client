@@ -1,0 +1,21 @@
+// -*- protobuf -*-
+// External gRPC interface of the Wispers Connect hub.
+
+syntax = "proto3";
+package hub;
+option go_package = "proto/hubpb";
+option java_package = "dev.wispers.connect.proto.hub";
+
+service Hub {
+  rpc CompleteNodeRegistration(NodeRegistrationRequest) returns (NodeRegistration) {}
+}
+
+//-- Node registration ---------------------------------------------------------
+
+message NodeRegistrationRequest {
+  string token = 1;
+}
+message NodeRegistration {
+  int64 device_id = 1;
+  string auth_token = 2;
+}

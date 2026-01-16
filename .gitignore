@@ -43,6 +43,9 @@
 # Environment files
 .env
 
+# Emacs temp files
+*~
+
 # Added by cargo
 
 /target
