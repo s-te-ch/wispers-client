@@ -7,7 +7,14 @@ option go_package = "connect/client/proto/hubpb";
 option java_package = "dev.wispers.connect.proto.hub";
 
 service Hub {
+  // Completes node registration using a registration token.
+  // Returns the node's credentials for future authenticated requests.
   rpc CompleteNodeRegistration(NodeRegistrationRequest) returns (NodeRegistration) {}
+
+  // Lists all nodes in the same connectivity group as the caller.
+  // Requires authentication via metadata:
+  //   x-connectivity-group-id, x-node-number, x-auth-token
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse) {}
 }
 
 //-- Node registration ---------------------------------------------------------
@@ -15,7 +22,25 @@ service Hub {
 message NodeRegistrationRequest {
   string token = 1;
 }
+
 message NodeRegistration {
-  int64 device_id = 1;
-  string auth_token = 2;
+  string connectivity_group_id = 1;
+  int32 node_number = 2;
+  string auth_token = 3;
+}
+
+//-- List nodes ----------------------------------------------------------------
+
+message ListNodesRequest {
+  // Empty - connectivity_group_id is derived from authenticated caller
+}
+
+message ListNodesResponse {
+  repeated Node nodes = 1;
+}
+
+message Node {
+  int32 node_number = 1;
+  string name = 2;
+  int64 last_seen_at_millis = 3;
 }
