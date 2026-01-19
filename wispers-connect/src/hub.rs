@@ -7,7 +7,15 @@ use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 
 pub mod proto {
-    tonic::include_proto!("connect.hub");
+    pub mod connect {
+        pub mod roster {
+            tonic::include_proto!("connect.roster");
+        }
+        pub mod hub {
+            tonic::include_proto!("connect.hub");
+        }
+    }
+    pub use connect::hub::*;
 }
 
 use proto::hub_client::HubClient as ProtoHubClient;
