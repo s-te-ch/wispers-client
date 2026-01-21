@@ -27,6 +27,8 @@ enum Command {
     Status,
     /// Clear stored credentials and state
     Logout,
+    /// Start serving and handle incoming requests
+    Serve,
 }
 
 fn get_storage(hub_override: Option<&str>) -> Result<NodeStorage<FileNodeStateStore>> {
@@ -49,6 +51,7 @@ async fn main() -> Result<()> {
         Command::Nodes => nodes(hub_override).await,
         Command::Status => status(hub_override).await,
         Command::Logout => logout(hub_override).await,
+        Command::Serve => serve(hub_override).await,
     }
 }
 
@@ -185,5 +188,26 @@ async fn logout(hub_override: Option<&str>) -> Result<()> {
 
     stage.logout().await.context("failed to logout")?;
     println!("Logged out.");
+    Ok(())
+}
+
+async fn serve(hub_override: Option<&str>) -> Result<()> {
+    let storage = get_storage(hub_override)?;
+    let stage = storage
+        .restore_or_init_node_state("unused", None::<String>)
+        .await
+        .context("failed to load node state")?;
+
+    let activated = match stage {
+        NodeStateStage::Pending(_) => {
+            anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
+        }
+        NodeStateStage::Registered(_) => {
+            anyhow::bail!("Not activated. Activation required before serving.");
+        }
+        NodeStateStage::Activated(a) => a,
+    };
+
+    activated.serve().await.context("serve failed")?;
     Ok(())
 }

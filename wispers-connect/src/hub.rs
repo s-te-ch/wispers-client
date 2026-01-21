@@ -3,6 +3,8 @@
 //! This module provides the gRPC client for communicating with the Wispers Connect Hub.
 
 use crate::types::{AuthToken, ConnectivityGroupId, NodeRegistration};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 
@@ -135,6 +137,36 @@ impl HubClient {
             .cosigned_roster
             .ok_or_else(|| HubError::Rpc(tonic::Status::internal("missing cosigned_roster in response")))
     }
+
+    /// Start serving: open a bidirectional stream for handling incoming requests.
+    ///
+    /// Returns a handle for sending responses and a stream of incoming requests.
+    pub async fn start_serving(
+        &mut self,
+        registration: &NodeRegistration,
+    ) -> Result<ServingConnection, HubError> {
+        let (response_tx, response_rx) = mpsc::channel::<proto::ServingResponse>(32);
+        let response_stream = ReceiverStream::new(response_rx);
+
+        let mut request = tonic::Request::new(response_stream);
+        add_auth_metadata(request.metadata_mut(), registration)?;
+
+        let response = self.client.start_serving(request).await?;
+        let request_stream = response.into_inner();
+
+        Ok(ServingConnection {
+            response_tx,
+            request_stream,
+        })
+    }
+}
+
+/// A bidirectional serving connection to the hub.
+pub struct ServingConnection {
+    /// Send responses to requests.
+    pub response_tx: mpsc::Sender<proto::ServingResponse>,
+    /// Receive incoming requests.
+    pub request_stream: tonic::Streaming<proto::ServingRequest>,
 }
 
 /// Add authentication metadata to a request.
