@@ -20,6 +20,9 @@ message Roster {
 message Node {
   int32 node_number = 1;
   bytes public_key_spki = 2;
+  // True if this node has been revoked. Revoked nodes remain in the roster
+  // for verification purposes but should be ignored for operational use.
+  bool revoked = 3;
 }
 
 // A single change to the roster history.

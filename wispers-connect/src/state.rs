@@ -423,6 +423,7 @@ impl<S: NodeStateStore> RegisteredNodeState<S> {
         new_roster.nodes.push(proto::connect::roster::Node {
             node_number: self.registration().node_number,
             public_key_spki: signing_key.public_key_spki(),
+            revoked: false,
         });
         new_roster.addenda.push(proto::connect::roster::Addendum {
             kind: Some(proto::connect::roster::addendum::Kind::Activation(activation)),
