@@ -6,9 +6,9 @@ use wispers_connect::{FileNodeStateStore, NodeStateStore, NodeStateStage, NodeSt
 #[command(name = "wconnect")]
 #[command(about = "CLI for Wispers Connect nodes")]
 struct Cli {
-    /// Hub address (e.g., http://localhost:50051)
-    #[arg(long, env = "WCONNECT_HUB", default_value = "http://localhost:50051")]
-    hub: String,
+    /// Override hub address (for testing)
+    #[arg(long, env = "WCONNECT_HUB")]
+    hub: Option<String>,
 
     #[command(subcommand)]
     command: Command,
@@ -29,26 +29,31 @@ enum Command {
     Logout,
 }
 
-fn get_storage() -> Result<NodeStorage<FileNodeStateStore>> {
+fn get_storage(hub_override: Option<&str>) -> Result<NodeStorage<FileNodeStateStore>> {
     let store = FileNodeStateStore::with_app_name("wconnect")
         .context("could not determine config directory")?;
-    Ok(NodeStorage::new(store))
+    let storage = NodeStorage::new(store);
+    if let Some(addr) = hub_override {
+        storage.override_hub_addr(addr);
+    }
+    Ok(storage)
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let hub_override = cli.hub.as_deref();
 
     match cli.command {
-        Command::Register { token } => register(&cli.hub, &token).await,
-        Command::Nodes => nodes(&cli.hub).await,
+        Command::Register { token } => register(hub_override, &token).await,
+        Command::Nodes => nodes(hub_override).await,
         Command::Status => status(),
         Command::Logout => logout(),
     }
 }
 
-async fn register(hub_addr: &str, token: &str) -> Result<()> {
-    let storage = get_storage()?;
+async fn register(hub_override: Option<&str>, token: &str) -> Result<()> {
+    let storage = get_storage(hub_override)?;
 
     // TODO: remove app/profile namespaces later
     let stage = storage
@@ -67,11 +72,10 @@ async fn register(hub_addr: &str, token: &str) -> Result<()> {
         }
     };
 
-    println!("Connecting to hub at {}...", hub_addr);
     println!("Registering with token {}...", token);
 
     let registered = pending
-        .register(hub_addr, token)
+        .register(token)
         .await
         .context("registration failed")?;
 
@@ -82,8 +86,8 @@ async fn register(hub_addr: &str, token: &str) -> Result<()> {
     Ok(())
 }
 
-async fn nodes(hub_addr: &str) -> Result<()> {
-    let storage = get_storage()?;
+async fn nodes(hub_override: Option<&str>) -> Result<()> {
+    let storage = get_storage(hub_override)?;
     let stage = storage
         .restore_or_init_node_state("unused", None::<String>)
         .context("failed to load node state")?;
@@ -97,7 +101,7 @@ async fn nodes(hub_addr: &str) -> Result<()> {
 
     let reg = registered.registration();
     let nodes = registered
-        .list_nodes(hub_addr)
+        .list_nodes()
         .await
         .context("failed to list nodes")?;
 
@@ -123,7 +127,7 @@ async fn nodes(hub_addr: &str) -> Result<()> {
 }
 
 fn status() -> Result<()> {
-    let storage = get_storage()?;
+    let storage = get_storage(None)?;
     let stage = storage
         .restore_or_init_node_state("unused", None::<String>)
         .context("failed to load node state")?;
@@ -143,7 +147,7 @@ fn status() -> Result<()> {
 }
 
 fn logout() -> Result<()> {
-    let storage = get_storage()?;
+    let storage = get_storage(None)?;
     let stage = storage
         .restore_or_init_node_state("unused", None::<String>)
         .context("failed to load node state")?;

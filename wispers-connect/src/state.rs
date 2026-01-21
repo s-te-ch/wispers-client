@@ -4,20 +4,39 @@ use crate::hub::proto;
 use crate::storage::{NodeStateStore, SharedStore};
 use crate::types::{AppNamespace, NodeRegistration, NodeState, ProfileNamespace};
 use prost::Message;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use urlencoding::encode;
+
+/// Default hub address for production use.
+const DEFAULT_HUB_ADDR: &str = "https://hub.connect.wispers.dev";
+
+/// Runtime configuration shared across state types (not persisted).
+pub(crate) struct RuntimeConfig {
+    hub_addr: String,
+}
+
+pub(crate) type SharedConfig = Arc<RwLock<RuntimeConfig>>;
 
 /// High-level storage handle that drives state initialization and persistence.
 #[derive(Clone)]
 pub struct NodeStorage<S: NodeStateStore> {
     store: SharedStore<S>,
+    config: SharedConfig,
 }
 
 impl<S: NodeStateStore> NodeStorage<S> {
     pub fn new(store: S) -> Self {
         Self {
             store: Arc::new(store),
+            config: Arc::new(RwLock::new(RuntimeConfig {
+                hub_addr: DEFAULT_HUB_ADDR.to_string(),
+            })),
         }
+    }
+
+    /// Override the hub address (for testing).
+    pub fn override_hub_addr(&self, addr: impl Into<String>) {
+        self.config.write().unwrap().hub_addr = addr.into();
     }
 
     pub fn restore_or_init_node_state(
@@ -35,7 +54,7 @@ impl<S: NodeStateStore> NodeStorage<S> {
             .load(&app_namespace, &profile_namespace)
             .map_err(NodeStateError::store)?
         {
-            Some(state) => NodeStateStage::from_state(state, self.store.clone()),
+            Some(state) => NodeStateStage::from_state(state, self.store.clone(), self.config.clone()),
             None => {
                 let state = NodeState::initialize_with_namespaces(
                     app_namespace.clone(),
@@ -45,6 +64,7 @@ impl<S: NodeStateStore> NodeStorage<S> {
                 Ok(NodeStateStage::Pending(PendingNodeState::new(
                     state,
                     self.store.clone(),
+                    self.config.clone(),
                 )))
             }
         }
@@ -61,11 +81,12 @@ impl<S: NodeStateStore> NodeStateStage<S> {
     fn from_state(
         state: NodeState,
         store: SharedStore<S>,
+        config: SharedConfig,
     ) -> Result<Self, NodeStateError<S::Error>> {
         if state.is_registered() {
-            Ok(Self::Registered(RegisteredNodeState::new(state, store)?))
+            Ok(Self::Registered(RegisteredNodeState::new(state, store, config)?))
         } else {
-            Ok(Self::Pending(PendingNodeState::new(state, store)))
+            Ok(Self::Pending(PendingNodeState::new(state, store, config)))
         }
     }
 
@@ -90,11 +111,16 @@ impl<S: NodeStateStore> NodeStateStage<S> {
 pub struct PendingNodeState<S: NodeStateStore> {
     state: NodeState,
     store: SharedStore<S>,
+    config: SharedConfig,
 }
 
 impl<S: NodeStateStore> PendingNodeState<S> {
-    pub(crate) fn new(state: NodeState, store: SharedStore<S>) -> Self {
-        Self { state, store }
+    pub(crate) fn new(state: NodeState, store: SharedStore<S>, config: SharedConfig) -> Self {
+        Self { state, store, config }
+    }
+
+    fn hub_addr(&self) -> String {
+        self.config.read().unwrap().hub_addr.clone()
     }
 
     pub fn app_namespace(&self) -> &AppNamespace {
@@ -130,7 +156,7 @@ impl<S: NodeStateStore> PendingNodeState<S> {
         self.store
             .save(&self.state)
             .map_err(NodeStateError::store)?;
-        RegisteredNodeState::new(self.state, self.store)
+        RegisteredNodeState::new(self.state, self.store, self.config)
     }
 
     /// Register with the hub using a registration token.
@@ -139,12 +165,11 @@ impl<S: NodeStateStore> PendingNodeState<S> {
     /// and returns the registered state.
     pub async fn register(
         self,
-        hub_addr: &str,
         token: &str,
     ) -> Result<RegisteredNodeState<S>, NodeStateError<S::Error>> {
         use crate::hub::HubClient;
 
-        let mut client = HubClient::connect(hub_addr)
+        let mut client = HubClient::connect(self.hub_addr())
             .await
             .map_err(NodeStateError::hub)?;
         let registration = client
@@ -164,18 +189,24 @@ impl<S: NodeStateStore> PendingNodeState<S> {
 pub struct RegisteredNodeState<S: NodeStateStore> {
     state: NodeState,
     store: SharedStore<S>,
+    config: SharedConfig,
 }
 
 impl<S: NodeStateStore> RegisteredNodeState<S> {
     pub(crate) fn new(
         state: NodeState,
         store: SharedStore<S>,
+        config: SharedConfig,
     ) -> Result<Self, NodeStateError<S::Error>> {
         if state.registration.is_none() {
             return Err(NodeStateError::NotRegistered);
         }
 
-        Ok(Self { state, store })
+        Ok(Self { state, store, config })
+    }
+
+    fn hub_addr(&self) -> String {
+        self.config.read().unwrap().hub_addr.clone()
     }
 
     pub fn app_namespace(&self) -> &AppNamespace {
@@ -204,11 +235,10 @@ impl<S: NodeStateStore> RegisteredNodeState<S> {
     /// List all nodes in the connectivity group.
     pub async fn list_nodes(
         &self,
-        hub_addr: &str,
     ) -> Result<Vec<crate::hub::Node>, NodeStateError<S::Error>> {
         use crate::hub::HubClient;
 
-        let mut client = HubClient::connect(hub_addr)
+        let mut client = HubClient::connect(self.hub_addr())
             .await
             .map_err(NodeStateError::hub)?;
         client
@@ -223,7 +253,6 @@ impl<S: NodeStateStore> RegisteredNodeState<S> {
     /// This performs the mutual key exchange and roster update, returning an activated node.
     pub async fn activate(
         &self,
-        hub_addr: &str,
         pairing_code: &str,
     ) -> Result<ActivatedNode, NodeStateError<S::Error>> {
         use crate::hub::HubClient;
@@ -254,7 +283,7 @@ impl<S: NodeStateStore> RegisteredNodeState<S> {
         };
 
         // Connect and send the pairing request
-        let mut client = HubClient::connect(hub_addr)
+        let mut client = HubClient::connect(self.hub_addr())
             .await
             .map_err(NodeStateError::hub)?;
 
