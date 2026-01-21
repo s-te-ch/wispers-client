@@ -17,6 +17,7 @@ const PAIRING_SECRET_LEN: usize = 7;
 const NONCE_LEN: usize = 16;
 
 /// Ed25519 signing keypair derived from the root key.
+#[derive(Clone)]
 pub struct SigningKeyPair {
     signing_key: SigningKey,
 }

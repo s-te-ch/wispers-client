@@ -489,15 +489,27 @@ impl<S: NodeStateStore> ActivatedNode<S> {
             .map_err(NodeStateError::store)
     }
 
-    /// Start serving and handle incoming requests.
+    /// Start a serving session.
     ///
-    /// This connects to the hub and listens for messages from other nodes.
-    /// The method runs until cancelled or an error occurs.
-    pub async fn serve(&self) -> Result<(), NodeStateError<S::Error>> {
-        use crate::hub::{proto, HubClient};
+    /// Connects to the hub and returns a handle + session pair.
+    /// The session should be spawned to run the event loop, while the handle
+    /// can be used to send commands (e.g., generate pairing codes).
+    ///
+    /// # Example
+    /// ```ignore
+    /// let (handle, session) = activated.start_serving().await?;
+    /// tokio::spawn(async move { session.run().await });
+    /// let code = handle.generate_pairing_secret().await?;
+    /// ```
+    pub async fn start_serving(
+        &self,
+    ) -> Result<(crate::serving::ServingHandle, crate::serving::ServingSession), NodeStateError<S::Error>>
+    {
+        use crate::hub::HubClient;
+        use crate::serving::ServingSession;
 
         println!(
-            "Serving as node {} in group {}",
+            "Starting serving session for node {} in group {}",
             self.registration.node_number, self.registration.connectivity_group_id
         );
         println!("Roster has {} nodes", self.roster.nodes.len());
@@ -509,50 +521,19 @@ impl<S: NodeStateStore> ActivatedNode<S> {
 
         println!("Connected to hub, starting serve stream...");
 
-        let mut conn = client
+        let conn = client
             .start_serving(&self.registration)
             .await
             .map_err(NodeStateError::hub)?;
 
-        println!("Serving. Waiting for requests...");
+        let (handle, session) = ServingSession::new(
+            conn,
+            self.signing_key.clone(),
+            self.registration.connectivity_group_id.clone(),
+            self.registration.node_number,
+        );
 
-        while let Some(request) = conn
-            .request_stream
-            .message()
-            .await
-            .map_err(|e| NodeStateError::hub(crate::hub::HubError::Rpc(e)))?
-        {
-            println!(
-                "Received request: id={} dest_node={}",
-                request.request_id, request.dest_node_number
-            );
-
-            match &request.kind {
-                Some(proto::serving_request::Kind::PairNodesMessage(msg)) => {
-                    if let Some(payload) = &msg.payload {
-                        println!(
-                            "  PairNodesMessage: sender={} receiver={}",
-                            payload.sender_node_number, payload.receiver_node_number
-                        );
-                    }
-                }
-                Some(proto::serving_request::Kind::RosterCosignRequest(req)) => {
-                    println!(
-                        "  RosterCosignRequest: new_node={}",
-                        req.new_node_number
-                    );
-                }
-                None => {
-                    println!("  Unknown request kind");
-                }
-            }
-
-            // TODO: process request and send response
-            // For now, just log and continue
-        }
-
-        println!("Serve stream ended");
-        Ok(())
+        Ok((handle, session))
     }
 }
 

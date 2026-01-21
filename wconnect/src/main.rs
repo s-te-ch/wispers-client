@@ -208,6 +208,13 @@ async fn serve(hub_override: Option<&str>) -> Result<()> {
         NodeStateStage::Activated(a) => a,
     };
 
-    activated.serve().await.context("serve failed")?;
+    let (_handle, session) = activated
+        .start_serving()
+        .await
+        .context("failed to start serving")?;
+
+    // TODO: Add UDS listener and use handle for commands
+    // For now, just run the session directly
+    session.run().await.context("serve failed")?;
     Ok(())
 }

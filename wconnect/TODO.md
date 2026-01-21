@@ -56,25 +56,25 @@ The runner internally:
 
 ## Implementation Plan
 
-### 1. Create ServingSession with handle + runner pattern (library)
-- [ ] Create `ServingSession` runner that owns:
+### 1. Create ServingSession with handle + runner pattern (library) ✓
+- [x] Create `ServingSession` runner that owns:
   - Hub gRPC connection (ServingConnection)
   - Endorsing state (Option<PairingSecret>, Option<PendingEndorsement>)
   - Command receiver channel
-- [ ] Create `ServingHandle` (Clone) with:
+- [x] Create `ServingHandle` (Clone) with:
   - Command sender channel
   - Async methods: `status()`, `generate_pairing_secret()`, `shutdown()`
-- [ ] `ServingSession::new(activated: &ActivatedNode) -> (ServingHandle, ServingSession)`
-- [ ] `ServingSession::run(self) -> Result<(), Error>` - the event loop
+- [x] `ActivatedNode::start_serving() -> (ServingHandle, ServingSession)`
+- [x] `ServingSession::run(self) -> Result<(), Error>` - the event loop
 
-### 2. Implement endorsing logic in ServingSession (library)
-- [ ] Handle PairNodesMessage:
+### 2. Implement endorsing logic in ServingSession (library) ✓
+- [x] Handle PairNodesMessage:
   - Check for stored PairingSecret
   - Verify MAC
   - Store new node's pubkey and nonce
   - Generate our nonce, send reply (MAC'd)
   - Transition to PendingEndorsement state
-- [ ] Handle RosterCosignRequest:
+- [x] Handle RosterCosignRequest:
   - Verify new_node_number matches pending endorsement
   - Verify nonces and pubkey in activation payload
   - Sign activation payload
