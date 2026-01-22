@@ -23,6 +23,11 @@ enum Command {
         /// The registration token from the integrator
         token: String,
     },
+    /// Activate this node by pairing with an endorser
+    Activate {
+        /// The pairing code from the endorser (format: "node_number-secret")
+        pairing_code: String,
+    },
     /// List nodes in the connectivity group
     Nodes,
     /// Show current registration status
@@ -52,6 +57,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Command::Register { token } => register(hub_override, &token).await,
+        Command::Activate { pairing_code } => activate(hub_override, &pairing_code).await,
         Command::Nodes => nodes(hub_override).await,
         Command::Status => status(hub_override).await,
         Command::Logout => logout(hub_override).await,
@@ -100,6 +106,43 @@ async fn register(hub_override: Option<&str>, token: &str) -> Result<()> {
     println!("Registration successful!");
     println!("  Connectivity group: {}", reg.connectivity_group_id);
     println!("  Node number: {}", reg.node_number);
+    Ok(())
+}
+
+async fn activate(hub_override: Option<&str>, pairing_code: &str) -> Result<()> {
+    let storage = get_storage(hub_override)?;
+    let stage = storage
+        .restore_or_init_node_state("unused", None::<String>)
+        .await
+        .context("failed to load node state")?;
+
+    let registered = match stage {
+        NodeStateStage::Pending(_) => {
+            anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
+        }
+        NodeStateStage::Registered(r) => r,
+        NodeStateStage::Activated(a) => {
+            let reg = a.registration();
+            anyhow::bail!(
+                "Already activated as node {} in group {}.",
+                reg.node_number,
+                reg.connectivity_group_id
+            );
+        }
+    };
+
+    println!("Activating with pairing code {}...", pairing_code);
+
+    let activated = registered
+        .activate(pairing_code)
+        .await
+        .context("activation failed")?;
+
+    let reg = activated.registration();
+    println!("Activation successful!");
+    println!("  Connectivity group: {}", reg.connectivity_group_id);
+    println!("  Node number: {}", reg.node_number);
+    println!("  Roster has {} nodes", activated.roster().nodes.len());
     Ok(())
 }
 
