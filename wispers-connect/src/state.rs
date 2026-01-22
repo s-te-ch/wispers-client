@@ -323,6 +323,35 @@ impl<S: NodeStateStore> RegisteredNodeState<S> {
             .map_err(NodeStateError::hub)
     }
 
+    /// Start a serving session.
+    ///
+    /// This allows a registered (but not yet activated) node to serve,
+    /// which is needed during bootstrap when no nodes are activated yet.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let (handle, session) = registered.start_serving().await?;
+    /// tokio::spawn(async move { session.run().await });
+    /// let code = handle.generate_pairing_secret().await?;
+    /// ```
+    pub async fn start_serving(
+        &self,
+    ) -> Result<(crate::serving::ServingHandle, crate::serving::ServingSession), NodeStateError<S::Error>>
+    {
+        let reg = self.registration();
+        println!(
+            "Starting serving session for node {} in group {} (not yet activated)",
+            reg.node_number, reg.connectivity_group_id
+        );
+
+        let signing_key = SigningKeyPair::derive_from_root_key(self.state.root_key.as_bytes());
+        let hub_addr = self.config.read().unwrap().hub_addr.clone();
+
+        start_serving_impl(&hub_addr, signing_key, reg)
+            .await
+            .map_err(NodeStateError::hub)
+    }
+
     /// Activate this node by pairing with an endorser node.
     ///
     /// The pairing code format is "node_number-secret" where secret is 10 base36 characters.
@@ -505,9 +534,6 @@ impl<S: NodeStateStore> ActivatedNode<S> {
         &self,
     ) -> Result<(crate::serving::ServingHandle, crate::serving::ServingSession), NodeStateError<S::Error>>
     {
-        use crate::hub::HubClient;
-        use crate::serving::ServingSession;
-
         println!(
             "Starting serving session for node {} in group {}",
             self.registration.node_number, self.registration.connectivity_group_id
@@ -515,26 +541,33 @@ impl<S: NodeStateStore> ActivatedNode<S> {
         println!("Roster has {} nodes", self.roster.nodes.len());
 
         let hub_addr = self.config.read().unwrap().hub_addr.clone();
-        let mut client = HubClient::connect(hub_addr)
+
+        start_serving_impl(&hub_addr, self.signing_key.clone(), &self.registration)
             .await
-            .map_err(NodeStateError::hub)?;
-
-        println!("Connected to hub, starting serve stream...");
-
-        let conn = client
-            .start_serving(&self.registration)
-            .await
-            .map_err(NodeStateError::hub)?;
-
-        let (handle, session) = ServingSession::new(
-            conn,
-            self.signing_key.clone(),
-            self.registration.connectivity_group_id.clone(),
-            self.registration.node_number,
-        );
-
-        Ok((handle, session))
+            .map_err(NodeStateError::hub)
     }
+}
+
+/// Helper to start a serving session (used by both RegisteredNodeState and ActivatedNode).
+async fn start_serving_impl(
+    hub_addr: &str,
+    signing_key: SigningKeyPair,
+    registration: &NodeRegistration,
+) -> Result<(crate::serving::ServingHandle, crate::serving::ServingSession), crate::hub::HubError> {
+    use crate::hub::HubClient;
+    use crate::serving::ServingSession;
+
+    let mut client = HubClient::connect(hub_addr).await?;
+    let conn = client.start_serving(registration).await?;
+
+    let (handle, session) = ServingSession::new(
+        conn,
+        signing_key,
+        registration.connectivity_group_id.clone(),
+        registration.node_number,
+    );
+
+    Ok((handle, session))
 }
 
 /// Compute a hash of the roster for version verification.

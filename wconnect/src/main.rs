@@ -230,24 +230,32 @@ async fn serve(hub_override: Option<&str>) -> Result<()> {
         .await
         .context("failed to load node state")?;
 
-    let activated = match stage {
+    // Both Registered and Activated nodes can serve (needed for bootstrap)
+    let (cg_id, node_number, handle, session) = match stage {
         NodeStateStage::Pending(_) => {
             anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
         }
-        NodeStateStage::Registered(_) => {
-            anyhow::bail!("Not activated. Activation required before serving.");
+        NodeStateStage::Registered(r) => {
+            let reg = r.registration();
+            let cg_id = reg.connectivity_group_id.to_string();
+            let node_number = reg.node_number;
+            let (handle, session) = r
+                .start_serving()
+                .await
+                .context("failed to start serving")?;
+            (cg_id, node_number, handle, session)
         }
-        NodeStateStage::Activated(a) => a,
+        NodeStateStage::Activated(a) => {
+            let reg = a.registration();
+            let cg_id = reg.connectivity_group_id.to_string();
+            let node_number = reg.node_number;
+            let (handle, session) = a
+                .start_serving()
+                .await
+                .context("failed to start serving")?;
+            (cg_id, node_number, handle, session)
+        }
     };
-
-    let reg = activated.registration();
-    let cg_id = reg.connectivity_group_id.to_string();
-    let node_number = reg.node_number;
-
-    let (handle, session) = activated
-        .start_serving()
-        .await
-        .context("failed to start serving")?;
 
     // Start UDS daemon server
     let daemon = daemon::DaemonServer::bind(&cg_id, node_number)
