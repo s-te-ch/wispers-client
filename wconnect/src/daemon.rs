@@ -145,6 +145,7 @@ impl Drop for DaemonServer {
 /// Handle a single client connection.
 ///
 /// Reads JSON-lines requests and sends JSON-lines responses.
+#[allow(dead_code)]
 pub async fn handle_client(stream: UnixStream, handle: ServingHandle) {
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -153,10 +154,7 @@ pub async fn handle_client(stream: UnixStream, handle: ServingHandle) {
     loop {
         line.clear();
         match reader.read_line(&mut line).await {
-            Ok(0) => {
-                // EOF - client disconnected
-                break;
-            }
+            Ok(0) => break,
             Ok(_) => {
                 let response = process_request(&line, &handle).await;
                 let response_json = serde_json::to_string(&response).unwrap_or_else(|e| {
@@ -182,6 +180,70 @@ pub async fn handle_client(stream: UnixStream, handle: ServingHandle) {
                     serde_json::from_str::<Request>(&line),
                     Ok(Request::Shutdown)
                 ) {
+                    break;
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to read from client: {}", e);
+                break;
+            }
+        }
+    }
+}
+
+/// Handle a client connection when the ServingHandle may not be available yet.
+pub async fn handle_client_with_optional_handle(
+    stream: UnixStream,
+    handle_state: std::sync::Arc<tokio::sync::RwLock<Option<ServingHandle>>>,
+) {
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) => break,
+            Ok(_) => {
+                let response = {
+                    let guard = handle_state.read().await;
+                    match &*guard {
+                        Some(handle) => process_request(&line, handle).await,
+                        None => {
+                            // Hub not connected yet
+                            let request: Result<Request, _> = serde_json::from_str(&line);
+                            match request {
+                                Ok(Request::Status) => Response::success(ResponseData::Status(StatusData {
+                                    connected: false,
+                                    node_number: 0, // We don't have this info without the handle
+                                    cg_id: String::new(),
+                                    endorsing: None,
+                                })),
+                                Ok(_) => Response::error("hub not connected yet"),
+                                Err(e) => Response::error(format!("invalid request: {}", e)),
+                            }
+                        }
+                    }
+                };
+                let response_json = serde_json::to_string(&response).unwrap_or_else(|e| {
+                    serde_json::to_string(&Response::error(format!("serialization error: {}", e)))
+                        .unwrap()
+                });
+
+                if let Err(e) = writer.write_all(response_json.as_bytes()).await {
+                    eprintln!("Failed to write response: {}", e);
+                    break;
+                }
+                if let Err(e) = writer.write_all(b"\n").await {
+                    eprintln!("Failed to write newline: {}", e);
+                    break;
+                }
+                if let Err(e) = writer.flush().await {
+                    eprintln!("Failed to flush: {}", e);
+                    break;
+                }
+
+                if matches!(serde_json::from_str::<Request>(&line), Ok(Request::Shutdown)) {
                     break;
                 }
             }

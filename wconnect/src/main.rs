@@ -191,7 +191,7 @@ async fn print_daemon_status(cg_id: &str, node_number: i32) {
         Ok(mut client) => {
             match client.request(&daemon::Request::Status).await {
                 Ok(daemon::Response::Success { data: daemon::ResponseData::Status(s), .. }) => {
-                    println!("  Daemon: running");
+                    println!("  Daemon: running (connected: {})", s.connected);
                     if let Some(endorsing) = s.endorsing {
                         match endorsing {
                             daemon::EndorsingData::AwaitingPairNode => {
@@ -227,40 +227,32 @@ async fn logout(hub_override: Option<&str>) -> Result<()> {
 }
 
 async fn serve(hub_override: Option<&str>) -> Result<()> {
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+    use wispers_connect::{ServingHandle, ServingSession};
+
     let storage = get_storage(hub_override)?;
     let stage = storage
         .restore_or_init_node_state("unused", None::<String>)
         .await
         .context("failed to load node state")?;
 
-    // Both Registered and Activated nodes can serve (needed for bootstrap)
-    let (cg_id, node_number, handle, session) = match stage {
+    // Get registration info first (before connecting to hub)
+    let (cg_id, node_number) = match &stage {
         NodeStateStage::Pending(_) => {
             anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
         }
         NodeStateStage::Registered(r) => {
             let reg = r.registration();
-            let cg_id = reg.connectivity_group_id.to_string();
-            let node_number = reg.node_number;
-            let (handle, session) = r
-                .start_serving()
-                .await
-                .context("failed to start serving")?;
-            (cg_id, node_number, handle, session)
+            (reg.connectivity_group_id.to_string(), reg.node_number)
         }
         NodeStateStage::Activated(a) => {
             let reg = a.registration();
-            let cg_id = reg.connectivity_group_id.to_string();
-            let node_number = reg.node_number;
-            let (handle, session) = a
-                .start_serving()
-                .await
-                .context("failed to start serving")?;
-            (cg_id, node_number, handle, session)
+            (reg.connectivity_group_id.to_string(), reg.node_number)
         }
     };
 
-    // Start UDS daemon server
+    // Start UDS daemon server first (so it's available while connecting to hub)
     let daemon = daemon::DaemonServer::bind(&cg_id, node_number)
         .await
         .context("failed to start daemon")?;
@@ -272,14 +264,57 @@ async fn serve(hub_override: Option<&str>) -> Result<()> {
         daemon.path()
     );
 
-    // Spawn the serving session runner
-    let mut session_task = tokio::spawn(async move { session.run().await });
+    // Shared state for the serving handle (None until hub connects)
+    let handle_state: Arc<RwLock<Option<ServingHandle>>> = Arc::new(RwLock::new(None));
 
-    // Accept daemon client connections until session ends or shutdown
+    // Spawn hub connection in background
+    let connect_handle_state = handle_state.clone();
+    let mut connect_task = tokio::spawn(async move {
+        let result: Result<(ServingHandle, ServingSession), anyhow::Error> = match stage {
+            NodeStateStage::Pending(_) => unreachable!(),
+            NodeStateStage::Registered(r) => {
+                r.start_serving()
+                    .await
+                    .context("failed to start serving")
+            }
+            NodeStateStage::Activated(a) => {
+                a.start_serving()
+                    .await
+                    .context("failed to start serving")
+            }
+        };
+
+        if let Ok((handle, _session)) = &result {
+            *connect_handle_state.write().await = Some(handle.clone());
+        }
+        result
+    });
+
+    // Session task (None until hub connects)
+    let mut session_task: Option<tokio::task::JoinHandle<Result<(), wispers_connect::ServingError>>> = None;
+
+    // Accept daemon client connections, handle hub connection completing
     loop {
         tokio::select! {
+            // Hub connection completed
+            result = &mut connect_task, if session_task.is_none() => {
+                match result {
+                    Ok(Ok((handle, session))) => {
+                        println!("Connected to hub");
+                        *handle_state.write().await = Some(handle);
+                        session_task = Some(tokio::spawn(async move { session.run().await }));
+                    }
+                    Ok(Err(e)) => {
+                        return Err(e);
+                    }
+                    Err(e) => {
+                        return Err(anyhow::anyhow!("Connect task panicked: {}", e));
+                    }
+                }
+            }
+
             // Session completed (hub disconnected, error, or shutdown via handle)
-            result = &mut session_task => {
+            result = async { session_task.as_mut().unwrap().await }, if session_task.is_some() => {
                 match result {
                     Ok(Ok(())) => {
                         println!("Session ended normally");
@@ -298,9 +333,9 @@ async fn serve(hub_override: Option<&str>) -> Result<()> {
             result = daemon.accept() => {
                 match result {
                     Ok(stream) => {
-                        let client_handle = handle.clone();
+                        let client_handle_state = handle_state.clone();
                         tokio::spawn(async move {
-                            daemon::handle_client(stream, client_handle).await;
+                            daemon::handle_client_with_optional_handle(stream, client_handle_state).await;
                         });
                     }
                     Err(e) => {
