@@ -1,3 +1,5 @@
+mod daemon;
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use wispers_connect::{FileNodeStateStore, NodeStateStage, NodeStorage};

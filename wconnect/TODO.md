@@ -81,11 +81,11 @@ The runner internally:
   - Send RosterCosignResponse
   - Clear endorsement state
 
-### 3. Add daemon module to wconnect (CLI)
-- [ ] Create `wconnect/src/daemon.rs` with UDS server
-- [ ] Socket path: `~/.wconnect/daemon.sock` (one per user)
-- [ ] JSON-lines protocol over UDS
-- [ ] Translate JSON commands to ServingHandle method calls
+### 3. Add daemon module to wconnect (CLI) ✓
+- [x] Create `wconnect/src/daemon.rs` with UDS server
+- [x] Socket path: `~/.wconnect/sockets/{cg_id}-{node}.sock`
+- [x] JSON-lines protocol over UDS
+- [x] Translate JSON commands to ServingHandle method calls
 
 ### 4. Integrate daemon into `wconnect serve`
 - [ ] Create ServingSession, get handle
@@ -125,7 +125,7 @@ Request/response over UDS, newline-delimited JSON:
 
 ## Socket Path
 
-`~/.wconnect/daemon.sock` (one daemon per user)
+`~/.wconnect/sockets/{connectivity_group_id}-{node_number}.sock`
 
 ## Library Types
 

@@ -1,0 +1,279 @@
+//! Local daemon server for wconnect CLI.
+//!
+//! The daemon listens on a Unix Domain Socket and accepts JSON-lines commands
+//! that are translated to ServingHandle method calls.
+
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{UnixListener, UnixStream};
+use wispers_connect::ServingHandle;
+
+/// Get the daemon socket path for a specific node.
+pub fn socket_path(connectivity_group_id: &str, node_number: i32) -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join(".wconnect")
+        .join("sockets")
+        .join(format!("{}-{}.sock", connectivity_group_id, node_number))
+}
+
+/// Request from CLI to daemon.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
+pub enum Request {
+    Status,
+    GetPairingCode,
+    Shutdown,
+}
+
+/// Response from daemon to CLI.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Response {
+    Success { ok: bool, data: ResponseData },
+    Error { ok: bool, error: String },
+}
+
+/// Data payload for successful responses.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ResponseData {
+    Status(StatusData),
+    PairingCode(PairingCodeData),
+    Empty,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StatusData {
+    pub connected: bool,
+    pub node_number: i32,
+    pub cg_id: String,
+    pub endorsing: Option<EndorsingData>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum EndorsingData {
+    AwaitingPairNode,
+    AwaitingCosign { new_node_number: i32 },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PairingCodeData {
+    pub pairing_code: String,
+}
+
+impl Response {
+    pub fn success(data: ResponseData) -> Self {
+        Response::Success { ok: true, data }
+    }
+
+    pub fn error(msg: impl Into<String>) -> Self {
+        Response::Error {
+            ok: false,
+            error: msg.into(),
+        }
+    }
+}
+
+/// Daemon server that listens for CLI commands.
+pub struct DaemonServer {
+    listener: UnixListener,
+    connectivity_group_id: String,
+    node_number: i32,
+}
+
+impl DaemonServer {
+    /// Bind to the daemon socket.
+    ///
+    /// Removes stale socket if it exists and no daemon is running.
+    pub async fn bind(connectivity_group_id: &str, node_number: i32) -> Result<Self> {
+        let path = socket_path(connectivity_group_id, node_number);
+
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .context("failed to create socket directory")?;
+        }
+
+        // Check for stale socket
+        if path.exists() {
+            match UnixStream::connect(&path).await {
+                Ok(_) => {
+                    anyhow::bail!("daemon already running at {:?}", path);
+                }
+                Err(_) => {
+                    // Stale socket, remove it
+                    tokio::fs::remove_file(&path)
+                        .await
+                        .context("failed to remove stale socket")?;
+                }
+            }
+        }
+
+        let listener = UnixListener::bind(&path).context("failed to bind socket")?;
+
+        Ok(Self {
+            listener,
+            connectivity_group_id: connectivity_group_id.to_string(),
+            node_number,
+        })
+    }
+
+    /// Accept a new connection.
+    pub async fn accept(&self) -> Result<UnixStream> {
+        let (stream, _addr) = self.listener.accept().await?;
+        Ok(stream)
+    }
+
+    /// Get the socket path.
+    pub fn path(&self) -> PathBuf {
+        socket_path(&self.connectivity_group_id, self.node_number)
+    }
+}
+
+impl Drop for DaemonServer {
+    fn drop(&mut self) {
+        // Best-effort cleanup
+        let _ = std::fs::remove_file(self.path());
+    }
+}
+
+/// Handle a single client connection.
+///
+/// Reads JSON-lines requests and sends JSON-lines responses.
+pub async fn handle_client(stream: UnixStream, handle: ServingHandle) {
+    let (reader, mut writer) = stream.into_split();
+    let mut reader = BufReader::new(reader);
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) => {
+                // EOF - client disconnected
+                break;
+            }
+            Ok(_) => {
+                let response = process_request(&line, &handle).await;
+                let response_json = serde_json::to_string(&response).unwrap_or_else(|e| {
+                    serde_json::to_string(&Response::error(format!("serialization error: {}", e)))
+                        .unwrap()
+                });
+
+                if let Err(e) = writer.write_all(response_json.as_bytes()).await {
+                    eprintln!("Failed to write response: {}", e);
+                    break;
+                }
+                if let Err(e) = writer.write_all(b"\n").await {
+                    eprintln!("Failed to write newline: {}", e);
+                    break;
+                }
+                if let Err(e) = writer.flush().await {
+                    eprintln!("Failed to flush: {}", e);
+                    break;
+                }
+
+                // If this was a shutdown request, signal the caller
+                if matches!(
+                    serde_json::from_str::<Request>(&line),
+                    Ok(Request::Shutdown)
+                ) {
+                    break;
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to read from client: {}", e);
+                break;
+            }
+        }
+    }
+}
+
+/// Process a single request and return a response.
+async fn process_request(line: &str, handle: &ServingHandle) -> Response {
+    let request: Request = match serde_json::from_str(line) {
+        Ok(r) => r,
+        Err(e) => return Response::error(format!("invalid request: {}", e)),
+    };
+
+    match request {
+        Request::Status => match handle.status().await {
+            Ok(status) => {
+                let endorsing = status.endorsing.map(|e| match e {
+                    wispers_connect::EndorsingStatus::AwaitingPairNode => {
+                        EndorsingData::AwaitingPairNode
+                    }
+                    wispers_connect::EndorsingStatus::AwaitingCosign { new_node_number } => {
+                        EndorsingData::AwaitingCosign { new_node_number }
+                    }
+                });
+                Response::success(ResponseData::Status(StatusData {
+                    connected: status.connected,
+                    node_number: status.node_number,
+                    cg_id: status.connectivity_group_id.to_string(),
+                    endorsing,
+                }))
+            }
+            Err(e) => Response::error(format!("status failed: {}", e)),
+        },
+
+        Request::GetPairingCode => match handle.generate_pairing_secret().await {
+            Ok(code) => Response::success(ResponseData::PairingCode(PairingCodeData {
+                pairing_code: code.format(),
+            })),
+            Err(e) => Response::error(format!("{}", e)),
+        },
+
+        Request::Shutdown => {
+            let _ = handle.shutdown().await;
+            Response::success(ResponseData::Empty)
+        }
+    }
+}
+
+/// Client for connecting to the daemon.
+pub struct DaemonClient {
+    reader: BufReader<tokio::net::unix::OwnedReadHalf>,
+    writer: tokio::net::unix::OwnedWriteHalf,
+}
+
+impl DaemonClient {
+    /// Connect to the daemon for a specific node.
+    pub async fn connect(connectivity_group_id: &str, node_number: i32) -> Result<Self> {
+        let path = socket_path(connectivity_group_id, node_number);
+        let stream = UnixStream::connect(&path)
+            .await
+            .with_context(|| format!(
+                "failed to connect to daemon at {:?} (is it running?)",
+                path
+            ))?;
+        let (reader, writer) = stream.into_split();
+        Ok(Self {
+            reader: BufReader::new(reader),
+            writer,
+        })
+    }
+
+    /// Send a request and receive a response.
+    pub async fn request(&mut self, req: &Request) -> Result<Response> {
+        let request_json = serde_json::to_string(req)?;
+        self.writer.write_all(request_json.as_bytes()).await?;
+        self.writer.write_all(b"\n").await?;
+        self.writer.flush().await?;
+
+        let mut line = String::new();
+        self.reader.read_line(&mut line).await?;
+
+        let response: Response = serde_json::from_str(&line)?;
+        Ok(response)
+    }
+
+    /// Check if daemon is running for a specific node.
+    pub async fn is_running(connectivity_group_id: &str, node_number: i32) -> bool {
+        Self::connect(connectivity_group_id, node_number).await.is_ok()
+    }
+}
