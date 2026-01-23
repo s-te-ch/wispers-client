@@ -5,6 +5,7 @@
 
 use thiserror::Error;
 
+use crate::encryption::{EncryptionError, P2pCipher};
 use crate::ice::{IceAnswerer, IceCaller, IceError};
 
 /// Error type for P2P connection operations.
@@ -16,6 +17,9 @@ pub enum P2pError {
     #[error("ICE error: {0}")]
     Ice(#[from] IceError),
 
+    #[error("encryption error: {0}")]
+    Encryption(#[from] EncryptionError),
+
     #[error("peer rejected connection: {0}")]
     PeerRejected(String),
 
@@ -24,9 +28,6 @@ pub enum P2pError {
 
     #[error("connection closed")]
     ConnectionClosed,
-
-    #[error("encryption error")]
-    Encryption,
 }
 
 /// A peer-to-peer connection to another node (caller side).
@@ -43,9 +44,8 @@ pub struct P2pConnection {
     /// The underlying ICE connection.
     ice: IceCaller,
 
-    /// Shared secret derived from X25519 key exchange (for encryption).
-    #[allow(dead_code)]
-    shared_secret: [u8; 32],
+    /// Cipher for encrypting/decrypting packets.
+    cipher: P2pCipher,
 }
 
 impl P2pConnection {
@@ -55,21 +55,22 @@ impl P2pConnection {
         connection_id: i64,
         ice: IceCaller,
         shared_secret: [u8; 32],
-    ) -> Self {
-        Self {
+    ) -> Result<Self, P2pError> {
+        let cipher = P2pCipher::new_caller(&shared_secret, connection_id)?;
+        Ok(Self {
             peer_node_number,
             connection_id,
             ice,
-            shared_secret,
-        }
+            cipher,
+        })
     }
 
     /// Send data to the peer.
     ///
-    /// The data is encrypted using the shared secret before transmission.
+    /// The data is encrypted before transmission.
     pub fn send(&self, data: &[u8]) -> Result<(), P2pError> {
-        // TODO: Encrypt data with shared_secret using AES-GCM
-        self.ice.send(data)?;
+        let encrypted = self.cipher.encrypt(data)?;
+        self.ice.send(&encrypted)?;
         Ok(())
     }
 
@@ -77,9 +78,9 @@ impl P2pConnection {
     ///
     /// Returns decrypted data from the peer.
     pub async fn recv(&self) -> Result<Vec<u8>, P2pError> {
-        let data = self.ice.recv().await?;
-        // TODO: Decrypt data with shared_secret using AES-GCM
-        Ok(data)
+        let encrypted = self.ice.recv().await?;
+        let decrypted = self.cipher.decrypt(&encrypted)?;
+        Ok(decrypted)
     }
 
     /// Close the connection.
@@ -104,9 +105,8 @@ pub struct P2pConnectionAnswerer {
     /// The underlying ICE connection.
     ice: IceAnswerer,
 
-    /// Shared secret derived from X25519 key exchange (for encryption).
-    #[allow(dead_code)]
-    shared_secret: [u8; 32],
+    /// Cipher for encrypting/decrypting packets.
+    cipher: P2pCipher,
 }
 
 impl P2pConnectionAnswerer {
@@ -116,13 +116,14 @@ impl P2pConnectionAnswerer {
         connection_id: i64,
         ice: IceAnswerer,
         shared_secret: [u8; 32],
-    ) -> Self {
-        Self {
+    ) -> Result<Self, P2pError> {
+        let cipher = P2pCipher::new_answerer(&shared_secret, connection_id)?;
+        Ok(Self {
             peer_node_number,
             connection_id,
             ice,
-            shared_secret,
-        }
+            cipher,
+        })
     }
 
     /// Wait for the ICE connection to complete.
@@ -133,16 +134,16 @@ impl P2pConnectionAnswerer {
 
     /// Send data to the peer.
     pub fn send(&self, data: &[u8]) -> Result<(), P2pError> {
-        // TODO: Encrypt data with shared_secret using AES-GCM
-        self.ice.send(data)?;
+        let encrypted = self.cipher.encrypt(data)?;
+        self.ice.send(&encrypted)?;
         Ok(())
     }
 
     /// Receive data from the peer.
     pub async fn recv(&self) -> Result<Vec<u8>, P2pError> {
-        let data = self.ice.recv().await?;
-        // TODO: Decrypt data with shared_secret using AES-GCM
-        Ok(data)
+        let encrypted = self.ice.recv().await?;
+        let decrypted = self.cipher.decrypt(&encrypted)?;
+        Ok(decrypted)
     }
 
     /// Close the connection.

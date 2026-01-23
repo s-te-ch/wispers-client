@@ -710,12 +710,12 @@ impl<S: NodeStateStore> ActivatedNode<S> {
         // Complete ICE connection with answerer's SDP
         ice_caller.connect(&response.answerer_sdp).await?;
 
-        Ok(P2pConnection::new(
+        P2pConnection::new(
             peer_node_number,
             response.connection_id,
             ice_caller,
             shared_secret,
-        ))
+        )
     }
 }
 

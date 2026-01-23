@@ -8,6 +8,7 @@ description = "Client library for Wispers Connect"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+aes-gcm = "0.10"
 bincode = "1.3"
 dirs = "5"
 ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8"] }

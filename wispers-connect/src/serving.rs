@@ -661,13 +661,19 @@ impl ServingSession {
 
         println!("  Sent StartConnectionResponse, connection_id={}", connection_id);
 
-        // Create the P2pConnectionAnswerer and spawn task to complete ICE and deliver
-        let p2p_conn = P2pConnectionAnswerer::new(
+        // Create the P2pConnectionAnswerer
+        let p2p_conn = match P2pConnectionAnswerer::new(
             caller_node_number,
             connection_id,
             ice_answerer,
             shared_secret,
-        );
+        ) {
+            Ok(conn) => conn,
+            Err(e) => {
+                eprintln!("  Failed to create P2pConnectionAnswerer: {}", e);
+                return;
+            }
+        };
 
         // Deliver the connection to the incoming channel
         // The ICE connection will complete asynchronously; the receiver should call connect()

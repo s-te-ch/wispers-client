@@ -1,4 +1,5 @@
 pub mod crypto;
+pub mod encryption;
 pub mod errors;
 pub mod ffi;
 mod hub;
