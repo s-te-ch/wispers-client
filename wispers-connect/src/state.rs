@@ -471,6 +471,16 @@ impl<S: NodeStateStore> RegisteredNodeState<S> {
         // Build the new roster
         let mut new_roster = current_roster.clone();
         new_roster.version = new_version;
+
+        // For bootstrap (base_version == 0), add both nodes
+        if base_version == 0 {
+            new_roster.nodes.push(proto::connect::roster::Node {
+                node_number: endorser_node_number,
+                public_key_spki: response_payload.public_key_spki.clone(),
+                revoked: false,
+            });
+        }
+
         new_roster.nodes.push(proto::connect::roster::Node {
             node_number: self.registration().node_number,
             public_key_spki: signing_key.public_key_spki(),
