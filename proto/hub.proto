@@ -113,6 +113,7 @@ message Welcome {
 
 message ServingRequest {
   int32 dest_node_number = 1;
+  int32 source_node_number = 3;
   int64 request_id = 2;
 
   oneof kind {
