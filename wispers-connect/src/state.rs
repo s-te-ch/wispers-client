@@ -122,8 +122,9 @@ impl<S: NodeStateStore> NodeStorage<S> {
             .await
             .map_err(NodeStateError::hub)?;
 
+        // Fetch unverified first - we need to check if we're in it before we can verify
         let roster = client
-            .get_roster(registration)
+            .get_unverified_roster(registration)
             .await
             .map_err(NodeStateError::hub)?;
 
@@ -461,9 +462,9 @@ impl<S: NodeStateStore> RegisteredNodeState<S> {
 
         let endorser_nonce = response_payload.nonce.clone();
 
-        // Fetch the current roster
+        // Fetch the current roster (unverified - we're not in it yet)
         let current_roster = client
-            .get_roster(self.registration())
+            .get_unverified_roster(self.registration())
             .await
             .map_err(NodeStateError::hub)?;
 

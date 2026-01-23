@@ -546,7 +546,7 @@ impl ServingSession {
             }
         };
 
-        // Fetch fresh roster from hub to get caller's Ed25519 public key
+        // Fetch and verify fresh roster from hub
         // This ensures we have the latest roster (including recently activated nodes)
         let mut client = match HubClient::connect(&p2p_config.hub_addr).await {
             Ok(c) => c,
@@ -557,10 +557,13 @@ impl ServingSession {
             }
         };
 
-        let roster = match client.get_roster(&p2p_config.registration).await {
+        let roster = match client
+            .get_and_verify_roster(&p2p_config.registration, &self.signing_key.public_key_spki())
+            .await
+        {
             Ok(r) => r,
             Err(e) => {
-                println!("  Failed to fetch roster: {}", e);
+                println!("  Failed to fetch/verify roster: {}", e);
                 self.send_error_response(request_id, "internal error").await;
                 return;
             }

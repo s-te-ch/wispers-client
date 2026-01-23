@@ -33,6 +33,8 @@ pub enum HubError {
     Rpc(#[from] tonic::Status),
     #[error("invalid metadata: {0}")]
     Metadata(#[from] tonic::metadata::errors::InvalidMetadataValue),
+    #[error("roster verification failed: {0}")]
+    RosterVerification(#[from] crate::roster::RosterVerificationError),
 }
 
 /// A node in a connectivity group.
@@ -116,7 +118,12 @@ impl HubClient {
     }
 
     /// Get the current roster for the connectivity group.
-    pub async fn get_roster(
+    /// Fetch the roster without verification.
+    ///
+    /// Use this only during pre-activation flows (bootstrap, activation) when
+    /// the node is not yet in the roster and cannot verify it.
+    /// For activated nodes, use `get_and_verify_roster` instead.
+    pub async fn get_unverified_roster(
         &mut self,
         registration: &NodeRegistration,
     ) -> Result<proto::connect::roster::Roster, HubError> {
@@ -125,6 +132,24 @@ impl HubClient {
 
         let response = self.client.get_roster(request).await?;
         Ok(response.into_inner())
+    }
+
+    /// Fetch the roster and verify it cryptographically.
+    ///
+    /// This is the standard method for activated nodes. It fetches the roster
+    /// and verifies the signature chain before returning.
+    pub async fn get_and_verify_roster(
+        &mut self,
+        registration: &NodeRegistration,
+        verifier_public_key_spki: &[u8],
+    ) -> Result<proto::connect::roster::Roster, HubError> {
+        let roster = self.get_unverified_roster(registration).await?;
+        crate::roster::verify_roster(
+            &roster,
+            registration.node_number,
+            verifier_public_key_spki,
+        )?;
+        Ok(roster)
     }
 
     /// Submit a roster update. The hub will obtain the endorser's cosignature
