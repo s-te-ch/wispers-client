@@ -6,7 +6,7 @@ use crate::types::{AuthToken, ConnectivityGroupId, NodeRegistration};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::MetadataValue;
-use tonic::transport::Channel;
+use tonic::transport::{Channel, ClientTlsConfig};
 
 pub mod proto {
     pub mod connect {
@@ -50,10 +50,18 @@ pub struct HubClient {
 
 impl HubClient {
     /// Connect to a hub at the given address.
+    ///
+    /// Supports both `http://` (plaintext) and `https://` (TLS) schemes.
     pub async fn connect(hub_addr: impl Into<String>) -> Result<Self, HubError> {
-        let channel = Channel::from_shared(hub_addr.into())?
-            .connect()
-            .await?;
+        let addr = hub_addr.into();
+        let mut endpoint = Channel::from_shared(addr.clone())?;
+
+        // Configure TLS for https:// URLs
+        if addr.starts_with("https://") {
+            endpoint = endpoint.tls_config(ClientTlsConfig::new().with_native_roots())?;
+        }
+
+        let channel = endpoint.connect().await?;
         Ok(Self {
             client: ProtoHubClient::new(channel),
         })
