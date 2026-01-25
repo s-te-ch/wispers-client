@@ -7,6 +7,44 @@ use thiserror::Error;
 
 use crate::encryption::{EncryptionError, P2pCipher};
 use crate::ice::{IceAnswerer, IceCaller, IceError};
+use crate::juice::State as IceState;
+
+/// Connection state for a P2P connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionState {
+    /// ICE is gathering candidates.
+    Gathering,
+    /// ICE is connecting to the peer.
+    Connecting,
+    /// Connection is established and ready for data.
+    Connected,
+    /// Connection has been disconnected.
+    Disconnected,
+    /// Connection failed (ICE failure or other error).
+    Failed,
+}
+
+impl ConnectionState {
+    fn from_ice_state(ice_state: IceState) -> Self {
+        match ice_state {
+            IceState::Disconnected => ConnectionState::Disconnected,
+            IceState::Gathering => ConnectionState::Gathering,
+            IceState::Connecting => ConnectionState::Connecting,
+            IceState::Connected | IceState::Completed => ConnectionState::Connected,
+            IceState::Failed | IceState::Unknown(_) => ConnectionState::Failed,
+        }
+    }
+
+    /// Returns true if the connection is established and ready for data.
+    pub fn is_connected(self) -> bool {
+        matches!(self, ConnectionState::Connected)
+    }
+
+    /// Returns true if the connection is disconnected or failed.
+    pub fn is_disconnected(self) -> bool {
+        matches!(self, ConnectionState::Disconnected | ConnectionState::Failed)
+    }
+}
 
 /// Error type for P2P connection operations.
 #[derive(Debug, Error)]
@@ -26,8 +64,8 @@ pub enum P2pError {
     #[error("signature verification failed")]
     SignatureVerificationFailed,
 
-    #[error("connection closed")]
-    ConnectionClosed,
+    #[error("disconnected")]
+    Disconnected,
 }
 
 /// A peer-to-peer connection to another node (caller side).
@@ -69,6 +107,9 @@ impl P2pConnection {
     ///
     /// The data is encrypted before transmission.
     pub fn send(&self, data: &[u8]) -> Result<(), P2pError> {
+        if self.state().is_disconnected() {
+            return Err(P2pError::Disconnected);
+        }
         let encrypted = self.cipher.encrypt(data)?;
         self.ice.send(&encrypted)?;
         Ok(())
@@ -78,6 +119,9 @@ impl P2pConnection {
     ///
     /// Returns decrypted data from the peer.
     pub async fn recv(&self) -> Result<Vec<u8>, P2pError> {
+        if self.state().is_disconnected() {
+            return Err(P2pError::Disconnected);
+        }
         let encrypted = self.ice.recv().await?;
         let decrypted = self.cipher.decrypt(&encrypted)?;
         Ok(decrypted)
@@ -89,8 +133,13 @@ impl P2pConnection {
     }
 
     /// Get the current connection state.
+    pub fn state(&self) -> ConnectionState {
+        ConnectionState::from_ice_state(self.ice.state())
+    }
+
+    /// Returns true if the connection is established and ready for data.
     pub fn is_connected(&self) -> bool {
-        self.ice.state().is_connected()
+        self.state().is_connected()
     }
 }
 
@@ -134,13 +183,21 @@ impl P2pConnectionAnswerer {
 
     /// Send data to the peer.
     pub fn send(&self, data: &[u8]) -> Result<(), P2pError> {
+        if self.state().is_disconnected() {
+            return Err(P2pError::Disconnected);
+        }
         let encrypted = self.cipher.encrypt(data)?;
         self.ice.send(&encrypted)?;
         Ok(())
     }
 
     /// Receive data from the peer.
+    ///
+    /// Returns decrypted data from the peer.
     pub async fn recv(&self) -> Result<Vec<u8>, P2pError> {
+        if self.state().is_disconnected() {
+            return Err(P2pError::Disconnected);
+        }
         let encrypted = self.ice.recv().await?;
         let decrypted = self.cipher.decrypt(&encrypted)?;
         Ok(decrypted)
@@ -152,8 +209,13 @@ impl P2pConnectionAnswerer {
     }
 
     /// Get the current connection state.
+    pub fn state(&self) -> ConnectionState {
+        ConnectionState::from_ice_state(self.ice.state())
+    }
+
+    /// Returns true if the connection is established and ready for data.
     pub fn is_connected(&self) -> bool {
-        self.ice.state().is_connected()
+        self.state().is_connected()
     }
 }
 
