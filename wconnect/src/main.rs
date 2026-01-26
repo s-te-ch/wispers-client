@@ -332,7 +332,7 @@ async fn nodes(hub_override: Option<&str>) -> Result<()> {
 
 fn format_last_seen(millis: i64) -> String {
     if millis == 0 {
-        return "never seen".to_string();
+        return "never connected".to_string();
     }
 
     let now = std::time::SystemTime::now()
@@ -342,26 +342,26 @@ fn format_last_seen(millis: i64) -> String {
 
     let ago_ms = now - millis;
     if ago_ms < 0 {
-        return "just now".to_string();
+        return "connected just now".to_string();
     }
 
     let ago_secs = ago_ms / 1000;
     if ago_secs < 60 {
-        return "just now".to_string();
+        return "connected just now".to_string();
     }
 
     let ago_mins = ago_secs / 60;
     if ago_mins < 60 {
-        return format!("{}m ago", ago_mins);
+        return format!("connected {}m ago", ago_mins);
     }
 
     let ago_hours = ago_mins / 60;
     if ago_hours < 24 {
-        return format!("{}h ago", ago_hours);
+        return format!("connected {}h ago", ago_hours);
     }
 
     let ago_days = ago_hours / 24;
-    format!("{}d ago", ago_days)
+    format!("connected {}d ago", ago_days)
 }
 
 async fn status(hub_override: Option<&str>) -> Result<()> {
