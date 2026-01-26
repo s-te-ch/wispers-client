@@ -322,4 +322,44 @@ mod tests {
         let result = cipher2.decrypt(&encrypted);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn tampered_ciphertext_fails() {
+        let shared_secret = [0x42u8; 32];
+        let connection_id = 1i64;
+
+        let caller = P2pCipher::new_caller(&shared_secret, connection_id).unwrap();
+        let answerer = P2pCipher::new_answerer(&shared_secret, connection_id).unwrap();
+
+        let mut encrypted = caller.encrypt(b"secret message").unwrap();
+
+        // Tamper with ciphertext (after the 8-byte seqno)
+        encrypted[10] ^= 0xFF;
+
+        let result = answerer.decrypt(&encrypted);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn wrong_shared_secret_fails() {
+        let connection_id = 1i64;
+
+        let caller = P2pCipher::new_caller(&[0x42u8; 32], connection_id).unwrap();
+        let answerer = P2pCipher::new_answerer(&[0x99u8; 32], connection_id).unwrap(); // Different secret
+
+        let encrypted = caller.encrypt(b"secret message").unwrap();
+
+        let result = answerer.decrypt(&encrypted);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn packet_too_short_fails() {
+        let shared_secret = [0x42u8; 32];
+        let answerer = P2pCipher::new_answerer(&shared_secret, 1).unwrap();
+
+        // Packet shorter than 8-byte seqno header
+        let result = answerer.decrypt(&[0u8; 7]);
+        assert!(matches!(result, Err(EncryptionError::PacketTooShort)));
+    }
 }

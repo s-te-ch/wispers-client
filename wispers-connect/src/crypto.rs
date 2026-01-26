@@ -327,4 +327,33 @@ mod tests {
         assert!(verify_signature_spki(&spki, message, &signature));
         assert!(!verify_signature_spki(&spki, b"wrong message", &signature));
     }
+
+    #[test]
+    fn test_x25519_derivation_deterministic() {
+        let root_key = [42u8; 32];
+        let kp1 = X25519KeyPair::derive_from_root_key(&root_key);
+        let kp2 = X25519KeyPair::derive_from_root_key(&root_key);
+        assert_eq!(kp1.public_key(), kp2.public_key());
+    }
+
+    #[test]
+    fn test_x25519_different_roots_different_keys() {
+        let kp1 = X25519KeyPair::derive_from_root_key(&[1u8; 32]);
+        let kp2 = X25519KeyPair::derive_from_root_key(&[2u8; 32]);
+        assert_ne!(kp1.public_key(), kp2.public_key());
+    }
+
+    #[test]
+    fn test_x25519_dh_shared_secret() {
+        // Two parties derive keypairs from different root keys
+        let alice = X25519KeyPair::derive_from_root_key(&[1u8; 32]);
+        let bob = X25519KeyPair::derive_from_root_key(&[2u8; 32]);
+
+        // Each performs DH with the other's public key
+        let alice_shared = alice.diffie_hellman(&bob.public_key());
+        let bob_shared = bob.diffie_hellman(&alice.public_key());
+
+        // They should arrive at the same shared secret
+        assert_eq!(alice_shared, bob_shared);
+    }
 }
