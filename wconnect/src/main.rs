@@ -261,35 +261,35 @@ async fn activate(hub_override: Option<&str>, pairing_code: &str) -> Result<()> 
 }
 
 async fn nodes(hub_override: Option<&str>) -> Result<()> {
+    use std::collections::HashSet;
+
     let storage = get_storage(hub_override)?;
     let stage = storage
         .restore_or_init_node_state("unused", None::<String>)
         .await
         .context("failed to load node state")?;
 
-    let (reg, nodes) = match stage {
+    // Get nodes from hub and optionally the roster (if activated)
+    let (reg, nodes, roster_nodes) = match stage {
         NodeStateStage::Pending(_) => {
             anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
         }
         NodeStateStage::Registered(r) => {
             let reg = r.registration().clone();
             let nodes = r.list_nodes().await.context("failed to list nodes")?;
-            (reg, nodes)
+            (reg, nodes, HashSet::new())
         }
         NodeStateStage::Activated(a) => {
             let reg = a.registration().clone();
-            // Convert roster nodes to the Node type used by list_nodes
-            let nodes: Vec<_> = a
+            let nodes = a.list_nodes().await.context("failed to list nodes")?;
+            let roster_nodes: HashSet<i32> = a
                 .roster()
                 .nodes
                 .iter()
-                .map(|n| wispers_connect::Node {
-                    node_number: n.node_number,
-                    name: String::new(),
-                    last_seen_at_millis: 0,
-                })
+                .filter(|n| !n.revoked)
+                .map(|n| n.node_number)
                 .collect();
-            (reg, nodes)
+            (reg, nodes, roster_nodes)
         }
     };
 
@@ -303,15 +303,65 @@ async fn nodes(hub_override: Option<&str>) -> Result<()> {
             } else {
                 node.name
             };
-            let you = if node.node_number == reg.node_number {
-                " (you)"
+
+            let mut tags = Vec::new();
+            if node.node_number == reg.node_number {
+                tags.push("you");
+            }
+            if !roster_nodes.is_empty() {
+                if roster_nodes.contains(&node.node_number) {
+                    tags.push("activated");
+                } else {
+                    tags.push("not activated");
+                }
+            }
+
+            let last_seen = format_last_seen(node.last_seen_at_millis);
+
+            let tags_str = if tags.is_empty() {
+                String::new()
             } else {
-                ""
+                format!(" ({})", tags.join(", "))
             };
-            println!("  {}: {}{}", node.node_number, name, you);
+
+            println!("  {}: {}{} - {}", node.node_number, name, tags_str, last_seen);
         }
     }
     Ok(())
+}
+
+fn format_last_seen(millis: i64) -> String {
+    if millis == 0 {
+        return "never seen".to_string();
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+
+    let ago_ms = now - millis;
+    if ago_ms < 0 {
+        return "just now".to_string();
+    }
+
+    let ago_secs = ago_ms / 1000;
+    if ago_secs < 60 {
+        return "just now".to_string();
+    }
+
+    let ago_mins = ago_secs / 60;
+    if ago_mins < 60 {
+        return format!("{}m ago", ago_mins);
+    }
+
+    let ago_hours = ago_mins / 60;
+    if ago_hours < 24 {
+        return format!("{}h ago", ago_hours);
+    }
+
+    let ago_days = ago_hours / 24;
+    format!("{}d ago", ago_days)
 }
 
 async fn status(hub_override: Option<&str>) -> Result<()> {

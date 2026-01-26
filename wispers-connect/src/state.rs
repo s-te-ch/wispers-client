@@ -579,6 +579,22 @@ impl<S: NodeStateStore> ActivatedNode<S> {
         self.registration.node_number
     }
 
+    /// List all nodes in the connectivity group.
+    pub async fn list_nodes(
+        &self,
+    ) -> Result<Vec<crate::hub::Node>, NodeStateError<S::Error>> {
+        use crate::hub::HubClient;
+
+        let hub_addr = self.config.read().unwrap().hub_addr.clone();
+        let mut client = HubClient::connect(&hub_addr)
+            .await
+            .map_err(NodeStateError::hub)?;
+        client
+            .list_nodes(&self.registration)
+            .await
+            .map_err(NodeStateError::hub)
+    }
+
     /// Logout: revoke from roster, deregister from connectivity group, delete local state.
     pub async fn logout(self) -> Result<(), NodeStateError<S::Error>> {
         // TODO: submit self-revocation to roster
