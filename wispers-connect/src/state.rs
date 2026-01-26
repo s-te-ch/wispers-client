@@ -550,7 +550,7 @@ impl<S: NodeStateStore> RegisteredNodeState<S> {
 pub struct ActivatedNode<S: NodeStateStore> {
     signing_key: SigningKeyPair,
     x25519_key: X25519KeyPair,
-    roster: proto::connect::roster::Roster,
+    roster: proto::roster::Roster,
     registration: NodeRegistration,
     store: SharedStore<S>,
     app_namespace: AppNamespace,
@@ -565,7 +565,7 @@ impl<S: NodeStateStore> ActivatedNode<S> {
     }
 
     /// Get the current roster.
-    pub fn roster(&self) -> &proto::connect::roster::Roster {
+    pub fn roster(&self) -> &proto::roster::Roster {
         &self.roster
     }
 
@@ -716,6 +716,32 @@ impl<S: NodeStateStore> ActivatedNode<S> {
             ice_caller,
             shared_secret,
         )
+    }
+
+}
+
+/// Test helper for creating ActivatedNode instances.
+#[doc(hidden)]
+impl ActivatedNode<crate::storage::InMemoryNodeStateStore> {
+    /// Create an ActivatedNode for testing with explicit configuration.
+    pub fn new_for_test(
+        root_key: [u8; 32],
+        roster: proto::roster::Roster,
+        registration: NodeRegistration,
+        hub_addr: String,
+    ) -> Self {
+        use crate::storage::InMemoryNodeStateStore;
+
+        Self {
+            signing_key: SigningKeyPair::derive_from_root_key(&root_key),
+            x25519_key: X25519KeyPair::derive_from_root_key(&root_key),
+            roster,
+            registration,
+            store: std::sync::Arc::new(InMemoryNodeStateStore::new()),
+            app_namespace: AppNamespace::from("test"),
+            profile_namespace: ProfileNamespace::from("default"),
+            config: std::sync::Arc::new(std::sync::RwLock::new(RuntimeConfig { hub_addr })),
+        }
     }
 }
 

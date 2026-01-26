@@ -8,16 +8,17 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::MetadataValue;
 use tonic::transport::{Channel, ClientTlsConfig};
 
+/// Proto-generated types for the Hub gRPC service.
 pub mod proto {
-    pub mod connect {
-        pub mod roster {
-            tonic::include_proto!("connect.roster");
-        }
-        pub mod hub {
-            tonic::include_proto!("connect.hub");
-        }
+    /// Roster proto types.
+    pub mod roster {
+        tonic::include_proto!("connect.roster");
     }
-    pub use connect::hub::*;
+    /// Hub proto types.
+    pub mod hub {
+        tonic::include_proto!("connect.hub");
+    }
+    pub use hub::*;
 }
 
 use proto::hub_client::HubClient as ProtoHubClient;
@@ -126,7 +127,7 @@ impl HubClient {
     pub async fn get_unverified_roster(
         &mut self,
         registration: &NodeRegistration,
-    ) -> Result<proto::connect::roster::Roster, HubError> {
+    ) -> Result<proto::roster::Roster, HubError> {
         let mut request = tonic::Request::new(proto::RosterRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
@@ -142,7 +143,7 @@ impl HubClient {
         &mut self,
         registration: &NodeRegistration,
         verifier_public_key_spki: &[u8],
-    ) -> Result<proto::connect::roster::Roster, HubError> {
+    ) -> Result<proto::roster::Roster, HubError> {
         let roster = self.get_unverified_roster(registration).await?;
         crate::roster::verify_roster(
             &roster,
@@ -157,8 +158,8 @@ impl HubClient {
     pub async fn update_roster(
         &mut self,
         registration: &NodeRegistration,
-        new_roster: proto::connect::roster::Roster,
-    ) -> Result<proto::connect::roster::Roster, HubError> {
+        new_roster: proto::roster::Roster,
+    ) -> Result<proto::roster::Roster, HubError> {
         let mut request = tonic::Request::new(proto::UpdateRosterRequest {
             new_roster: Some(new_roster),
         });

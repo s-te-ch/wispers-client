@@ -2669,6 +2669,7 @@ name = "wispers-connect"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "async-stream",
  "bincode",
  "bindgen",
  "cmake",

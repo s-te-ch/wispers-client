@@ -2,7 +2,7 @@ pub mod crypto;
 pub mod encryption;
 pub mod errors;
 pub mod ffi;
-mod hub;
+pub mod hub;
 pub mod ice;
 pub mod juice;
 pub mod p2p;

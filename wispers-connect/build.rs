@@ -11,7 +11,7 @@ fn main() -> BuildResult<()> {
 
 fn compile_protos() -> BuildResult<()> {
     tonic_build::configure()
-        .build_server(false)
+        .build_server(true) // Enable server for integration tests
         .compile_protos(
             &["../proto/hub.proto", "../proto/roster.proto"],
             &["../proto"],

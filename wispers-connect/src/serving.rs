@@ -12,6 +12,7 @@ use crate::hub::ServingConnection;
 use crate::ice::IceAnswerer;
 use crate::p2p::P2pConnectionAnswerer;
 use crate::types::ConnectivityGroupId;
+use ed25519_dalek::pkcs8::DecodePublicKey;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use prost::Message;
 use tokio::sync::{mpsc, oneshot};
@@ -384,7 +385,7 @@ impl ServingSession {
         // Find the activation addendum for this node
         let activation = roster.addenda.last().and_then(|a| {
             match &a.kind {
-                Some(proto::connect::roster::addendum::Kind::Activation(act)) => Some(act),
+                Some(proto::roster::addendum::Kind::Activation(act)) => Some(act),
                 _ => None,
             }
         });
@@ -473,8 +474,8 @@ impl ServingSession {
     /// and the last addendum, then verifies the hash matches.
     fn verify_base_version_hash(
         &self,
-        new_roster: &proto::connect::roster::Roster,
-        activation_payload: &proto::connect::roster::activation::Payload,
+        new_roster: &proto::roster::Roster,
+        activation_payload: &proto::roster::activation::Payload,
         new_node_number: i32,
     ) -> bool {
         use sha2::{Digest, Sha256};
@@ -576,14 +577,8 @@ impl ServingSession {
             return;
         };
 
-        let Ok(pubkey_bytes): Result<[u8; 32], _> = caller_node.public_key_spki.clone().try_into() else {
+        let Ok(verifying_key) = VerifyingKey::from_public_key_der(&caller_node.public_key_spki) else {
             println!("  Invalid public key format for node {}", caller_node_number);
-            self.send_error_response(request_id, "invalid caller public key").await;
-            return;
-        };
-
-        let Ok(verifying_key) = VerifyingKey::from_bytes(&pubkey_bytes) else {
-            println!("  Failed to parse Ed25519 key for node {}", caller_node_number);
             self.send_error_response(request_id, "invalid caller public key").await;
             return;
         };

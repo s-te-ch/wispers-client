@@ -3,7 +3,7 @@
 //! This module provides cryptographic verification of the roster, ensuring the
 //! chain of trust from version 1 to the current version is valid.
 
-use crate::hub::proto::connect::roster::{self, addendum, Roster};
+use crate::hub::proto::roster::{self, addendum, Roster};
 use ed25519_dalek::pkcs8::DecodePublicKey;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use prost::Message;
