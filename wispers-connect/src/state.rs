@@ -678,6 +678,8 @@ impl<S: NodeStateStore> ActivatedNode<S> {
         use crate::hub::HubClient;
         use crate::ice::IceCaller;
         use crate::p2p::{UdpConnection, P2pError};
+        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        use ed25519_dalek::pkcs8::DecodePublicKey;
 
         let hub_addr = self.config.read().unwrap().hub_addr.clone();
 
@@ -715,7 +717,26 @@ impl<S: NodeStateStore> ActivatedNode<S> {
             .start_connection(&self.registration, request)
             .await?;
 
-        // TODO: Verify answerer's signature against roster
+        // Verify answerer's signature against roster
+        let peer_node = self.roster.nodes.iter()
+            .find(|n| n.node_number == peer_node_number)
+            .ok_or(P2pError::SignatureVerificationFailed)?;
+
+        let verifying_key = VerifyingKey::from_public_key_der(&peer_node.public_key_spki)
+            .map_err(|_| P2pError::SignatureVerificationFailed)?;
+
+        // Verify signature over: connection_id || answerer_x25519_public_key || answerer_sdp
+        let mut message_to_verify = Vec::new();
+        message_to_verify.extend_from_slice(&response.connection_id.to_le_bytes());
+        message_to_verify.extend_from_slice(&response.answerer_x25519_public_key);
+        message_to_verify.extend_from_slice(response.answerer_sdp.as_bytes());
+
+        let sig_bytes: [u8; 64] = response.signature.clone().try_into()
+            .map_err(|_| P2pError::SignatureVerificationFailed)?;
+        let sig = Signature::from_bytes(&sig_bytes);
+
+        verifying_key.verify(&message_to_verify, &sig)
+            .map_err(|_| P2pError::SignatureVerificationFailed)?;
 
         // Extract peer's X25519 public key
         let peer_x25519_public: [u8; 32] = response
@@ -758,6 +779,8 @@ impl<S: NodeStateStore> ActivatedNode<S> {
         use crate::hub::HubClient;
         use crate::ice::IceCaller;
         use crate::p2p::{QuicConnection, P2pError};
+        use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+        use ed25519_dalek::pkcs8::DecodePublicKey;
 
         let hub_addr = self.config.read().unwrap().hub_addr.clone();
 
@@ -795,7 +818,26 @@ impl<S: NodeStateStore> ActivatedNode<S> {
             .start_connection(&self.registration, request)
             .await?;
 
-        // TODO: Verify answerer's signature against roster
+        // Verify answerer's signature against roster
+        let peer_node = self.roster.nodes.iter()
+            .find(|n| n.node_number == peer_node_number)
+            .ok_or(P2pError::SignatureVerificationFailed)?;
+
+        let verifying_key = VerifyingKey::from_public_key_der(&peer_node.public_key_spki)
+            .map_err(|_| P2pError::SignatureVerificationFailed)?;
+
+        // Verify signature over: connection_id || answerer_x25519_public_key || answerer_sdp
+        let mut message_to_verify = Vec::new();
+        message_to_verify.extend_from_slice(&response.connection_id.to_le_bytes());
+        message_to_verify.extend_from_slice(&response.answerer_x25519_public_key);
+        message_to_verify.extend_from_slice(response.answerer_sdp.as_bytes());
+
+        let sig_bytes: [u8; 64] = response.signature.clone().try_into()
+            .map_err(|_| P2pError::SignatureVerificationFailed)?;
+        let sig = Signature::from_bytes(&sig_bytes);
+
+        verifying_key.verify(&message_to_verify, &sig)
+            .map_err(|_| P2pError::SignatureVerificationFailed)?;
 
         // Extract peer's X25519 public key
         let peer_x25519_public: [u8; 32] = response

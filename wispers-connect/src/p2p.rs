@@ -403,57 +403,5 @@ impl QuicConnection {
     }
 }
 
-/// A pending QUIC connection (answerer side, pre-handshake).
-///
-/// This is an internal type used by the serving layer. Users receive
-/// fully-connected `QuicConnection` instances via the incoming channel.
-pub(crate) struct QuicConnectionPending {
-    /// The peer's node number (the caller).
-    pub peer_node_number: i32,
-
-    /// Connection ID we assigned.
-    pub connection_id: i64,
-
-    /// The underlying ICE connection (not yet fully connected).
-    ice: IceAnswerer,
-
-    /// Shared secret for PSK derivation.
-    shared_secret: [u8; 32],
-}
-
-impl QuicConnectionPending {
-    /// Create a new pending QUIC connection (internal use).
-    ///
-    /// The ICE answerer should already have the remote SDP set.
-    /// Call `connect()` to complete the connection.
-    pub(crate) fn new(
-        peer_node_number: i32,
-        connection_id: i64,
-        ice: IceAnswerer,
-        shared_secret: [u8; 32],
-    ) -> Self {
-        Self {
-            peer_node_number,
-            connection_id,
-            ice,
-            shared_secret,
-        }
-    }
-
-    /// Complete the ICE and QUIC handshakes.
-    ///
-    /// This waits for ICE to connect, then performs the QUIC handshake.
-    /// Returns a fully-established connection ready for stream operations.
-    pub async fn connect(self) -> Result<QuicConnection, P2pError> {
-        QuicConnection::connect_answerer(
-            self.peer_node_number,
-            self.connection_id,
-            self.ice,
-            self.shared_secret,
-        )
-        .await
-    }
-}
-
 /// Re-export StunTurnConfig from proto.
 pub use crate::hub::proto::StunTurnConfig;
