@@ -7,7 +7,12 @@
 use boring::ssl::{SslContextBuilder, SslMethod};
 use hkdf::Hkdf;
 use sha2::Sha256;
+use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
+use tokio::sync::Mutex;
+
+use crate::ice::{IceAnswerer, IceCaller, IceError};
 
 /// PSK identity used in TLS 1.3 handshake.
 /// Both peers must use the same identity string.
@@ -139,6 +144,248 @@ pub fn create_config(psk: [u8; PSK_LEN], role: QuicRole) -> Result<quiche::Confi
     // (0-RTT data can be replayed)
 
     Ok(config)
+}
+
+/// QUIC connection error.
+#[derive(Debug, thiserror::Error)]
+pub enum QuicError {
+    #[error("configuration error: {0}")]
+    Config(#[from] QuicConfigError),
+    #[error("QUIC error: {0}")]
+    Quic(#[from] quiche::Error),
+    #[error("ICE error: {0}")]
+    Ice(#[from] IceError),
+    #[error("handshake failed")]
+    HandshakeFailed,
+    #[error("connection closed")]
+    ConnectionClosed,
+    #[error("stream error: {0}")]
+    Stream(String),
+    #[error("timeout")]
+    Timeout,
+}
+
+/// Maximum UDP packet size for QUIC.
+const MAX_DATAGRAM_SIZE: usize = 1350;
+
+/// QUIC connection state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuicState {
+    /// QUIC handshake in progress.
+    Handshaking,
+    /// Connection established, ready for streams.
+    Established,
+    /// Connection is closing.
+    Closing,
+    /// Connection is closed.
+    Closed,
+}
+
+/// A QUIC connection over an ICE transport.
+///
+/// This wraps a quiche connection and drives the QUIC state machine
+/// by exchanging UDP packets over the ICE layer.
+pub struct QuicConnection<T> {
+    conn: Mutex<Pin<Box<quiche::Connection>>>,
+    transport: T,
+}
+
+impl<T: IceTransport> QuicConnection<T> {
+    /// Create a new QUIC connection.
+    ///
+    /// The ICE connection must already be established before calling this.
+    /// This creates the QUIC connection but does not perform the handshake.
+    fn new_inner(
+        transport: T,
+        psk: [u8; PSK_LEN],
+        role: QuicRole,
+        scid: quiche::ConnectionId<'static>,
+    ) -> Result<Self, QuicError> {
+        let mut config = create_config(psk, role)?;
+
+        // Placeholder addresses - we're using ICE for actual transport,
+        // these are just required by quiche's API
+        let local: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let peer: SocketAddr = "127.0.0.1:1".parse().unwrap();
+
+        let conn = match role {
+            QuicRole::Client => {
+                // Client connects to server
+                // Server name is not used for PSK but quiche requires it
+                quiche::connect(None, &scid, local, peer, &mut config)?
+            }
+            QuicRole::Server => {
+                // Server accepts from client
+                quiche::accept(&scid, None, local, peer, &mut config)?
+            }
+        };
+
+        Ok(Self {
+            conn: Mutex::new(Box::pin(conn)),
+            transport,
+        })
+    }
+
+    /// Perform the QUIC handshake.
+    ///
+    /// This exchanges QUIC packets over the ICE transport until the
+    /// handshake completes or fails.
+    pub async fn handshake(&self) -> Result<(), QuicError> {
+        loop {
+            // Send any pending QUIC packets
+            self.flush_send().await?;
+
+            // Check if handshake is complete
+            {
+                let conn = self.conn.lock().await;
+                if conn.is_established() {
+                    return Ok(());
+                }
+                if conn.is_closed() {
+                    return Err(QuicError::HandshakeFailed);
+                }
+            }
+
+            // Wait for incoming packet or timeout
+            let timeout = {
+                let conn = self.conn.lock().await;
+                conn.timeout()
+            };
+
+            let recv_result = if let Some(timeout) = timeout {
+                tokio::time::timeout(timeout, self.transport.recv()).await
+            } else {
+                // No timeout set, just wait for packet
+                Ok(self.transport.recv().await)
+            };
+
+            match recv_result {
+                Ok(Ok(packet)) => {
+                    // Feed packet to QUIC
+                    let mut conn = self.conn.lock().await;
+                    let recv_info = quiche::RecvInfo {
+                        from: "127.0.0.1:0".parse().unwrap(),
+                        to: "127.0.0.1:0".parse().unwrap(),
+                    };
+                    match conn.recv(&mut packet.clone(), recv_info) {
+                        Ok(_) => {}
+                        Err(quiche::Error::Done) => {}
+                        Err(e) => return Err(QuicError::Quic(e)),
+                    }
+                }
+                Ok(Err(e)) => {
+                    // ICE error
+                    return Err(QuicError::Ice(e));
+                }
+                Err(_) => {
+                    // Timeout - call on_timeout
+                    let mut conn = self.conn.lock().await;
+                    conn.on_timeout();
+                }
+            }
+        }
+    }
+
+    /// Send all pending QUIC packets over the ICE transport.
+    async fn flush_send(&self) -> Result<(), QuicError> {
+        let mut buf = vec![0u8; MAX_DATAGRAM_SIZE];
+
+        loop {
+            let mut conn = self.conn.lock().await;
+            match conn.send(&mut buf) {
+                Ok((len, _send_info)) => {
+                    drop(conn); // Release lock before async send
+                    self.transport.send(&buf[..len])?;
+                }
+                Err(quiche::Error::Done) => break,
+                Err(e) => return Err(QuicError::Quic(e)),
+            }
+        }
+        Ok(())
+    }
+
+    /// Get the current connection state.
+    pub async fn state(&self) -> QuicState {
+        let conn = self.conn.lock().await;
+        if conn.is_closed() {
+            QuicState::Closed
+        } else if conn.is_draining() {
+            QuicState::Closing
+        } else if conn.is_established() {
+            QuicState::Established
+        } else {
+            QuicState::Handshaking
+        }
+    }
+
+    /// Check if the connection is established.
+    pub async fn is_established(&self) -> bool {
+        self.state().await == QuicState::Established
+    }
+
+    /// Close the connection.
+    pub async fn close(&self) -> Result<(), QuicError> {
+        {
+            let mut conn = self.conn.lock().await;
+            conn.close(true, 0, b"close")?;
+        }
+        self.flush_send().await?;
+        Ok(())
+    }
+}
+
+/// Trait for ICE transports (abstracts IceCaller and IceAnswerer).
+pub trait IceTransport: Send + Sync {
+    /// Send a packet over the ICE connection.
+    fn send(&self, data: &[u8]) -> Result<(), IceError>;
+
+    /// Receive a packet from the ICE connection.
+    fn recv(&self) -> impl std::future::Future<Output = Result<Vec<u8>, IceError>> + Send;
+}
+
+impl IceTransport for IceCaller {
+    fn send(&self, data: &[u8]) -> Result<(), IceError> {
+        IceCaller::send(self, data)
+    }
+
+    fn recv(&self) -> impl std::future::Future<Output = Result<Vec<u8>, IceError>> + Send {
+        IceCaller::recv(self)
+    }
+}
+
+impl IceTransport for IceAnswerer {
+    fn send(&self, data: &[u8]) -> Result<(), IceError> {
+        IceAnswerer::send(self, data)
+    }
+
+    fn recv(&self) -> impl std::future::Future<Output = Result<Vec<u8>, IceError>> + Send {
+        IceAnswerer::recv(self)
+    }
+}
+
+/// Generate a random QUIC connection ID.
+fn generate_conn_id() -> quiche::ConnectionId<'static> {
+    let mut id = [0u8; 16];
+    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut id);
+    quiche::ConnectionId::from_vec(id.to_vec())
+}
+
+// Convenience constructors for specific ICE transport types
+
+impl QuicConnection<IceCaller> {
+    /// Create a QUIC connection as the caller (client role).
+    pub fn new_caller(transport: IceCaller, psk: [u8; PSK_LEN]) -> Result<Self, QuicError> {
+        let scid = generate_conn_id();
+        Self::new_inner(transport, psk, QuicRole::Client, scid)
+    }
+}
+
+impl QuicConnection<IceAnswerer> {
+    /// Create a QUIC connection as the answerer (server role).
+    pub fn new_answerer(transport: IceAnswerer, psk: [u8; PSK_LEN]) -> Result<Self, QuicError> {
+        let scid = generate_conn_id();
+        Self::new_inner(transport, psk, QuicRole::Server, scid)
+    }
 }
 
 #[cfg(test)]
