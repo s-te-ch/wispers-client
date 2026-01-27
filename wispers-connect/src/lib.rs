@@ -6,6 +6,7 @@ pub mod hub;
 pub mod ice;
 pub mod juice;
 pub mod p2p;
+pub mod quic;
 pub mod roster;
 pub mod serving;
 pub mod state;
