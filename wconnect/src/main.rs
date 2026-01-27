@@ -50,6 +50,10 @@ enum Command {
     Ping {
         /// The node number to ping
         node_number: i32,
+
+        /// Use QUIC transport (reliable streams) instead of UDP (datagrams)
+        #[arg(long)]
+        quic: bool,
     },
 }
 
@@ -162,7 +166,7 @@ async fn async_main(command: Command, hub_override: Option<String>) -> Result<()
         Command::Logout => logout(hub_override).await,
         Command::Serve { daemon: _, stop: _ } => serve(hub_override).await,
         Command::GetPairingCode => get_pairing_code(hub_override).await,
-        Command::Ping { node_number } => ping(hub_override, node_number).await,
+        Command::Ping { node_number, quic } => ping(hub_override, node_number, quic).await,
     }
 }
 
@@ -717,7 +721,7 @@ async fn get_pairing_code(hub_override: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-async fn ping(hub_override: Option<&str>, target_node: i32) -> Result<()> {
+async fn ping(hub_override: Option<&str>, target_node: i32, use_quic: bool) -> Result<()> {
     let storage = get_storage(hub_override)?;
     let stage = storage
         .restore_or_init_node_state("unused", None::<String>)
@@ -739,10 +743,23 @@ async fn ping(hub_override: Option<&str>, target_node: i32) -> Result<()> {
         anyhow::bail!("Cannot ping yourself (node {}).", our_node);
     }
 
-    println!("Pinging node {}...", target_node);
+    let transport = if use_quic { "QUIC" } else { "UDP" };
+    println!("Pinging node {} via {}...", target_node, transport);
 
     let start = std::time::Instant::now();
 
+    if use_quic {
+        ping_quic(&activated, target_node, start).await
+    } else {
+        ping_udp(&activated, target_node, start).await
+    }
+}
+
+async fn ping_udp<S: wispers_connect::NodeStateStore>(
+    activated: &wispers_connect::ActivatedNode<S>,
+    target_node: i32,
+    start: std::time::Instant,
+) -> Result<()> {
     // Establish P2P connection
     let conn = activated
         .connect_udp(target_node)
@@ -772,6 +789,54 @@ async fn ping(hub_override: Option<&str>, target_node: i32) -> Result<()> {
         println!("Ping successful! Total time: {:?}", start.elapsed());
     } else {
         println!("  Unexpected response: {:?}", String::from_utf8_lossy(&response));
+    }
+
+    Ok(())
+}
+
+async fn ping_quic<S: wispers_connect::NodeStateStore>(
+    activated: &wispers_connect::ActivatedNode<S>,
+    target_node: i32,
+    start: std::time::Instant,
+) -> Result<()> {
+    // Establish QUIC connection
+    let conn = activated
+        .connect_quic(target_node)
+        .await
+        .context("failed to connect")?;
+
+    let connect_time = start.elapsed();
+    println!("  Connected in {:?}", connect_time);
+
+    // Open a stream
+    let stream_start = std::time::Instant::now();
+    let stream = conn.open_stream().await.context("failed to open stream")?;
+    let stream_time = stream_start.elapsed();
+    println!("  Stream opened in {:?}", stream_time);
+
+    // Send ping
+    stream.write_all(b"ping").await.context("failed to send ping")?;
+    stream.finish().await.context("failed to finish stream")?;
+
+    // Wait for pong with timeout
+    let pong_start = std::time::Instant::now();
+    let mut buf = [0u8; 1024];
+    let n = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        stream.read(&mut buf),
+    )
+    .await
+    .context("timeout waiting for pong")?
+    .context("failed to receive pong")?;
+
+    let rtt = pong_start.elapsed();
+    let response = &buf[..n];
+
+    if response == b"pong" {
+        println!("  Pong received in {:?}", rtt);
+        println!("Ping successful! Total time: {:?}", start.elapsed());
+    } else {
+        println!("  Unexpected response: {:?}", String::from_utf8_lossy(response));
     }
 
     Ok(())
