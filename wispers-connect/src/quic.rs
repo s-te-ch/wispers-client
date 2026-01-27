@@ -3,14 +3,18 @@
 //! This module provides QUIC connections on top of ICE-established UDP paths,
 //! using quiche (Cloudflare's QUIC implementation). Authentication uses TLS 1.3
 //! with a Pre-Shared Key (PSK) derived from the X25519 Diffie-Hellman exchange.
+//!
+//! A background driver task handles packet I/O and timeouts, allowing the
+//! application to perform long-running operations without stalling the connection.
 
 use boring::ssl::{SslContextBuilder, SslMethod};
 use hkdf::Hkdf;
 use sha2::Sha256;
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 use crate::ice::{IceAnswerer, IceCaller, IceError};
 
@@ -38,6 +42,9 @@ const INITIAL_MAX_STREAMS_BIDI: u64 = 100;
 
 /// Length of the derived PSK in bytes.
 const PSK_LEN: usize = 32;
+
+/// Maximum UDP packet size for QUIC.
+const MAX_DATAGRAM_SIZE: usize = 1350;
 
 /// QUIC configuration error.
 #[derive(Debug, thiserror::Error)]
@@ -165,9 +172,6 @@ pub enum QuicError {
     Timeout,
 }
 
-/// Maximum UDP packet size for QUIC.
-const MAX_DATAGRAM_SIZE: usize = 1350;
-
 /// QUIC connection state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuicState {
@@ -181,21 +185,89 @@ pub enum QuicState {
     Closed,
 }
 
-/// A QUIC connection over an ICE transport.
-///
-/// This wraps a quiche connection and drives the QUIC state machine
-/// by exchanging UDP packets over the ICE layer.
-pub struct QuicConnection<T> {
+/// Shared state between QuicConnection and the background driver.
+struct QuicConnectionInner<T> {
+    /// The quiche connection.
     conn: Mutex<Pin<Box<quiche::Connection>>>,
+    /// ICE transport for sending/receiving packets.
     transport: T,
+    /// Our role (client or server).
     role: QuicRole,
+    /// Notified when connection state changes (data available, established, etc.).
+    state_notify: Notify,
+    /// Set to true to signal the driver to stop.
+    shutdown: AtomicBool,
 }
 
-impl<T: IceTransport> QuicConnection<T> {
-    /// Create a new QUIC connection.
+impl<T: IceTransport> QuicConnectionInner<T> {
+    /// Send all pending QUIC packets over the ICE transport.
+    async fn flush_send(&self) -> Result<(), QuicError> {
+        let mut buf = vec![0u8; MAX_DATAGRAM_SIZE];
+
+        loop {
+            let send_result = {
+                let mut conn = self.conn.lock().await;
+                conn.send(&mut buf)
+            };
+
+            match send_result {
+                Ok((len, _send_info)) => {
+                    self.transport.send(&buf[..len])?;
+                }
+                Err(quiche::Error::Done) => break,
+                Err(e) => return Err(QuicError::Quic(e)),
+            }
+        }
+        Ok(())
+    }
+
+    /// Process one incoming packet.
+    async fn process_packet(&self, mut packet: Vec<u8>) -> Result<(), QuicError> {
+        let mut conn = self.conn.lock().await;
+        let recv_info = quiche::RecvInfo {
+            from: "127.0.0.1:0".parse().unwrap(),
+            to: "127.0.0.1:0".parse().unwrap(),
+        };
+        match conn.recv(&mut packet, recv_info) {
+            Ok(_) => Ok(()),
+            Err(quiche::Error::Done) => Ok(()),
+            Err(e) => Err(QuicError::Quic(e)),
+        }
+    }
+
+    /// Handle timeout.
+    async fn handle_timeout(&self) {
+        let mut conn = self.conn.lock().await;
+        conn.on_timeout();
+    }
+
+    /// Get the current timeout duration.
+    async fn timeout(&self) -> Option<std::time::Duration> {
+        let conn = self.conn.lock().await;
+        conn.timeout()
+    }
+
+    /// Check if connection is closed.
+    async fn is_closed(&self) -> bool {
+        let conn = self.conn.lock().await;
+        conn.is_closed()
+    }
+}
+
+/// A QUIC connection over an ICE transport.
+///
+/// This wraps a quiche connection and runs a background driver task that
+/// handles packet I/O and timeouts. The driver keeps the connection alive
+/// even when the application is not actively reading or writing.
+pub struct QuicConnection<T: IceTransport + 'static> {
+    inner: Arc<QuicConnectionInner<T>>,
+    driver_handle: tokio::task::JoinHandle<()>,
+}
+
+impl<T: IceTransport + 'static> QuicConnection<T> {
+    /// Create a new QUIC connection and start the background driver.
     ///
     /// The ICE connection must already be established before calling this.
-    /// This creates the QUIC connection but does not perform the handshake.
     fn new_inner(
         transport: T,
         psk: [u8; PSK_LEN],
@@ -210,36 +282,39 @@ impl<T: IceTransport> QuicConnection<T> {
         let peer: SocketAddr = "127.0.0.1:1".parse().unwrap();
 
         let conn = match role {
-            QuicRole::Client => {
-                // Client connects to server
-                // Server name is not used for PSK but quiche requires it
-                quiche::connect(None, &scid, local, peer, &mut config)?
-            }
-            QuicRole::Server => {
-                // Server accepts from client
-                quiche::accept(&scid, None, local, peer, &mut config)?
-            }
+            QuicRole::Client => quiche::connect(None, &scid, local, peer, &mut config)?,
+            QuicRole::Server => quiche::accept(&scid, None, local, peer, &mut config)?,
         };
 
-        Ok(Self {
+        let inner = Arc::new(QuicConnectionInner {
             conn: Mutex::new(Box::pin(conn)),
             transport,
             role,
+            state_notify: Notify::new(),
+            shutdown: AtomicBool::new(false),
+        });
+
+        // Spawn the background driver
+        let driver_inner = Arc::clone(&inner);
+        let driver_handle = tokio::spawn(async move {
+            driver_loop(driver_inner).await;
+        });
+
+        Ok(Self {
+            inner,
+            driver_handle,
         })
     }
 
     /// Perform the QUIC handshake.
     ///
-    /// This exchanges QUIC packets over the ICE transport until the
-    /// handshake completes or fails.
+    /// Waits until the handshake completes or fails. The background driver
+    /// handles the actual packet exchange.
     pub async fn handshake(&self) -> Result<(), QuicError> {
         loop {
-            // Send any pending QUIC packets
-            self.flush_send().await?;
-
-            // Check if handshake is complete
+            // Check current state
             {
-                let conn = self.conn.lock().await;
+                let conn = self.inner.conn.lock().await;
                 if conn.is_established() {
                     return Ok(());
                 }
@@ -248,67 +323,14 @@ impl<T: IceTransport> QuicConnection<T> {
                 }
             }
 
-            // Wait for incoming packet or timeout
-            let timeout = {
-                let conn = self.conn.lock().await;
-                conn.timeout()
-            };
-
-            let recv_result = if let Some(timeout) = timeout {
-                tokio::time::timeout(timeout, self.transport.recv()).await
-            } else {
-                // No timeout set, just wait for packet
-                Ok(self.transport.recv().await)
-            };
-
-            match recv_result {
-                Ok(Ok(packet)) => {
-                    // Feed packet to QUIC
-                    let mut conn = self.conn.lock().await;
-                    let recv_info = quiche::RecvInfo {
-                        from: "127.0.0.1:0".parse().unwrap(),
-                        to: "127.0.0.1:0".parse().unwrap(),
-                    };
-                    match conn.recv(&mut packet.clone(), recv_info) {
-                        Ok(_) => {}
-                        Err(quiche::Error::Done) => {}
-                        Err(e) => return Err(QuicError::Quic(e)),
-                    }
-                }
-                Ok(Err(e)) => {
-                    // ICE error
-                    return Err(QuicError::Ice(e));
-                }
-                Err(_) => {
-                    // Timeout - call on_timeout
-                    let mut conn = self.conn.lock().await;
-                    conn.on_timeout();
-                }
-            }
+            // Wait for state change
+            self.inner.state_notify.notified().await;
         }
-    }
-
-    /// Send all pending QUIC packets over the ICE transport.
-    async fn flush_send(&self) -> Result<(), QuicError> {
-        let mut buf = vec![0u8; MAX_DATAGRAM_SIZE];
-
-        loop {
-            let mut conn = self.conn.lock().await;
-            match conn.send(&mut buf) {
-                Ok((len, _send_info)) => {
-                    drop(conn); // Release lock before async send
-                    self.transport.send(&buf[..len])?;
-                }
-                Err(quiche::Error::Done) => break,
-                Err(e) => return Err(QuicError::Quic(e)),
-            }
-        }
-        Ok(())
     }
 
     /// Get the current connection state.
     pub async fn state(&self) -> QuicState {
-        let conn = self.conn.lock().await;
+        let conn = self.inner.conn.lock().await;
         if conn.is_closed() {
             QuicState::Closed
         } else if conn.is_draining() {
@@ -328,10 +350,12 @@ impl<T: IceTransport> QuicConnection<T> {
     /// Close the connection.
     pub async fn close(&self) -> Result<(), QuicError> {
         {
-            let mut conn = self.conn.lock().await;
-            conn.close(true, 0, b"close")?;
+            let mut conn = self.inner.conn.lock().await;
+            let _ = conn.close(true, 0, b"close");
         }
-        self.flush_send().await?;
+        self.inner.flush_send().await?;
+        self.inner.shutdown.store(true, Ordering::SeqCst);
+        self.inner.state_notify.notify_waiters();
         Ok(())
     }
 
@@ -339,17 +363,17 @@ impl<T: IceTransport> QuicConnection<T> {
     ///
     /// Returns a stream that can be used for reading and writing.
     /// Both client and server can open streams (they use different ID ranges).
-    pub async fn open_stream(&self) -> Result<QuicStream<'_, T>, QuicError> {
+    pub async fn open_stream(&self) -> Result<QuicStream<T>, QuicError> {
         // Stream ID assignment:
         // - Client-initiated bidi: 0, 4, 8, ... (id % 4 == 0)
         // - Server-initiated bidi: 1, 5, 9, ... (id % 4 == 1)
-        let base = match self.role {
+        let base = match self.inner.role {
             QuicRole::Client => 0u64,
             QuicRole::Server => 1u64,
         };
 
         let stream_id = {
-            let conn = self.conn.lock().await;
+            let conn = self.inner.conn.lock().await;
             // Find next available stream ID for our role
             let mut candidate = base;
             while conn.stream_finished(candidate) {
@@ -363,7 +387,7 @@ impl<T: IceTransport> QuicConnection<T> {
 
         // Send a zero-byte write to "open" the stream
         {
-            let mut conn = self.conn.lock().await;
+            let mut conn = self.inner.conn.lock().await;
             match conn.stream_send(stream_id, &[], false) {
                 Ok(_) => {}
                 Err(quiche::Error::Done) => {}
@@ -372,10 +396,10 @@ impl<T: IceTransport> QuicConnection<T> {
         }
 
         // Flush to notify the peer
-        self.flush_send().await?;
+        self.inner.flush_send().await?;
 
         Ok(QuicStream {
-            conn: self,
+            inner: Arc::clone(&self.inner),
             stream_id,
         })
     }
@@ -384,14 +408,14 @@ impl<T: IceTransport> QuicConnection<T> {
     ///
     /// Waits for the peer to open a new stream and returns it.
     /// Either side can accept streams opened by the other.
-    pub async fn accept_stream(&self) -> Result<QuicStream<'_, T>, QuicError> {
+    pub async fn accept_stream(&self) -> Result<QuicStream<T>, QuicError> {
         loop {
             // Check for readable streams (peer has opened and sent data)
             {
-                let mut conn = self.conn.lock().await;
+                let mut conn = self.inner.conn.lock().await;
                 if let Some(stream_id) = conn.stream_readable_next() {
                     return Ok(QuicStream {
-                        conn: self,
+                        inner: Arc::clone(&self.inner),
                         stream_id,
                     });
                 }
@@ -401,62 +425,94 @@ impl<T: IceTransport> QuicConnection<T> {
                 }
             }
 
-            // Drive the connection to receive more data
-            self.drive_once().await?;
+            // Wait for state change (driver will notify when packet arrives)
+            self.inner.state_notify.notified().await;
         }
     }
+}
 
-    /// Drive the connection once (receive packet, handle timeout).
-    async fn drive_once(&self) -> Result<(), QuicError> {
-        // Flush any pending outgoing data
-        self.flush_send().await?;
+impl<T: IceTransport + 'static> Drop for QuicConnection<T> {
+    fn drop(&mut self) {
+        self.inner.shutdown.store(true, Ordering::SeqCst);
+        self.driver_handle.abort();
+    }
+}
+
+/// Background driver loop that keeps the QUIC connection alive.
+async fn driver_loop<T: IceTransport>(inner: Arc<QuicConnectionInner<T>>) {
+    loop {
+        // Check if we should stop
+        if inner.shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+
+        // Flush any pending outgoing packets
+        if let Err(_) = inner.flush_send().await {
+            break;
+        }
+
+        // Check if connection is closed
+        if inner.is_closed().await {
+            inner.state_notify.notify_waiters();
+            break;
+        }
+
+        // Get timeout for next event
+        let timeout = inner.timeout().await;
 
         // Wait for incoming packet or timeout
-        let timeout = {
-            let conn = self.conn.lock().await;
-            conn.timeout()
-        };
-
-        let recv_result = if let Some(timeout) = timeout {
-            tokio::time::timeout(timeout, self.transport.recv()).await
+        let recv_result = if let Some(timeout_duration) = timeout {
+            match tokio::time::timeout(timeout_duration, inner.transport.recv()).await {
+                Ok(result) => Some(result),
+                Err(_) => None, // Timeout
+            }
         } else {
-            Ok(self.transport.recv().await)
+            // No timeout, use a reasonable default to avoid blocking forever
+            match tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                inner.transport.recv(),
+            )
+            .await
+            {
+                Ok(result) => Some(result),
+                Err(_) => None,
+            }
         };
 
         match recv_result {
-            Ok(Ok(packet)) => {
-                let mut conn = self.conn.lock().await;
-                let recv_info = quiche::RecvInfo {
-                    from: "127.0.0.1:0".parse().unwrap(),
-                    to: "127.0.0.1:0".parse().unwrap(),
-                };
-                match conn.recv(&mut packet.clone(), recv_info) {
-                    Ok(_) => {}
-                    Err(quiche::Error::Done) => {}
-                    Err(e) => return Err(QuicError::Quic(e)),
+            Some(Ok(packet)) => {
+                // Process the packet
+                if let Err(_) = inner.process_packet(packet).await {
+                    break;
                 }
+                // Notify waiters that state may have changed
+                inner.state_notify.notify_waiters();
             }
-            Ok(Err(e)) => return Err(QuicError::Ice(e)),
-            Err(_) => {
-                // Timeout
-                let mut conn = self.conn.lock().await;
-                conn.on_timeout();
+            Some(Err(_)) => {
+                // ICE error, stop the driver
+                break;
+            }
+            None => {
+                // Timeout - call on_timeout
+                inner.handle_timeout().await;
+                // Notify in case handshake progressed
+                inner.state_notify.notify_waiters();
             }
         }
-
-        Ok(())
     }
 }
 
 /// A QUIC stream for reading and writing data.
 ///
 /// Streams provide ordered, reliable byte delivery within a QUIC connection.
-pub struct QuicStream<'a, T> {
-    conn: &'a QuicConnection<T>,
+/// The background driver handles packet I/O, so stream operations can block
+/// without stalling the connection.
+pub struct QuicStream<T: IceTransport + 'static> {
+    inner: Arc<QuicConnectionInner<T>>,
     stream_id: u64,
 }
 
-impl<'a, T: IceTransport> QuicStream<'a, T> {
+impl<T: IceTransport + 'static> QuicStream<T> {
     /// Get the stream ID.
     pub fn id(&self) -> u64 {
         self.stream_id
@@ -468,7 +524,7 @@ impl<'a, T: IceTransport> QuicStream<'a, T> {
     /// requested if the stream's flow control window is limited.
     pub async fn write(&self, data: &[u8]) -> Result<usize, QuicError> {
         let written = {
-            let mut conn = self.conn.conn.lock().await;
+            let mut conn = self.inner.conn.lock().await;
             match conn.stream_send(self.stream_id, data, false) {
                 Ok(n) => n,
                 Err(quiche::Error::Done) => 0,
@@ -476,8 +532,8 @@ impl<'a, T: IceTransport> QuicStream<'a, T> {
             }
         };
 
-        // Flush to send the data
-        self.conn.flush_send().await?;
+        // Flush to send the data (driver will also flush, but do it now for lower latency)
+        self.inner.flush_send().await?;
 
         Ok(written)
     }
@@ -488,12 +544,21 @@ impl<'a, T: IceTransport> QuicStream<'a, T> {
     pub async fn write_all(&self, data: &[u8]) -> Result<(), QuicError> {
         let mut offset = 0;
         while offset < data.len() {
-            let written = self.write(&data[offset..]).await?;
-            if written == 0 {
-                // Flow control blocked, drive connection and retry
-                self.conn.drive_once().await?;
-            } else {
+            let written = {
+                let mut conn = self.inner.conn.lock().await;
+                match conn.stream_send(self.stream_id, &data[offset..], false) {
+                    Ok(n) => n,
+                    Err(quiche::Error::Done) => 0,
+                    Err(e) => return Err(QuicError::Quic(e)),
+                }
+            };
+
+            if written > 0 {
                 offset += written;
+                self.inner.flush_send().await?;
+            } else {
+                // Flow control blocked, wait for state change
+                self.inner.state_notify.notified().await;
             }
         }
         Ok(())
@@ -506,7 +571,7 @@ impl<'a, T: IceTransport> QuicStream<'a, T> {
         loop {
             // Try to read from the stream
             {
-                let mut conn = self.conn.conn.lock().await;
+                let mut conn = self.inner.conn.lock().await;
                 match conn.stream_recv(self.stream_id, buf) {
                     Ok((len, _fin)) => return Ok(len),
                     Err(quiche::Error::Done) => {
@@ -523,34 +588,34 @@ impl<'a, T: IceTransport> QuicStream<'a, T> {
                 }
             }
 
-            // Drive connection to receive more data
-            self.conn.drive_once().await?;
+            // Wait for state change (driver will notify when data arrives)
+            self.inner.state_notify.notified().await;
         }
     }
 
     /// Close the stream for writing (send FIN).
     pub async fn finish(&self) -> Result<(), QuicError> {
         {
-            let mut conn = self.conn.conn.lock().await;
+            let mut conn = self.inner.conn.lock().await;
             match conn.stream_send(self.stream_id, &[], true) {
                 Ok(_) => {}
                 Err(quiche::Error::Done) => {}
                 Err(e) => return Err(QuicError::Quic(e)),
             }
         }
-        self.conn.flush_send().await?;
+        self.inner.flush_send().await?;
         Ok(())
     }
 
     /// Shutdown the stream (stop sending and receiving).
     pub async fn shutdown(&self) -> Result<(), QuicError> {
         {
-            let mut conn = self.conn.conn.lock().await;
+            let mut conn = self.inner.conn.lock().await;
             // Shutdown both directions
             let _ = conn.stream_shutdown(self.stream_id, quiche::Shutdown::Read, 0);
             let _ = conn.stream_shutdown(self.stream_id, quiche::Shutdown::Write, 0);
         }
-        self.conn.flush_send().await?;
+        self.inner.flush_send().await?;
         Ok(())
     }
 }
@@ -597,6 +662,7 @@ impl QuicConnection<IceCaller> {
     /// Create a QUIC connection as the caller (client role).
     ///
     /// The `connection_id` should be from the `StartConnectionResponse`.
+    /// This starts a background driver task that handles packet I/O.
     pub fn new_caller(
         transport: IceCaller,
         psk: [u8; PSK_LEN],
@@ -611,6 +677,7 @@ impl QuicConnection<IceAnswerer> {
     /// Create a QUIC connection as the answerer (server role).
     ///
     /// The `connection_id` is the one generated for `StartConnectionResponse`.
+    /// This starts a background driver task that handles packet I/O.
     pub fn new_answerer(
         transport: IceAnswerer,
         psk: [u8; PSK_LEN],
