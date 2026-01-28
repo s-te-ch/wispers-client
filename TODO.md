@@ -37,19 +37,19 @@ curl http://localhost:8080
 ## Phase 1: Stream Protocol
 
 ### 1.1 Define session types
-- [ ] `PING\n` - existing ping/pong behavior
-- [ ] `FORWARD <port>\n` - request TCP forwarding to localhost:port
+- [x] `PING\n` - existing ping/pong behavior
+- [x] `FORWARD <port>\n` - request TCP forwarding to localhost:port
 
 ### 1.2 Update ping command
-- [ ] Send `PING\n` as first line instead of raw "ping"
-- [ ] Update serve to parse first line and dispatch
+- [x] Send `PING\n` as first line instead of raw "ping"
+- [x] Update serve to parse first line and dispatch
 
 ### 1.3 Implement forward handler (serve side)
-- [ ] On incoming QUIC **stream**, read first line
-- [ ] If `FORWARD <port>\n`:
-  - [ ] Connect to `localhost:<port>` via TCP
-  - [ ] If connection fails, send `ERROR <reason>\n` and close stream
-  - [ ] If connection succeeds, send `OK\n` and start relaying
+- [x] On incoming QUIC **stream**, read first line
+- [x] If `FORWARD <port>\n`:
+  - [x] Connect to `localhost:<port>` via TCP
+  - [x] If connection fails, send `ERROR <reason>\n` and close stream
+  - [x] If connection succeeds, send `OK\n` and start relaying
 
 ---
 
