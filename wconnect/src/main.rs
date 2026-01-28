@@ -1076,9 +1076,52 @@ async fn handle_forward_connection(
     let response = response.trim();
 
     if response == "OK" {
-        println!("  Stream {} forwarding to port {}", stream.id(), remote_port);
-        // TODO: Phase 2.4 - relay data
-        drop(tcp_stream);
+        let stream_id = stream.id();
+        println!("  Stream {} forwarding to port {}", stream_id, remote_port);
+
+        // Phase 2.4: Relay data bidirectionally
+        let stream = std::sync::Arc::new(stream);
+        let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
+
+        let stream_for_read = std::sync::Arc::clone(&stream);
+        let stream_for_write = std::sync::Arc::clone(&stream);
+
+        // TCP -> QUIC
+        let tcp_to_quic = async move {
+            let mut buf = [0u8; 8192];
+            loop {
+                match tcp_read.read(&mut buf).await {
+                    Ok(0) => break, // TCP closed
+                    Ok(n) => {
+                        if stream_for_write.write_all(&buf[..n]).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            let _ = stream_for_write.finish().await;
+        };
+
+        // QUIC -> TCP
+        let quic_to_tcp = async move {
+            let mut buf = [0u8; 8192];
+            loop {
+                match stream_for_read.read(&mut buf).await {
+                    Ok(0) => break, // QUIC stream finished
+                    Ok(n) => {
+                        if tcp_write.write_all(&buf[..n]).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            let _ = tcp_write.shutdown().await;
+        };
+
+        tokio::join!(tcp_to_quic, quic_to_tcp);
+        println!("  Stream {} closed", stream_id);
         Ok(())
     } else if response.starts_with("ERROR ") {
         anyhow::bail!("Remote error: {}", &response[6..]);
