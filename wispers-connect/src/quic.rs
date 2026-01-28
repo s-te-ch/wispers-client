@@ -486,21 +486,43 @@ impl<T: IceTransport + 'static> Connection<T> {
     /// Returns a stream that can be used for reading and writing.
     /// Both client and server can open streams (they use different ID ranges).
     pub async fn open_stream(&self) -> Result<Stream<T>, QuicError> {
-        // Stream ID assignment:
-        // - Client-initiated bidi: 0, 4, 8, ... (id % 4 == 0)
-        // - Server-initiated bidi: 1, 5, 9, ... (id % 4 == 1)
-        let base = match self.inner.role {
-            QuicRole::Client => 0u64,
-            QuicRole::Server => 1u64,
-        };
-
+        // Check if the peer allows us to open more streams
         let stream_id = {
-            let conn = self.inner.conn.lock().await;
+            let mut conn = self.inner.conn.lock().await;
+            let streams_left = conn.peer_streams_left_bidi();
+            if streams_left == 0 {
+                return Err(QuicError::Stream(format!(
+                    "peer allows 0 bidirectional streams (is_established={})",
+                    conn.is_established()
+                )));
+            }
+
+            // Stream ID assignment:
+            // - Client-initiated bidi: 0, 4, 8, ... (id % 4 == 0)
+            // - Server-initiated bidi: 1, 5, 9, ... (id % 4 == 1)
+            let base = match self.inner.role {
+                QuicRole::Client => 0u64,
+                QuicRole::Server => 1u64,
+            };
+
             // Find next available stream ID for our role
             let mut candidate = base;
-            while conn.stream_finished(candidate) {
-                candidate += 4;
-                if candidate > 1000 {
+            loop {
+                // Check if this stream is already in use or finished
+                match conn.stream_capacity(candidate) {
+                    Ok(_) => {
+                        // Stream exists and has capacity - it's in use
+                        candidate += 4;
+                    }
+                    Err(quiche::Error::InvalidStreamState(_)) => {
+                        // Stream doesn't exist yet - we can use it
+                        break;
+                    }
+                    Err(_) => {
+                        candidate += 4;
+                    }
+                }
+                if candidate > 4 * INITIAL_MAX_STREAMS_BIDI {
                     return Err(QuicError::Stream("no available stream IDs".into()));
                 }
             }
