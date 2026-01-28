@@ -1008,9 +1008,26 @@ async fn forward(
         local_port, target_node, remote_port
     );
 
-    // TODO: Phase 2.2 - bind local listener
-    // TODO: Phase 2.3 - connect QUIC
-    // TODO: Phase 2.4 - relay
+    // Phase 2.2: Bind local listener
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", local_port))
+        .await
+        .context(format!("failed to bind to port {}", local_port))?;
 
-    anyhow::bail!("Not implemented yet");
+    println!("Listening on 127.0.0.1:{}", local_port);
+
+    // TODO: Phase 2.3 - connect QUIC to target node (single connection, reused)
+
+    // Accept incoming connections
+    loop {
+        let (tcp_stream, peer_addr) = listener
+            .accept()
+            .await
+            .context("failed to accept connection")?;
+
+        println!("Accepted connection from {}", peer_addr);
+
+        // TODO: Phase 2.3/2.4 - open QUIC stream and relay
+        // For now, just close the connection
+        drop(tcp_stream);
+    }
 }
