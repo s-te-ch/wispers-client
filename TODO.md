@@ -56,30 +56,30 @@ curl http://localhost:8080
 ## Phase 2: Forward Command
 
 ### 2.1 CLI
-- [ ] Add `forward` subcommand: `wconnect forward <local_port> <node> <remote_port>`
-- [ ] Argument validation (ports 1-65535, node must be number for now)
+- [x] Add `forward` subcommand: `wconnect forward <local_port> <node> <remote_port>`
+- [x] Argument validation (ports 1-65535, node must be number for now)
 
 ### 2.2 Local listener
-- [ ] Bind TCP listener on `localhost:<local_port>`
-- [ ] Accept incoming connections
+- [x] Bind TCP listener on `localhost:<local_port>`
+- [x] Accept incoming connections
 
 ### 2.3 QUIC connection
-- [ ] Connect to target node via QUIC (reuse existing `connect_quic`)
-- [ ] Open stream, send `FORWARD <remote_port>\n`
-- [ ] Wait for `OK\n` or error response
+- [x] Connect to target node via QUIC (reuse existing `connect_quic`)
+- [x] Open stream, send `FORWARD <remote_port>\n`
+- [x] Wait for `OK\n` or error response
 
 ### 2.4 Relay
-- [ ] Bidirectional copy: TCP socket <-> QUIC stream
-- [ ] Handle EOF in both directions (half-close)
-- [ ] Clean shutdown on stream/socket close
+- [x] Bidirectional copy: TCP socket <-> QUIC stream
+- [ ] Handle EOF in both directions (half-close) - **partial, reload issue**
+- [x] Clean shutdown on stream/socket close
 
 ---
 
 ## Phase 3: Polish
 
 ### 3.1 Multiple connections
-- [ ] Single QUIC connection to target node, kept alive
-- [ ] Each incoming TCP connection gets its own QUIC stream
+- [x] Single QUIC connection to target node, kept alive
+- [x] Each incoming TCP connection gets its own QUIC stream
 
 ### 3.2 Error handling
 - [ ] Connection refused on remote
