@@ -635,39 +635,18 @@ async fn handle_udp_connection(conn: wispers_connect::UdpConnection) {
     }
 }
 
-/// Handle an incoming QUIC P2P connection (respond to stream pings).
+/// Handle an incoming QUIC P2P connection.
 async fn handle_quic_connection(conn: wispers_connect::QuicConnection) {
     let peer = conn.peer_node_number;
     println!("  QUIC connected to node {} (connection already established)", peer);
 
-    // Accept streams and respond to pings
+    // Accept streams and dispatch based on command
     loop {
         match conn.accept_stream().await {
             Ok(stream) => {
-                println!("  Accepted stream {} from node {}", stream.id(), peer);
-
-                // Read message
-                let mut buf = [0u8; 1024];
-                match stream.read(&mut buf).await {
-                    Ok(0) => {
-                        println!("  Stream {} closed by peer", stream.id());
-                    }
-                    Ok(n) => {
-                        let data = &buf[..n];
-                        if data == b"ping" {
-                            println!("  Received ping on stream {}, sending pong", stream.id());
-                            if let Err(e) = stream.write_all(b"pong").await {
-                                eprintln!("  Failed to send pong: {}", e);
-                            }
-                            let _ = stream.finish().await;
-                        } else {
-                            println!("  Received {} bytes on stream {}", n, stream.id());
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("  Stream read error: {}", e);
-                    }
-                }
+                let stream_id = stream.id();
+                println!("  Accepted stream {} from node {}", stream_id, peer);
+                tokio::spawn(handle_quic_stream(stream, peer, stream_id));
             }
             Err(e) => {
                 println!("  QUIC connection to node {} closed: {}", peer, e);
@@ -675,6 +654,67 @@ async fn handle_quic_connection(conn: wispers_connect::QuicConnection) {
             }
         }
     }
+}
+
+/// Handle a single QUIC stream - read command and dispatch.
+async fn handle_quic_stream(stream: wispers_connect::QuicStream, _peer: i32, stream_id: u64) {
+    // Read command line
+    let mut buf = [0u8; 1024];
+    let n = match stream.read(&mut buf).await {
+        Ok(0) => {
+            println!("  Stream {} closed by peer before command", stream_id);
+            return;
+        }
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("  Stream {} read error: {}", stream_id, e);
+            return;
+        }
+    };
+
+    let data = &buf[..n];
+
+    // Parse command (first line)
+    let line = match data.iter().position(|&b| b == b'\n') {
+        Some(pos) => &data[..pos],
+        None => data, // No newline, treat whole thing as command
+    };
+
+    match line {
+        b"PING" => {
+            println!("  Received PING on stream {}, sending PONG", stream_id);
+            if let Err(e) = stream.write_all(b"PONG\n").await {
+                eprintln!("  Failed to send PONG: {}", e);
+            }
+            let _ = stream.finish().await;
+        }
+        cmd if cmd.starts_with(b"FORWARD ") => {
+            // Parse port from "FORWARD <port>"
+            let port_str = String::from_utf8_lossy(&cmd[8..]);
+            match port_str.trim().parse::<u16>() {
+                Ok(port) => {
+                    println!("  Received FORWARD {} on stream {}", port, stream_id);
+                    handle_forward(stream, port).await;
+                }
+                Err(_) => {
+                    let _ = stream.write_all(b"ERROR invalid port\n").await;
+                    let _ = stream.finish().await;
+                }
+            }
+        }
+        _ => {
+            println!("  Unknown command on stream {}: {:?}", stream_id, String::from_utf8_lossy(line));
+            let _ = stream.write_all(b"ERROR unknown command\n").await;
+            let _ = stream.finish().await;
+        }
+    }
+}
+
+/// Handle a FORWARD command - connect to local port and relay.
+async fn handle_forward(stream: wispers_connect::QuicStream, port: u16) {
+    // TODO: Implement in Phase 1.3
+    let _ = stream.write_all(b"ERROR not implemented\n").await;
+    let _ = stream.finish().await;
 }
 
 async fn get_pairing_code(hub_override: Option<&str>) -> Result<()> {
@@ -814,11 +854,11 @@ async fn ping_quic<S: wispers_connect::NodeStateStore>(
     let stream_time = stream_start.elapsed();
     println!("  Stream opened in {:?}", stream_time);
 
-    // Send ping
-    stream.write_all(b"ping").await.context("failed to send ping")?;
+    // Send PING command
+    stream.write_all(b"PING\n").await.context("failed to send PING")?;
     stream.finish().await.context("failed to finish stream")?;
 
-    // Wait for pong with timeout
+    // Wait for PONG with timeout
     let pong_start = std::time::Instant::now();
     let mut buf = [0u8; 1024];
     let n = tokio::time::timeout(
@@ -826,13 +866,13 @@ async fn ping_quic<S: wispers_connect::NodeStateStore>(
         stream.read(&mut buf),
     )
     .await
-    .context("timeout waiting for pong")?
-    .context("failed to receive pong")?;
+    .context("timeout waiting for PONG")?
+    .context("failed to receive PONG")?;
 
     let rtt = pong_start.elapsed();
     let response = &buf[..n];
 
-    if response == b"pong" {
+    if response == b"PONG\n" {
         println!("  Pong received in {:?}", rtt);
         println!("Ping successful! Total time: {:?}", start.elapsed());
     } else {
