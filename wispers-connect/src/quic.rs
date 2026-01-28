@@ -265,6 +265,8 @@ struct ConnectionInner<T> {
     state_notify: Notify,
     /// Set to true to signal the driver to stop.
     shutdown: AtomicBool,
+    /// Stream IDs that have been accepted (to avoid returning same stream twice).
+    accepted_streams: Mutex<std::collections::HashSet<u64>>,
 }
 
 impl<T: IceTransport> ConnectionInner<T> {
@@ -358,6 +360,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             peer_addr: peer,
             state_notify: Notify::new(),
             shutdown: AtomicBool::new(false),
+            accepted_streams: Mutex::new(std::collections::HashSet::new()),
         });
 
         // Send Initial packet immediately (don't wait for driver)
@@ -408,6 +411,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             peer_addr: peer,
             state_notify: Notify::new(),
             shutdown: AtomicBool::new(false),
+            accepted_streams: Mutex::new(std::collections::HashSet::new()),
         });
 
         // Process the initial packet we already received
@@ -557,11 +561,17 @@ impl<T: IceTransport + 'static> Connection<T> {
             // Check for readable streams (peer has opened and sent data)
             {
                 let mut conn = self.inner.conn.lock().await;
-                if let Some(stream_id) = conn.stream_readable_next() {
-                    return Ok(Stream {
-                        inner: Arc::clone(&self.inner),
-                        stream_id,
-                    });
+                let mut accepted = self.inner.accepted_streams.lock().await;
+
+                // Find a readable stream that hasn't been accepted yet
+                while let Some(stream_id) = conn.stream_readable_next() {
+                    if !accepted.contains(&stream_id) {
+                        accepted.insert(stream_id);
+                        return Ok(Stream {
+                            inner: Arc::clone(&self.inner),
+                            stream_id,
+                        });
+                    }
                 }
 
                 if conn.is_closed() {
