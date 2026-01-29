@@ -14,6 +14,10 @@ struct Cli {
     #[arg(long, env = "WCONNECT_HUB")]
     hub: Option<String>,
 
+    /// Profile name for storing node state (allows multiple nodes on same machine)
+    #[arg(long, short, default_value = "default", env = "WCONNECT_PROFILE")]
+    profile: String,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -71,8 +75,8 @@ enum Command {
 }
 
 /// Read registration info synchronously (for use before tokio starts).
-fn read_registration_sync() -> Result<(String, i32)> {
-    let storage = get_storage(None)?;
+fn read_registration_sync(profile: &str) -> Result<(String, i32)> {
+    let storage = get_storage(None, profile)?;
     let reg = storage
         .read_registration()
         .context("failed to read registration")?
@@ -82,11 +86,11 @@ fn read_registration_sync() -> Result<(String, i32)> {
 }
 
 /// Stop a running daemon by sending shutdown command via socket.
-fn stop_daemon(_hub_override: Option<&str>) -> Result<()> {
+fn stop_daemon(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
 
-    let (cg_id, node_number) = read_registration_sync()?;
+    let (cg_id, node_number) = read_registration_sync(profile)?;
     let socket_path = daemon::socket_path(&cg_id, node_number);
 
     let mut stream = UnixStream::connect(&socket_path)
@@ -110,11 +114,11 @@ fn stop_daemon(_hub_override: Option<&str>) -> Result<()> {
 }
 
 /// Daemonize the process before starting tokio.
-fn daemonize_serve(_hub_override: Option<&str>) -> Result<()> {
+fn daemonize_serve(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     use daemonize::Daemonize;
     use std::fs::{self, File};
 
-    let (cg_id, node_number) = read_registration_sync()?;
+    let (cg_id, node_number) = read_registration_sync(profile)?;
 
     // Create log directory
     let log_dir = dirs::home_dir()
@@ -137,9 +141,9 @@ fn daemonize_serve(_hub_override: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn get_storage(hub_override: Option<&str>) -> Result<NodeStorage<FileNodeStateStore>> {
+fn get_storage(hub_override: Option<&str>, profile: &str) -> Result<NodeStorage<FileNodeStateStore>> {
     let config_dir = dirs::config_dir().context("could not determine config directory")?;
-    let store_dir = config_dir.join("wconnect").join("default");
+    let store_dir = config_dir.join("wconnect").join(profile);
     let store = FileNodeStateStore::new(store_dir);
     let storage = NodeStorage::new(store);
     if let Some(addr) = hub_override {
@@ -151,15 +155,16 @@ fn get_storage(hub_override: Option<&str>) -> Result<NodeStorage<FileNodeStateSt
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let hub_override: Option<String> = cli.hub.clone();
+    let profile = cli.profile.clone();
 
     // Handle serve --stop synchronously (no need for tokio)
     if let Command::Serve { stop: true, .. } = &cli.command {
-        return stop_daemon(hub_override.as_deref());
+        return stop_daemon(hub_override.as_deref(), &profile);
     }
 
     // Handle serve --daemon: daemonize before starting tokio
     if let Command::Serve { daemon: true, .. } = &cli.command {
-        daemonize_serve(hub_override.as_deref())?;
+        daemonize_serve(hub_override.as_deref(), &profile)?;
     }
 
     // Start tokio runtime and run async main
@@ -167,30 +172,30 @@ fn main() -> Result<()> {
         .enable_all()
         .build()
         .context("failed to create tokio runtime")?
-        .block_on(async_main(cli.command, hub_override))
+        .block_on(async_main(cli.command, hub_override, profile))
 }
 
-async fn async_main(command: Command, hub_override: Option<String>) -> Result<()> {
+async fn async_main(command: Command, hub_override: Option<String>, profile: String) -> Result<()> {
     let hub_override = hub_override.as_deref();
+    let profile = profile.as_str();
     match command {
-        Command::Register { token } => register(hub_override, &token).await,
-        Command::Activate { pairing_code } => activate(hub_override, &pairing_code).await,
-        Command::Nodes => nodes(hub_override).await,
-        Command::Status => status(hub_override).await,
-        Command::Logout => logout(hub_override).await,
-        Command::Serve { daemon: _, stop: _ } => serve(hub_override).await,
-        Command::GetPairingCode => get_pairing_code(hub_override).await,
-        Command::Ping { node_number, quic } => ping(hub_override, node_number, quic).await,
+        Command::Register { token } => register(hub_override, profile, &token).await,
+        Command::Activate { pairing_code } => activate(hub_override, profile, &pairing_code).await,
+        Command::Nodes => nodes(hub_override, profile).await,
+        Command::Status => status(hub_override, profile).await,
+        Command::Logout => logout(hub_override, profile).await,
+        Command::Serve { daemon: _, stop: _ } => serve(hub_override, profile).await,
+        Command::GetPairingCode => get_pairing_code(hub_override, profile).await,
+        Command::Ping { node_number, quic } => ping(hub_override, profile, node_number, quic).await,
         Command::Forward { local_port, node, remote_port } => {
-            forward(hub_override, local_port, node, remote_port).await
+            forward(hub_override, profile, local_port, node, remote_port).await
         }
     }
 }
 
-async fn register(hub_override: Option<&str>, token: &str) -> Result<()> {
-    let storage = get_storage(hub_override)?;
+async fn register(hub_override: Option<&str>, profile: &str, token: &str) -> Result<()> {
+    let storage = get_storage(hub_override, profile)?;
 
-    // TODO: remove app/profile namespaces later
     let stage = storage
         .restore_or_init_node_state()
         .await
@@ -230,10 +235,10 @@ async fn register(hub_override: Option<&str>, token: &str) -> Result<()> {
     Ok(())
 }
 
-async fn activate(hub_override: Option<&str>, pairing_code: &str) -> Result<()> {
+async fn activate(hub_override: Option<&str>, profile: &str, pairing_code: &str) -> Result<()> {
     use wispers_connect::PairingCode;
 
-    let storage = get_storage(hub_override)?;
+    let storage = get_storage(hub_override, profile)?;
     let stage = storage
         .restore_or_init_node_state()
         .await
@@ -281,10 +286,10 @@ async fn activate(hub_override: Option<&str>, pairing_code: &str) -> Result<()> 
     Ok(())
 }
 
-async fn nodes(hub_override: Option<&str>) -> Result<()> {
+async fn nodes(hub_override: Option<&str>, profile: &str) -> Result<()> {
     use std::collections::HashSet;
 
-    let storage = get_storage(hub_override)?;
+    let storage = get_storage(hub_override, profile)?;
     let stage = storage
         .restore_or_init_node_state()
         .await
@@ -385,8 +390,8 @@ fn format_last_seen(millis: i64) -> String {
     format!("connected {}d ago", ago_days)
 }
 
-async fn status(hub_override: Option<&str>) -> Result<()> {
-    let storage = get_storage(hub_override)?;
+async fn status(hub_override: Option<&str>, profile: &str) -> Result<()> {
+    let storage = get_storage(hub_override, profile)?;
     let stage = storage
         .restore_or_init_node_state()
         .await
@@ -442,8 +447,8 @@ async fn print_daemon_status(cg_id: &str, node_number: i32) {
     }
 }
 
-async fn logout(hub_override: Option<&str>) -> Result<()> {
-    let storage = get_storage(hub_override)?;
+async fn logout(hub_override: Option<&str>, profile: &str) -> Result<()> {
+    let storage = get_storage(hub_override, profile)?;
     let stage = storage
         .restore_or_init_node_state()
         .await
@@ -454,14 +459,14 @@ async fn logout(hub_override: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-async fn serve(hub_override: Option<&str>) -> Result<()> {
+async fn serve(hub_override: Option<&str>, profile: &str) -> Result<()> {
     use std::sync::Arc;
     use tokio::sync::RwLock;
     use wispers_connect::p2p::P2pError;
     use wispers_connect::{IncomingConnections, QuicConnection, UdpConnection, ServingHandle, ServingSession};
     type IncomingResult = Option<IncomingConnections>;
 
-    let storage = get_storage(hub_override)?;
+    let storage = get_storage(hub_override, profile)?;
     let stage = storage
         .restore_or_init_node_state()
         .await
@@ -804,8 +809,8 @@ async fn handle_forward(stream: wispers_connect::QuicStream, port: u16) {
     tokio::join!(quic_to_tcp, tcp_to_quic);
 }
 
-async fn get_pairing_code(hub_override: Option<&str>) -> Result<()> {
-    let storage = get_storage(hub_override)?;
+async fn get_pairing_code(hub_override: Option<&str>, profile: &str) -> Result<()> {
+    let storage = get_storage(hub_override, profile)?;
     let stage = storage
         .restore_or_init_node_state()
         .await
@@ -848,8 +853,8 @@ async fn get_pairing_code(hub_override: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-async fn ping(hub_override: Option<&str>, target_node: i32, use_quic: bool) -> Result<()> {
-    let storage = get_storage(hub_override)?;
+async fn ping(hub_override: Option<&str>, profile: &str, target_node: i32, use_quic: bool) -> Result<()> {
+    let storage = get_storage(hub_override, profile)?;
     let stage = storage
         .restore_or_init_node_state()
         .await
@@ -971,6 +976,7 @@ async fn ping_quic<S: wispers_connect::NodeStateStore>(
 
 async fn forward(
     hub_override: Option<&str>,
+    profile: &str,
     local_port: u16,
     target_node: i32,
     remote_port: u16,
@@ -983,7 +989,7 @@ async fn forward(
         anyhow::bail!("Remote port cannot be 0");
     }
 
-    let storage = get_storage(hub_override)?;
+    let storage = get_storage(hub_override, profile)?;
     let stage = storage
         .restore_or_init_node_state()
         .await
