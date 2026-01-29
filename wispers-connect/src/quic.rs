@@ -267,6 +267,8 @@ struct ConnectionInner<T> {
     shutdown: AtomicBool,
     /// Stream IDs that have been accepted (to avoid returning same stream twice).
     accepted_streams: Mutex<std::collections::HashSet<u64>>,
+    /// Stream IDs that have been opened by us (to avoid reusing finished streams).
+    opened_streams: Mutex<std::collections::HashSet<u64>>,
 }
 
 impl<T: IceTransport> ConnectionInner<T> {
@@ -361,6 +363,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             state_notify: Notify::new(),
             shutdown: AtomicBool::new(false),
             accepted_streams: Mutex::new(std::collections::HashSet::new()),
+            opened_streams: Mutex::new(std::collections::HashSet::new()),
         });
 
         // Send Initial packet immediately (don't wait for driver)
@@ -412,6 +415,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             state_notify: Notify::new(),
             shutdown: AtomicBool::new(false),
             accepted_streams: Mutex::new(std::collections::HashSet::new()),
+            opened_streams: Mutex::new(std::collections::HashSet::new()),
         });
 
         // Process the initial packet we already received
@@ -509,27 +513,36 @@ impl<T: IceTransport + 'static> Connection<T> {
                 QuicRole::Server => 1u64,
             };
 
+            let mut opened = self.inner.opened_streams.lock().await;
+
             // Find next available stream ID for our role
             let mut candidate = base;
             loop {
-                // Check if this stream is already in use or finished
-                match conn.stream_capacity(candidate) {
-                    Ok(_) => {
-                        // Stream exists and has capacity - it's in use
-                        candidate += 4;
-                    }
-                    Err(quiche::Error::InvalidStreamState(_)) => {
-                        // Stream doesn't exist yet - we can use it
-                        break;
-                    }
-                    Err(_) => {
-                        candidate += 4;
+                // Skip streams we've already opened (even if finished)
+                if opened.contains(&candidate) {
+                    candidate += 4;
+                } else {
+                    // Check if this stream is in use (peer might have opened it)
+                    match conn.stream_capacity(candidate) {
+                        Ok(_) => {
+                            // Stream exists and has capacity - it's in use
+                            candidate += 4;
+                        }
+                        Err(quiche::Error::InvalidStreamState(_)) => {
+                            // Stream doesn't exist yet - we can use it
+                            break;
+                        }
+                        Err(_) => {
+                            candidate += 4;
+                        }
                     }
                 }
                 if candidate > 4 * INITIAL_MAX_STREAMS_BIDI {
                     return Err(QuicError::Stream("no available stream IDs".into()));
                 }
             }
+
+            opened.insert(candidate);
             candidate
         };
 
