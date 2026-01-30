@@ -6,8 +6,16 @@
 #   make demo      - Build demo program
 #   make clean     - Remove built files
 
-# Use debug build by default, override with: make LIB=../../target/release/libwispers_connect.dylib
-LIB ?= ../../target/debug/libwispers_connect.dylib
+# Detect platform and set library extension
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    LIB_EXT := dylib
+else
+    LIB_EXT := so
+endif
+
+# Use debug build by default, override with: make LIB=../../target/release/libwispers_connect.$(LIB_EXT)
+LIB ?= ../../target/debug/libwispers_connect.$(LIB_EXT)
 INCLUDE ?= ../include
 CC ?= cc
 CFLAGS ?= -Wall -Wextra -pedantic
