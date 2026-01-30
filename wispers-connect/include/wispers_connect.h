@@ -123,7 +123,15 @@ WispersStatus wispers_storage_override_hub_addr(
     const char *hub_addr
 );
 
-// TODO: wispers_storage_restore_or_init_async - Phase 3
+// Restore or initialize node state asynchronously.
+// On success, callback receives the stage and exactly one non-null handle.
+// The storage handle remains valid and is NOT consumed.
+// Returns SUCCESS immediately if the async operation was started.
+WispersStatus wispers_storage_restore_or_init_async(
+    WispersNodeStorageHandle *handle,
+    void *ctx,
+    WispersInitCallback callback
+);
 
 //------------------------------------------------------------------------------
 // Pending state
@@ -140,7 +148,17 @@ WispersStatus wispers_pending_state_complete_registration(
     WispersRegisteredNodeStateHandle **out_registered
 );
 
-// TODO: wispers_pending_state_register_async - Phase 3
+// Register the pending node with the hub using a registration token.
+// On success, callback receives the registered state handle.
+// The pending handle is CONSUMED and must not be used afterward.
+// Returns SUCCESS immediately if the async operation was started.
+WispersStatus wispers_pending_state_register_async(
+    WispersPendingNodeStateHandle *handle,
+    const char *token,
+    void *ctx,
+    WispersRegisteredCallback callback
+);
+
 // TODO: wispers_pending_state_logout_async - Phase 4
 
 //------------------------------------------------------------------------------

@@ -6,6 +6,23 @@
 use crate::errors::WispersStatus;
 use std::ffi::c_void;
 
+/// Wrapper for callback context pointer that can be sent across threads.
+///
+/// Raw pointers aren't safe to send between threads by default. This wrapper
+/// asserts that the C caller ensures the context remains valid until the
+/// callback is invoked.
+#[derive(Clone, Copy)]
+pub struct CallbackContext(pub *mut c_void);
+
+unsafe impl Send for CallbackContext {}
+unsafe impl Sync for CallbackContext {}
+
+impl CallbackContext {
+    pub fn ptr(self) -> *mut c_void {
+        self.0
+    }
+}
+
 /// Basic completion callback (no result value).
 ///
 /// Called when an async operation completes, with status indicating success/failure.

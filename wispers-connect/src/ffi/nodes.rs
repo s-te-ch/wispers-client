@@ -1,10 +1,13 @@
+use super::callbacks::{CallbackContext, WispersRegisteredCallback};
 use super::handles::{
-    WispersActivatedNodeHandle, WispersPendingNodeStateHandle, WispersRegisteredNodeStateHandle,
-    complete_registration_internal,
+    PendingImpl, RegisteredImpl, WispersActivatedNodeHandle, WispersPendingNodeStateHandle,
+    WispersRegisteredNodeStateHandle, complete_registration_internal,
 };
 use super::helpers::{c_str_to_string, reset_out_ptr};
+use super::runtime;
 use crate::errors::WispersStatus;
 use crate::types::{AuthToken, ConnectivityGroupId, NodeRegistration};
+use std::ffi::c_void;
 use std::os::raw::{c_char, c_int};
 
 #[unsafe(no_mangle)]
@@ -81,4 +84,115 @@ pub extern "C" fn wispers_pending_state_complete_registration(
     }
 }
 
-// TODO: wispers_registered_state_logout_async - requires async FFI with callbacks
+/// Register the pending node with the hub using a registration token.
+///
+/// On success, the callback receives the registered state handle.
+/// The pending handle is CONSUMED by this call and must not be used afterward.
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_pending_state_register_async(
+    handle: *mut WispersPendingNodeStateHandle,
+    token: *const c_char,
+    ctx: *mut c_void,
+    callback: WispersRegisteredCallback,
+) -> WispersStatus {
+    if handle.is_null() {
+        return WispersStatus::NullPointer;
+    }
+
+    let token_str = match c_str_to_string(token) {
+        Ok(s) => s,
+        Err(status) => return status,
+    };
+
+    let callback = match callback {
+        Some(cb) => cb,
+        None => return WispersStatus::MissingCallback,
+    };
+
+    // Consume the handle
+    let wrapper = unsafe { Box::from_raw(handle) };
+    let ctx = CallbackContext(ctx);
+
+    match wrapper.0 {
+        PendingImpl::InMemory(pending) => {
+            runtime::spawn(async move {
+                let result = pending.register(&token_str).await;
+                match result {
+                    Ok(registered) => {
+                        let h = Box::into_raw(Box::new(WispersRegisteredNodeStateHandle(
+                            RegisteredImpl::InMemory(registered),
+                        )));
+                        unsafe {
+                            callback(ctx.ptr(), WispersStatus::Success, h);
+                        }
+                    }
+                    Err(e) => {
+                        let status = map_error_in_memory(&e);
+                        unsafe {
+                            callback(ctx.ptr(), status, std::ptr::null_mut());
+                        }
+                    }
+                }
+            });
+        }
+        PendingImpl::Foreign(pending) => {
+            runtime::spawn(async move {
+                let result = pending.register(&token_str).await;
+                match result {
+                    Ok(registered) => {
+                        let h = Box::into_raw(Box::new(WispersRegisteredNodeStateHandle(
+                            RegisteredImpl::Foreign(registered),
+                        )));
+                        unsafe {
+                            callback(ctx.ptr(), WispersStatus::Success, h);
+                        }
+                    }
+                    Err(e) => {
+                        let status = map_error_foreign(&e);
+                        unsafe {
+                            callback(ctx.ptr(), status, std::ptr::null_mut());
+                        }
+                    }
+                }
+            });
+        }
+    }
+
+    WispersStatus::Success
+}
+
+fn map_error_in_memory(
+    e: &crate::errors::NodeStateError<crate::storage::InMemoryStoreError>,
+) -> WispersStatus {
+    use crate::errors::NodeStateError;
+    match e {
+        NodeStateError::Store(_) => WispersStatus::StoreError,
+        NodeStateError::Hub(_) => WispersStatus::HubError,
+        NodeStateError::AlreadyRegistered => WispersStatus::AlreadyRegistered,
+        NodeStateError::NotRegistered => WispersStatus::NotRegistered,
+        NodeStateError::InvalidPairingCode(_) => WispersStatus::InvalidPairingCode,
+        NodeStateError::MacVerificationFailed => WispersStatus::ActivationFailed,
+        NodeStateError::MissingEndorserResponse => WispersStatus::ActivationFailed,
+        NodeStateError::RosterVerificationFailed(_) => WispersStatus::ActivationFailed,
+    }
+}
+
+fn map_error_foreign(
+    e: &crate::errors::NodeStateError<crate::storage::foreign::ForeignStoreError>,
+) -> WispersStatus {
+    use crate::errors::NodeStateError;
+    use crate::storage::foreign::ForeignStoreError;
+    match e {
+        NodeStateError::Store(ForeignStoreError::Status(s)) => *s,
+        NodeStateError::Store(_) => WispersStatus::StoreError,
+        NodeStateError::Hub(_) => WispersStatus::HubError,
+        NodeStateError::AlreadyRegistered => WispersStatus::AlreadyRegistered,
+        NodeStateError::NotRegistered => WispersStatus::NotRegistered,
+        NodeStateError::InvalidPairingCode(_) => WispersStatus::InvalidPairingCode,
+        NodeStateError::MacVerificationFailed => WispersStatus::ActivationFailed,
+        NodeStateError::MissingEndorserResponse => WispersStatus::ActivationFailed,
+        NodeStateError::RosterVerificationFailed(_) => WispersStatus::ActivationFailed,
+    }
+}
+
+// TODO: wispers_registered_state_logout_async - Phase 4

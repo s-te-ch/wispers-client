@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>  // for usleep
 
 #define TEST(name) printf("Testing: %s... ", name)
 #define PASS() printf("PASS\n")
@@ -217,6 +218,111 @@ static int test_registration_info_free_null(void) {
 }
 
 //------------------------------------------------------------------------------
+// Phase 3: State initialization tests
+//------------------------------------------------------------------------------
+
+// Test context for async callbacks
+typedef struct {
+    int called;
+    WispersStatus status;
+    WispersStage stage;
+    WispersPendingNodeStateHandle *pending;
+    WispersRegisteredNodeStateHandle *registered;
+    WispersActivatedNodeHandle *activated;
+} InitTestCtx;
+
+static void init_callback(
+    void *ctx,
+    WispersStatus status,
+    WispersStage stage,
+    WispersPendingNodeStateHandle *pending,
+    WispersRegisteredNodeStateHandle *registered,
+    WispersActivatedNodeHandle *activated
+) {
+    InitTestCtx *test = (InitTestCtx *)ctx;
+    test->called = 1;
+    test->status = status;
+    test->stage = stage;
+    test->pending = pending;
+    test->registered = registered;
+    test->activated = activated;
+}
+
+static int test_restore_or_init_fresh_storage(void) {
+    TEST("restore_or_init returns pending for fresh storage");
+
+    WispersNodeStorageHandle *storage = wispers_storage_new_in_memory();
+    if (!storage) FAIL("failed to create storage");
+
+    InitTestCtx ctx = {0};
+    WispersStatus status = wispers_storage_restore_or_init_async(storage, &ctx, init_callback);
+    if (status != WISPERS_STATUS_SUCCESS) {
+        wispers_storage_free(storage);
+        FAIL("failed to start async operation");
+    }
+
+    // Wait a bit for the callback (it should be nearly instant for in-memory)
+    for (int i = 0; i < 100 && !ctx.called; i++) {
+        usleep(10000); // 10ms
+    }
+
+    if (!ctx.called) {
+        wispers_storage_free(storage);
+        FAIL("callback was not invoked");
+    }
+
+    if (ctx.status != WISPERS_STATUS_SUCCESS) {
+        wispers_storage_free(storage);
+        FAIL("callback status was not SUCCESS");
+    }
+
+    if (ctx.stage != WISPERS_STAGE_PENDING) {
+        if (ctx.pending) wispers_pending_state_free(ctx.pending);
+        if (ctx.registered) wispers_registered_state_free(ctx.registered);
+        if (ctx.activated) wispers_activated_node_free(ctx.activated);
+        wispers_storage_free(storage);
+        FAIL("expected PENDING stage");
+    }
+
+    if (!ctx.pending) {
+        wispers_storage_free(storage);
+        FAIL("pending handle is NULL");
+    }
+
+    wispers_pending_state_free(ctx.pending);
+    wispers_storage_free(storage);
+    PASS();
+    return 0;
+}
+
+static int test_restore_or_init_null_callback(void) {
+    TEST("restore_or_init rejects NULL callback");
+
+    WispersNodeStorageHandle *storage = wispers_storage_new_in_memory();
+    if (!storage) FAIL("failed to create storage");
+
+    WispersStatus status = wispers_storage_restore_or_init_async(storage, NULL, NULL);
+    wispers_storage_free(storage);
+
+    if (status != WISPERS_STATUS_MISSING_CALLBACK) FAIL("expected MISSING_CALLBACK");
+
+    PASS();
+    return 0;
+}
+
+static int test_restore_or_init_null_handle(void) {
+    TEST("restore_or_init rejects NULL handle");
+
+    InitTestCtx ctx = {0};
+    WispersStatus status = wispers_storage_restore_or_init_async(NULL, &ctx, init_callback);
+
+    if (status != WISPERS_STATUS_NULL_POINTER) FAIL("expected NULL_POINTER");
+
+    PASS();
+    return 0;
+}
+
+//------------------------------------------------------------------------------
 // Main
 //------------------------------------------------------------------------------
 
@@ -241,6 +347,12 @@ int main(void) {
     failures += test_override_hub_addr();
     failures += test_override_hub_addr_null_params();
     failures += test_registration_info_free_null();
+
+    // Phase 3 tests
+    printf("\n-- Phase 3: State Initialization --\n");
+    failures += test_restore_or_init_fresh_storage();
+    failures += test_restore_or_init_null_callback();
+    failures += test_restore_or_init_null_handle();
 
     printf("\n");
     if (failures == 0) {
