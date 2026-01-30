@@ -677,6 +677,77 @@ static int cmd_activate(const char *pairing_code) {
     return 0;
 }
 
+// Handle a single QUIC connection: accept stream, read request, respond with PONG
+static void handle_quic_connection(WispersQuicConnectionHandle *conn) {
+    // Accept a stream
+    QuicStreamCtx stream_ctx = {0};
+    WispersStatus status = wispers_quic_connection_accept_stream_async(conn, &stream_ctx, quic_stream_callback);
+    if (status != WISPERS_STATUS_SUCCESS) {
+        printf("  Failed to start accept_stream: %s\n", status_str(status));
+        return;
+    }
+
+    WAIT_FOR_CALLBACK(stream_ctx, 10000);
+    if (!atomic_load(&stream_ctx.called) || stream_ctx.status != WISPERS_STATUS_SUCCESS) {
+        printf("  Failed to accept stream: %s\n",
+               atomic_load(&stream_ctx.called) ? status_str(stream_ctx.status) : "timeout");
+        return;
+    }
+
+    printf("  Stream accepted\n");
+
+    // Read the request
+    DataCtx read_ctx = {0};
+    status = wispers_quic_stream_read_async(stream_ctx.stream, 1024, &read_ctx, data_callback);
+    if (status != WISPERS_STATUS_SUCCESS) {
+        printf("  Failed to start read: %s\n", status_str(status));
+        wispers_quic_stream_free(stream_ctx.stream);
+        return;
+    }
+
+    WAIT_FOR_CALLBACK(read_ctx, 10000);
+    if (!atomic_load(&read_ctx.called) || read_ctx.status != WISPERS_STATUS_SUCCESS) {
+        printf("  Failed to read: %s\n",
+               atomic_load(&read_ctx.called) ? status_str(read_ctx.status) : "timeout");
+        wispers_quic_stream_free(stream_ctx.stream);
+        return;
+    }
+
+    printf("  Received %zu bytes: %.*s\n", read_ctx.len, (int)read_ctx.len, read_ctx.data);
+
+    // Respond with PONG
+    const uint8_t pong_data[] = "PONG\n";
+    BasicCtx write_ctx = {0};
+    status = wispers_quic_stream_write_async(stream_ctx.stream, pong_data, sizeof(pong_data) - 1, &write_ctx, basic_callback);
+    if (status != WISPERS_STATUS_SUCCESS) {
+        printf("  Failed to start write: %s\n", status_str(status));
+        wispers_quic_stream_free(stream_ctx.stream);
+        return;
+    }
+
+    WAIT_FOR_CALLBACK(write_ctx, 10000);
+    if (!atomic_load(&write_ctx.called) || write_ctx.status != WISPERS_STATUS_SUCCESS) {
+        printf("  Failed to write PONG: %s\n",
+               atomic_load(&write_ctx.called) ? status_str(write_ctx.status) : "timeout");
+        wispers_quic_stream_free(stream_ctx.stream);
+        return;
+    }
+
+    // Finish the stream
+    BasicCtx finish_ctx = {0};
+    status = wispers_quic_stream_finish_async(stream_ctx.stream, &finish_ctx, basic_callback);
+    if (status != WISPERS_STATUS_SUCCESS) {
+        printf("  Failed to start finish: %s\n", status_str(status));
+        wispers_quic_stream_free(stream_ctx.stream);
+        return;
+    }
+
+    WAIT_FOR_CALLBACK(finish_ctx, 10000);
+    printf("  Sent PONG response\n");
+
+    wispers_quic_stream_free(stream_ctx.stream);
+}
+
 static int cmd_serve(int print_pairing_code) {
     StorageCtx *storage_ctx = NULL;
     WispersNodeStorageHandle *storage = create_storage(&storage_ctx);
@@ -777,7 +848,7 @@ static int cmd_serve(int print_pairing_code) {
 
     printf("Serving... (press Ctrl-C to stop)\n");
 
-    // Run the serving session (blocks until shutdown or error)
+    // Run the serving session in background
     BasicCtx run_ctx = {0};
     status = wispers_serving_session_run_async(serv_ctx.session, &run_ctx, basic_callback);
     if (status != WISPERS_STATUS_SUCCESS) {
@@ -792,9 +863,44 @@ static int cmd_serve(int print_pairing_code) {
         return 1;
     }
 
-    // Wait indefinitely for the session to end (Ctrl-C will kill the process)
-    while (!atomic_load(&run_ctx.called)) {
-        usleep(100000);  // 100ms
+    // If activated, handle incoming QUIC connections with ping/pong responder
+    if (serv_ctx.incoming != NULL) {
+        printf("Listening for incoming QUIC connections...\n");
+        while (!atomic_load(&run_ctx.called)) {
+            // Try to accept an incoming QUIC connection
+            QuicConnCtx conn_ctx = {0};
+            status = wispers_incoming_accept_quic_async(serv_ctx.incoming, &conn_ctx, quic_conn_callback);
+            if (status != WISPERS_STATUS_SUCCESS) {
+                fprintf(stderr, "Failed to start accept_quic: %s\n", status_str(status));
+                usleep(1000000);  // Wait 1s before retrying
+                continue;
+            }
+
+            // Wait for connection with periodic checks if session ended
+            while (!atomic_load(&conn_ctx.called) && !atomic_load(&run_ctx.called)) {
+                usleep(100000);  // 100ms
+            }
+
+            if (atomic_load(&run_ctx.called)) {
+                break;  // Session ended
+            }
+
+            if (!atomic_load(&conn_ctx.called) || conn_ctx.status != WISPERS_STATUS_SUCCESS) {
+                if (atomic_load(&conn_ctx.called)) {
+                    printf("Accept connection failed: %s\n", status_str(conn_ctx.status));
+                }
+                continue;
+            }
+
+            printf("Accepted incoming QUIC connection\n");
+            handle_quic_connection(conn_ctx.connection);
+            wispers_quic_connection_free(conn_ctx.connection);
+        }
+    } else {
+        // Registered node - just wait for session to end
+        while (!atomic_load(&run_ctx.called)) {
+            usleep(100000);  // 100ms
+        }
     }
 
     printf("Serving session ended: %s\n", status_str(run_ctx.status));
