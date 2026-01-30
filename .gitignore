@@ -51,3 +51,4 @@
 
 # Compiled executables
 wispers-connect/examples/ffi_demo
+wispers-connect/examples/ffi_test
