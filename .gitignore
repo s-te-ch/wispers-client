@@ -47,5 +47,7 @@
 *~
 
 # Added by cargo
-
 /target
+
+# Compiled executables
+wispers-connect/examples/ffi_demo
