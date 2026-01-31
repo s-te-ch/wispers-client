@@ -1,5 +1,8 @@
 use std::fmt;
 
+// Re-export NodeStage from node module for use in error types
+pub use crate::node::NodeStage;
+
 #[derive(Debug)]
 pub enum NodeStateError<StoreError> {
     Store(StoreError),
@@ -10,6 +13,11 @@ pub enum NodeStateError<StoreError> {
     MacVerificationFailed,
     MissingEndorserResponse,
     RosterVerificationFailed(crate::roster::RosterVerificationError),
+    /// Operation requires a different node stage than the current one.
+    InvalidState {
+        current: NodeStage,
+        required: &'static str,
+    },
 }
 
 impl<StoreError> NodeStateError<StoreError> {
@@ -34,6 +42,9 @@ impl<StoreError: fmt::Display> fmt::Display for NodeStateError<StoreError> {
             NodeStateError::MissingEndorserResponse => write!(f, "missing endorser response"),
             NodeStateError::RosterVerificationFailed(err) => {
                 write!(f, "roster verification failed: {err}")
+            }
+            NodeStateError::InvalidState { current, required } => {
+                write!(f, "invalid state: node is {current}, but {required} is required")
             }
         }
     }
@@ -63,4 +74,5 @@ pub enum WispersStatus {
     HubError = 12,
     ConnectionFailed = 13,
     Timeout = 14,
+    InvalidState = 15,
 }

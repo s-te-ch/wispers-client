@@ -5,6 +5,7 @@ pub mod ffi;
 pub mod hub;
 pub mod ice;
 pub mod juice;
+pub mod node;
 pub mod p2p;
 pub mod quic;
 pub mod roster;
@@ -15,6 +16,7 @@ pub mod types;
 
 pub use crypto::{PairingCode, PairingSecret, SigningKeyPair};
 pub use errors::{NodeStateError, WispersStatus};
+pub use node::NodeStage;
 pub use hub::{HubError, Node};
 pub use roster::{
     active_nodes, build_activation_payload, compute_roster_hash, create_activation_roster,

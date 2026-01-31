@@ -174,6 +174,7 @@ fn map_error_in_memory(
         NodeStateError::MacVerificationFailed => WispersStatus::ActivationFailed,
         NodeStateError::MissingEndorserResponse => WispersStatus::ActivationFailed,
         NodeStateError::RosterVerificationFailed(_) => WispersStatus::ActivationFailed,
+        NodeStateError::InvalidState { .. } => WispersStatus::InvalidState,
     }
 }
 
@@ -192,6 +193,7 @@ fn map_error_foreign(
         NodeStateError::MacVerificationFailed => WispersStatus::ActivationFailed,
         NodeStateError::MissingEndorserResponse => WispersStatus::ActivationFailed,
         NodeStateError::RosterVerificationFailed(_) => WispersStatus::ActivationFailed,
+        NodeStateError::InvalidState { .. } => WispersStatus::InvalidState,
     }
 }
 
