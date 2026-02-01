@@ -1,6 +1,5 @@
 use crate::errors::WispersStatus;
-use crate::hub::Node;
-use crate::types::NodeRegistration;
+use crate::types::{NodeInfo, NodeRegistration};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
@@ -102,8 +101,17 @@ pub extern "C" fn wispers_registration_info_free(info: *mut WispersRegistrationI
 pub struct WispersNode {
     pub node_number: c_int,
     pub name: *mut c_char,
+    /// Whether this is the current node (self).
+    pub is_self: bool,
+    /// Activation status: 0 = unknown, 1 = not activated, 2 = activated.
+    pub activation_status: c_int,
     pub last_seen_at_millis: i64,
 }
+
+/// Activation status values for WispersNode.
+pub const WISPERS_ACTIVATION_UNKNOWN: c_int = 0;
+pub const WISPERS_ACTIVATION_NOT_ACTIVATED: c_int = 1;
+pub const WISPERS_ACTIVATION_ACTIVATED: c_int = 2;
 
 /// List of nodes returned to C callers.
 #[repr(C)]
@@ -113,8 +121,8 @@ pub struct WispersNodeList {
 }
 
 impl WispersNodeList {
-    /// Create from a Vec<Node>, allocating C strings.
-    pub fn from_nodes(nodes: Vec<Node>) -> Result<Self, WispersStatus> {
+    /// Create from a Vec<NodeInfo>, allocating C strings.
+    pub fn from_node_infos(nodes: Vec<NodeInfo>) -> Result<Self, WispersStatus> {
         let count = nodes.len();
         if count == 0 {
             return Ok(Self {
@@ -126,9 +134,16 @@ impl WispersNodeList {
         let mut c_nodes: Vec<WispersNode> = Vec::with_capacity(count);
         for node in nodes {
             let name = CString::new(node.name).map_err(|_| WispersStatus::InvalidUtf8)?;
+            let activation_status = match node.is_activated {
+                None => WISPERS_ACTIVATION_UNKNOWN,
+                Some(false) => WISPERS_ACTIVATION_NOT_ACTIVATED,
+                Some(true) => WISPERS_ACTIVATION_ACTIVATED,
+            };
             c_nodes.push(WispersNode {
                 node_number: node.node_number,
                 name: name.into_raw(),
+                is_self: node.is_self,
+                activation_status,
                 last_seen_at_millis: node.last_seen_at_millis,
             });
         }

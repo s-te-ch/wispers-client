@@ -195,31 +195,16 @@ pub extern "C" fn wispers_node_list_nodes_async(
         None => return WispersStatus::MissingCallback,
     };
 
-    let wrapper = unsafe { &*handle };
     let ctx = CallbackContext(ctx);
-
-    // Extract hub_addr and registration before spawning
-    let (hub_addr, registration) = match &wrapper.0 {
-        NodeImpl::InMemory(node) => {
-            match (node.hub_addr(), node.registration()) {
-                (addr, Some(reg)) => (addr, reg.clone()),
-                (_, None) => {
-                    return WispersStatus::InvalidState;
-                }
-            }
-        }
-        NodeImpl::Foreign(node) => {
-            match (node.hub_addr(), node.registration()) {
-                (addr, Some(reg)) => (addr, reg.clone()),
-                (_, None) => {
-                    return WispersStatus::InvalidState;
-                }
-            }
-        }
-    };
+    let handle_ptr = SendableNodePtr(handle);
 
     runtime::spawn(async move {
-        let result = list_nodes_impl(&hub_addr, &registration).await;
+        // Safety: caller must ensure handle is valid and not used concurrently
+        let wrapper = unsafe { handle_ptr.get() };
+        let result = match &wrapper.0 {
+            NodeImpl::InMemory(node) => node.list_nodes().await.map_err(map_error_in_memory),
+            NodeImpl::Foreign(node) => node.list_nodes().await.map_err(map_error_foreign),
+        };
         handle_list_nodes_result(result, ctx, callback);
     });
 
@@ -234,6 +219,12 @@ unsafe impl Send for SendableNodePtr {}
 unsafe impl Sync for SendableNodePtr {}
 
 impl SendableNodePtr {
+    /// Get an immutable reference to the inner handle.
+    /// SAFETY: The caller must ensure the pointer is valid.
+    unsafe fn get(&self) -> &WispersNodeHandle {
+        unsafe { &*self.0 }
+    }
+
     /// Get a mutable reference to the inner handle.
     /// SAFETY: The caller must ensure the pointer is valid.
     unsafe fn get_mut(&self) -> &mut WispersNodeHandle {
@@ -277,24 +268,14 @@ fn map_error_foreign(
     }
 }
 
-async fn list_nodes_impl(
-    hub_addr: &str,
-    registration: &crate::types::NodeRegistration,
-) -> Result<Vec<crate::hub::Node>, crate::hub::HubError> {
-    use crate::hub::HubClient;
-
-    let mut client = HubClient::connect(hub_addr).await?;
-    client.list_nodes(registration).await
-}
-
 fn handle_list_nodes_result(
-    result: Result<Vec<crate::hub::Node>, crate::hub::HubError>,
+    result: Result<Vec<crate::types::NodeInfo>, WispersStatus>,
     ctx: CallbackContext,
     callback: unsafe extern "C" fn(*mut c_void, WispersStatus, *mut WispersNodeList),
 ) {
     match result {
         Ok(nodes) => {
-            match WispersNodeList::from_nodes(nodes) {
+            match WispersNodeList::from_node_infos(nodes) {
                 Ok(list) => {
                     let list_ptr = Box::into_raw(Box::new(list));
                     unsafe {
@@ -308,9 +289,9 @@ fn handle_list_nodes_result(
                 }
             }
         }
-        Err(_) => {
+        Err(status) => {
             unsafe {
-                callback(ctx.ptr(), WispersStatus::HubError, std::ptr::null_mut());
+                callback(ctx.ptr(), status, std::ptr::null_mut());
             }
         }
     }

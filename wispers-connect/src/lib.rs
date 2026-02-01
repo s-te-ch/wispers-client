@@ -17,7 +17,7 @@ pub mod types;
 pub use crypto::{PairingCode, PairingSecret, SigningKeyPair};
 pub use errors::{NodeStateError, WispersStatus};
 pub use node::{Node, NodeState};
-pub use hub::{HubError, Node as HubNode};
+pub use hub::HubError;
 pub use roster::{
     active_nodes, build_activation_payload, compute_roster_hash, create_activation_roster,
     create_bootstrap_roster, create_revocation_roster, verify_roster, RosterVerificationError,
