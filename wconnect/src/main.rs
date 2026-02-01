@@ -281,34 +281,34 @@ async fn nodes(hub_override: Option<&str>, profile: &str) -> Result<()> {
     use std::collections::HashSet;
 
     let storage = get_storage(hub_override, profile)?;
-    let stage = storage
-        .restore_or_init_node_state()
+    let node = storage
+        .restore_or_init_node()
         .await
         .context("failed to load node state")?;
 
     // Get nodes from hub and optionally the roster (if activated)
-    let (reg, nodes, roster_nodes) = match stage {
-        NodeStateStage::Pending(_) => {
+    let reg = match node.state() {
+        NodeState::Pending => {
             anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
         }
-        NodeStateStage::Registered(r) => {
-            let reg = r.registration().clone();
-            let nodes = r.list_nodes().await.context("failed to list nodes")?;
-            (reg, nodes, HashSet::new())
-        }
-        NodeStateStage::Activated(a) => {
-            let reg = a.registration().clone();
-            let nodes = a.list_nodes().await.context("failed to list nodes")?;
-            let roster_nodes: HashSet<i32> = a
-                .roster()
-                .nodes
-                .iter()
-                .filter(|n| !n.revoked)
-                .map(|n| n.node_number)
-                .collect();
-            (reg, nodes, roster_nodes)
-        }
+        _ => node.registration().expect("registered").clone(),
     };
+
+    let hub_nodes = node.list_nodes().await.context("failed to list nodes")?;
+
+    let roster_nodes: HashSet<i32> = if node.state() == NodeState::Activated {
+        node.roster()
+            .expect("activated")
+            .nodes
+            .iter()
+            .filter(|n| !n.revoked)
+            .map(|n| n.node_number)
+            .collect()
+    } else {
+        HashSet::new()
+    };
+
+    let nodes = hub_nodes;
 
     if nodes.is_empty() {
         println!("No nodes in connectivity group.");
@@ -383,24 +383,24 @@ fn format_last_seen(millis: i64) -> String {
 
 async fn status(hub_override: Option<&str>, profile: &str) -> Result<()> {
     let storage = get_storage(hub_override, profile)?;
-    let stage = storage
-        .restore_or_init_node_state()
+    let node = storage
+        .restore_or_init_node()
         .await
         .context("failed to load node state")?;
 
-    match stage {
-        NodeStateStage::Pending(_) => {
+    match node.state() {
+        NodeState::Pending => {
             println!("Not registered.");
         }
-        NodeStateStage::Registered(r) => {
-            let reg = r.registration();
+        NodeState::Registered => {
+            let reg = node.registration().expect("registered");
             println!("Registered (not yet activated):");
             println!("  Connectivity group: {}", reg.connectivity_group_id);
             println!("  Node number: {}", reg.node_number);
             print_daemon_status(&reg.connectivity_group_id.to_string(), reg.node_number).await;
         }
-        NodeStateStage::Activated(a) => {
-            let reg = a.registration();
+        NodeState::Activated => {
+            let reg = node.registration().expect("activated");
             println!("Activated:");
             println!("  Connectivity group: {}", reg.connectivity_group_id);
             println!("  Node number: {}", reg.node_number);
@@ -440,12 +440,12 @@ async fn print_daemon_status(cg_id: &str, node_number: i32) {
 
 async fn logout(hub_override: Option<&str>, profile: &str) -> Result<()> {
     let storage = get_storage(hub_override, profile)?;
-    let stage = storage
-        .restore_or_init_node_state()
+    let node = storage
+        .restore_or_init_node()
         .await
         .context("failed to load node state")?;
 
-    stage.logout().await.context("failed to logout")?;
+    node.logout().await.context("failed to logout")?;
     println!("Logged out.");
     Ok(())
 }
@@ -458,22 +458,18 @@ async fn serve(hub_override: Option<&str>, profile: &str) -> Result<()> {
     type IncomingResult = Option<IncomingConnections>;
 
     let storage = get_storage(hub_override, profile)?;
-    let stage = storage
-        .restore_or_init_node_state()
+    let node = storage
+        .restore_or_init_node()
         .await
         .context("failed to load node state")?;
 
     // Get registration info first (before connecting to hub)
-    let (cg_id, node_number) = match &stage {
-        NodeStateStage::Pending(_) => {
+    let (cg_id, node_number) = match node.state() {
+        NodeState::Pending => {
             anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
         }
-        NodeStateStage::Registered(r) => {
-            let reg = r.registration();
-            (reg.connectivity_group_id.to_string(), reg.node_number)
-        }
-        NodeStateStage::Activated(a) => {
-            let reg = a.registration();
+        _ => {
+            let reg = node.registration().expect("registered");
             (reg.connectivity_group_id.to_string(), reg.node_number)
         }
     };
@@ -496,21 +492,11 @@ async fn serve(hub_override: Option<&str>, profile: &str) -> Result<()> {
     // Spawn hub connection in background
     let connect_handle_state = handle_state.clone();
     let mut connect_task = tokio::spawn(async move {
-        let result: Result<(ServingHandle, ServingSession, IncomingResult), anyhow::Error> = match stage {
-            NodeStateStage::Pending(_) => unreachable!(),
-            NodeStateStage::Registered(r) => {
-                r.start_serving()
-                    .await
-                    .map(|(handle, session, incoming_rx)| (handle, session, incoming_rx))
-                    .context("failed to start serving")
-            }
-            NodeStateStage::Activated(a) => {
-                a.start_serving()
-                    .await
-                    .map(|(handle, session, incoming_rx)| (handle, session, incoming_rx))
-                    .context("failed to start serving")
-            }
-        };
+        let result: Result<(ServingHandle, ServingSession, IncomingResult), anyhow::Error> = node
+            .start_serving()
+            .await
+            .map(|(handle, session, incoming_rx)| (handle, session, incoming_rx))
+            .context("failed to start serving");
 
         if let Ok((handle, _session, _)) = &result {
             *connect_handle_state.write().await = Some(handle.clone());
@@ -802,17 +788,16 @@ async fn handle_forward(stream: wispers_connect::QuicStream, port: u16) {
 
 async fn get_pairing_code(hub_override: Option<&str>, profile: &str) -> Result<()> {
     let storage = get_storage(hub_override, profile)?;
-    let stage = storage
-        .restore_or_init_node_state()
+    let node = storage
+        .restore_or_init_node()
         .await
         .context("failed to load node state")?;
 
-    let reg = match &stage {
-        NodeStateStage::Pending(_) => {
+    let reg = match node.state() {
+        NodeState::Pending => {
             anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
         }
-        NodeStateStage::Registered(r) => r.registration(),
-        NodeStateStage::Activated(a) => a.registration(),
+        _ => node.registration().expect("registered"),
     };
 
     let cg_id = reg.connectivity_group_id.to_string();
@@ -846,22 +831,22 @@ async fn get_pairing_code(hub_override: Option<&str>, profile: &str) -> Result<(
 
 async fn ping(hub_override: Option<&str>, profile: &str, target_node: i32, use_quic: bool) -> Result<()> {
     let storage = get_storage(hub_override, profile)?;
-    let stage = storage
-        .restore_or_init_node_state()
+    let node = storage
+        .restore_or_init_node()
         .await
         .context("failed to load node state")?;
 
-    let activated = match stage {
-        NodeStateStage::Pending(_) => {
+    match node.state() {
+        NodeState::Pending => {
             anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
         }
-        NodeStateStage::Registered(_) => {
+        NodeState::Registered => {
             anyhow::bail!("Not activated. Use 'wconnect activate <pairing_code>' first.");
         }
-        NodeStateStage::Activated(a) => a,
-    };
+        NodeState::Activated => {}
+    }
 
-    let our_node = activated.registration().node_number;
+    let our_node = node.registration().expect("activated").node_number;
     if target_node == our_node {
         anyhow::bail!("Cannot ping yourself (node {}).", our_node);
     }
@@ -872,19 +857,19 @@ async fn ping(hub_override: Option<&str>, profile: &str, target_node: i32, use_q
     let start = std::time::Instant::now();
 
     if use_quic {
-        ping_quic(&activated, target_node, start).await
+        ping_quic(&node, target_node, start).await
     } else {
-        ping_udp(&activated, target_node, start).await
+        ping_udp(&node, target_node, start).await
     }
 }
 
 async fn ping_udp<S: wispers_connect::NodeStateStore>(
-    activated: &wispers_connect::ActivatedNode<S>,
+    node: &Node<S>,
     target_node: i32,
     start: std::time::Instant,
 ) -> Result<()> {
     // Establish P2P connection
-    let conn = activated
+    let conn = node
         .connect_udp(target_node)
         .await
         .context("failed to connect")?;
@@ -918,12 +903,12 @@ async fn ping_udp<S: wispers_connect::NodeStateStore>(
 }
 
 async fn ping_quic<S: wispers_connect::NodeStateStore>(
-    activated: &wispers_connect::ActivatedNode<S>,
+    node: &Node<S>,
     target_node: i32,
     start: std::time::Instant,
 ) -> Result<()> {
     // Establish QUIC connection
-    let conn = activated
+    let conn = node
         .connect_quic(target_node)
         .await
         .context("failed to connect")?;
@@ -981,22 +966,22 @@ async fn forward(
     }
 
     let storage = get_storage(hub_override, profile)?;
-    let stage = storage
-        .restore_or_init_node_state()
+    let node = storage
+        .restore_or_init_node()
         .await
         .context("failed to load node state")?;
 
-    let activated = match stage {
-        NodeStateStage::Pending(_) => {
+    match node.state() {
+        NodeState::Pending => {
             anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
         }
-        NodeStateStage::Registered(_) => {
+        NodeState::Registered => {
             anyhow::bail!("Not activated. Use 'wconnect activate <pairing_code>' first.");
         }
-        NodeStateStage::Activated(a) => a,
-    };
+        NodeState::Activated => {}
+    }
 
-    let our_node = activated.registration().node_number;
+    let our_node = node.registration().expect("activated").node_number;
     if target_node == our_node {
         anyhow::bail!("Cannot forward to yourself (node {}).", our_node);
     }
@@ -1017,7 +1002,7 @@ async fn forward(
     print!("Connecting to node {}...", target_node);
     std::io::Write::flush(&mut std::io::stdout())?;
 
-    let quic_conn = activated
+    let quic_conn = node
         .connect_quic(target_node)
         .await
         .context("failed to connect to target node")?;
