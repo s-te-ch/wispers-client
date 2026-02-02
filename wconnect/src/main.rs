@@ -34,12 +34,12 @@ enum Command {
         /// The pairing code from the endorser (format: "node_number-secret")
         pairing_code: String,
     },
+    /// Clear stored credentials and state
+    Logout,
     /// List nodes in the connectivity group
     Nodes,
     /// Show current registration status
     Status,
-    /// Clear stored credentials and state
-    Logout,
     /// Start serving and handle incoming requests
     Serve {
         /// Detach and run as a background daemon
@@ -74,16 +74,33 @@ enum Command {
     },
 }
 
-/// Read registration info synchronously (for use before tokio starts).
-fn read_registration_sync(profile: &str) -> Result<(String, i32)> {
-    let storage = get_storage(None, profile)?;
-    let reg = storage
-        .read_registration()
-        .context("failed to read registration")?
-        .context("not registered")?;
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let hub_override: Option<String> = cli.hub.clone();
+    let profile = cli.profile.clone();
 
-    Ok((reg.connectivity_group_id.to_string(), reg.node_number))
+    // serve --stop and serve --daemon need to be handled before starting tokio.
+    match &cli.command {
+        Command::Serve { stop: true, .. } => {
+            // Stop the daemon and exit
+            return stop_daemon(hub_override.as_deref(), &profile);
+        }
+        Command::Serve { daemon: true, .. } => {
+            // Daemonize the process, then continue to start tokio
+            daemonize_serve(hub_override.as_deref(), &profile)?;
+        }
+        _ => {}
+    }
+
+    // Start tokio runtime and run async main
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("failed to create tokio runtime")?
+        .block_on(async_main(cli.command, hub_override, profile))
 }
+
+//-- Daemon Control Functions --------------------------------------------------
 
 /// Stop a running daemon by sending shutdown command via socket.
 fn stop_daemon(_hub_override: Option<&str>, profile: &str) -> Result<()> {
@@ -141,6 +158,19 @@ fn daemonize_serve(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     Ok(())
 }
 
+//-- Storage -------------------------------------------------------------------
+
+/// Read registration info synchronously (for use before tokio starts).
+fn read_registration_sync(profile: &str) -> Result<(String, i32)> {
+    let storage = get_storage(None, profile)?;
+    let reg = storage
+        .read_registration()
+        .context("failed to read registration")?
+        .context("not registered")?;
+
+    Ok((reg.connectivity_group_id.to_string(), reg.node_number))
+}
+
 fn get_storage(hub_override: Option<&str>, profile: &str) -> Result<NodeStorage> {
     let config_dir = dirs::config_dir().context("could not determine config directory")?;
     let store_dir = config_dir.join("wconnect").join(profile);
@@ -152,28 +182,7 @@ fn get_storage(hub_override: Option<&str>, profile: &str) -> Result<NodeStorage>
     Ok(storage)
 }
 
-fn main() -> Result<()> {
-    let cli = Cli::parse();
-    let hub_override: Option<String> = cli.hub.clone();
-    let profile = cli.profile.clone();
-
-    // Handle serve --stop synchronously (no need for tokio)
-    if let Command::Serve { stop: true, .. } = &cli.command {
-        return stop_daemon(hub_override.as_deref(), &profile);
-    }
-
-    // Handle serve --daemon: daemonize before starting tokio
-    if let Command::Serve { daemon: true, .. } = &cli.command {
-        daemonize_serve(hub_override.as_deref(), &profile)?;
-    }
-
-    // Start tokio runtime and run async main
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .context("failed to create tokio runtime")?
-        .block_on(async_main(cli.command, hub_override, profile))
-}
+//-- Async Main ----------------------------------------------------------------
 
 async fn async_main(command: Command, hub_override: Option<String>, profile: String) -> Result<()> {
     let hub_override = hub_override.as_deref();
@@ -181,9 +190,9 @@ async fn async_main(command: Command, hub_override: Option<String>, profile: Str
     match command {
         Command::Register { token } => register(hub_override, profile, &token).await,
         Command::Activate { pairing_code } => activate(hub_override, profile, &pairing_code).await,
+        Command::Logout => logout(hub_override, profile).await,
         Command::Nodes => nodes(hub_override, profile).await,
         Command::Status => status(hub_override, profile).await,
-        Command::Logout => logout(hub_override, profile).await,
         Command::Serve { daemon: _, stop: _ } => serve(hub_override, profile).await,
         Command::GetPairingCode => get_pairing_code(hub_override, profile).await,
         Command::Ping { node_number, quic } => ping(hub_override, profile, node_number, quic).await,
@@ -192,6 +201,8 @@ async fn async_main(command: Command, hub_override: Option<String>, profile: Str
         }
     }
 }
+
+//-- Node lifecycle ------------------------------------------------------------
 
 async fn register(hub_override: Option<&str>, profile: &str, token: &str) -> Result<()> {
     let storage = get_storage(hub_override, profile)?;
@@ -250,7 +261,6 @@ async fn activate(hub_override: Option<&str>, profile: &str, pairing_code: &str)
     // Parse pairing code to check for self-endorsement
     let parsed_code = PairingCode::parse(pairing_code)
         .context("invalid pairing code format")?;
-
     let our_node_number = node.node_number().unwrap();
     if parsed_code.node_number == our_node_number {
         anyhow::bail!(
@@ -260,7 +270,6 @@ async fn activate(hub_override: Option<&str>, profile: &str, pairing_code: &str)
     }
 
     println!("Activating with pairing code {}...", pairing_code);
-
     node.activate(pairing_code)
         .await
         .context("activation failed")?;
@@ -270,6 +279,20 @@ async fn activate(hub_override: Option<&str>, profile: &str, pairing_code: &str)
     println!("  Node number: {}", node.node_number().unwrap());
     Ok(())
 }
+
+async fn logout(hub_override: Option<&str>, profile: &str) -> Result<()> {
+    let storage = get_storage(hub_override, profile)?;
+    let node = storage
+        .restore_or_init_node()
+        .await
+        .context("failed to load node state")?;
+
+    node.logout().await.context("failed to logout")?;
+    println!("Logged out.");
+    Ok(())
+}
+
+//-- Status inspection ---------------------------------------------------------
 
 async fn nodes(hub_override: Option<&str>, profile: &str) -> Result<()> {
     let storage = get_storage(hub_override, profile)?;
@@ -287,37 +310,34 @@ async fn nodes(hub_override: Option<&str>, profile: &str) -> Result<()> {
 
     if nodes.is_empty() {
         println!("No nodes in connectivity group.");
-    } else {
-        println!("Nodes in connectivity group {}:", cg_id);
-        for info in nodes {
-            let name = if info.name.is_empty() {
-                "(unnamed)".to_string()
-            } else {
-                info.name
-            };
+        return Ok(());
+    }
 
-            let mut tags = Vec::new();
-            if info.is_self {
-                tags.push("you");
-            }
-            if let Some(activated) = info.is_activated {
-                if activated {
-                    tags.push("activated");
-                } else {
-                    tags.push("not activated");
-                }
-            }
-
-            let last_seen = format_last_seen(info.last_seen_at_millis);
-
-            let tags_str = if tags.is_empty() {
-                String::new()
-            } else {
-                format!(" ({})", tags.join(", "))
-            };
-
-            println!("  {}: {}{} - {}", info.node_number, name, tags_str, last_seen);
+    println!("Nodes in connectivity group {}:", cg_id);
+    for info in nodes {
+        let name = if info.name.is_empty() {
+            "(unnamed)".to_string()
+        } else {
+            info.name
+        };
+        let mut tags = Vec::new();
+        if info.is_self {
+            tags.push("you");
         }
+        if let Some(activated) = info.is_activated {
+            if activated {
+                tags.push("activated");
+            } else {
+                tags.push("not activated");
+            }
+        }
+        let last_seen = format_last_seen(info.last_seen_at_millis);
+        let tags_str = if tags.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", tags.join(", "))
+        };
+        println!("  {}: {}{} - {}", info.node_number, name, tags_str, last_seen);
     }
     Ok(())
 }
@@ -326,32 +346,26 @@ fn format_last_seen(millis: i64) -> String {
     if millis == 0 {
         return "never connected".to_string();
     }
-
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as i64;
-
     let ago_ms = now - millis;
     if ago_ms < 0 {
         return "connected just now".to_string();
     }
-
     let ago_secs = ago_ms / 1000;
     if ago_secs < 60 {
         return "connected just now".to_string();
     }
-
     let ago_mins = ago_secs / 60;
     if ago_mins < 60 {
         return format!("connected {}m ago", ago_mins);
     }
-
     let ago_hours = ago_mins / 60;
     if ago_hours < 24 {
         return format!("connected {}h ago", ago_hours);
     }
-
     let ago_days = ago_hours / 24;
     format!("connected {}d ago", ago_days)
 }
@@ -388,44 +402,29 @@ async fn status(hub_override: Option<&str>, profile: &str) -> Result<()> {
 }
 
 async fn print_daemon_status(cg_id: &str, node_number: i32) {
-    match daemon::DaemonClient::connect(cg_id, node_number).await {
-        Ok(mut client) => {
-            match client.request(&daemon::Request::Status).await {
-                Ok(daemon::Response::Success { data: daemon::ResponseData::Status(s), .. }) => {
-                    println!("  Daemon: running (connected: {})", s.connected);
-                    if let Some(endorsing) = s.endorsing {
-                        match endorsing {
-                            daemon::EndorsingData::AwaitingPairNode => {
-                                println!("  Endorsing: awaiting pair node");
-                            }
-                            daemon::EndorsingData::AwaitingCosign { new_node_number } => {
-                                println!("  Endorsing: awaiting cosign for node {}", new_node_number);
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    println!("  Daemon: running (status unavailable)");
-                }
+    let Ok(mut client) = daemon::DaemonClient::connect(cg_id, node_number).await else {
+        println!("  Daemon: not running");
+        return;
+    };
+    let resp = client.request(&daemon::Request::Status).await;
+    let Ok(daemon::Response::Success { data: daemon::ResponseData::Status(s), .. }) = resp else {
+        println!("  Daemon: running (status unavailable)");
+        return;
+    };
+    println!("  Daemon: running (connected: {})", s.connected);
+    if let Some(endorsing) = s.endorsing {
+        match endorsing {
+            daemon::EndorsingData::AwaitingPairNode => {
+                println!("  Endorsing: awaiting pair node");
             }
-        }
-        Err(_) => {
-            println!("  Daemon: not running");
+            daemon::EndorsingData::AwaitingCosign { new_node_number } => {
+                println!("  Endorsing: awaiting cosign for node {}", new_node_number);
+            }
         }
     }
 }
 
-async fn logout(hub_override: Option<&str>, profile: &str) -> Result<()> {
-    let storage = get_storage(hub_override, profile)?;
-    let node = storage
-        .restore_or_init_node()
-        .await
-        .context("failed to load node state")?;
-
-    node.logout().await.context("failed to logout")?;
-    println!("Logged out.");
-    Ok(())
-}
+//-- Serving -------------------------------------------------------------------
 
 async fn serve(hub_override: Option<&str>, profile: &str) -> Result<()> {
     use std::sync::Arc;
@@ -434,13 +433,12 @@ async fn serve(hub_override: Option<&str>, profile: &str) -> Result<()> {
     use wispers_connect::{IncomingConnections, QuicConnection, UdpConnection, ServingHandle, ServingSession};
     type IncomingResult = Option<IncomingConnections>;
 
+    // Get registration info first (before connecting to hub)
     let storage = get_storage(hub_override, profile)?;
     let node = storage
         .restore_or_init_node()
         .await
         .context("failed to load node state")?;
-
-    // Get registration info first (before connecting to hub)
     if node.state() == NodeState::Pending {
         anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
     }
