@@ -333,9 +333,4 @@ impl DaemonClient {
         let response: Response = serde_json::from_str(&line)?;
         Ok(response)
     }
-
-    /// Check if daemon is running for a specific node.
-    pub async fn is_running(connectivity_group_id: &str, node_number: i32) -> bool {
-        Self::connect(connectivity_group_id, node_number).await.is_ok()
-    }
 }

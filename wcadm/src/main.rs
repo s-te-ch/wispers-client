@@ -213,7 +213,10 @@ fn show_group(client: &Client, base_url: &str, api_key: &str, group_id: &str) ->
                 .last_seen_at
                 .as_deref()
                 .unwrap_or("never");
-            println!("    {} - {} (last seen: {})", node.node_number, name, last_seen);
+            println!(
+                "    {} - {} (created: {}, last seen: {})",
+                node.node_number, name, node.created_at, last_seen
+            );
         }
     }
 

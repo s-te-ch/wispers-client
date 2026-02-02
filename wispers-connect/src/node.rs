@@ -361,11 +361,6 @@ impl Node {
         self.encryption_key.as_ref()
     }
 
-    /// Get the roster. Only available when activated.
-    pub(crate) fn roster(&self) -> Option<&proto::roster::Roster> {
-        self.roster.as_ref()
-    }
-
     /// Get a derived signing key (for registered nodes that need to serve).
     /// This derives the key on demand from the root key.
     pub(crate) fn derive_signing_key(&self) -> Option<SigningKeyPair> {
