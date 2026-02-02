@@ -1,9 +1,8 @@
 use crate::errors::WispersStatus;
-use crate::storage::NodeStateStore;
+use crate::storage::{NodeStateStore, StorageError};
 use crate::types::{NodeRegistration, PersistedNodeState, RootKey};
 use bincode;
 use std::ffi::c_void;
-use std::fmt;
 
 const INITIAL_REGISTRATION_BUFFER: usize = 256;
 
@@ -42,46 +41,25 @@ pub struct ForeignNodeStateStore {
     callbacks: WispersNodeStorageCallbacks,
 }
 
-#[derive(Debug)]
-pub enum ForeignStoreError {
-    MissingCallback(&'static str),
-    RegistrationEncode,
-    RegistrationDecode,
-    Status(WispersStatus),
-}
-
-impl fmt::Display for ForeignStoreError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ForeignStoreError::MissingCallback(name) => write!(f, "missing callback: {name}"),
-            ForeignStoreError::RegistrationEncode => write!(f, "failed to encode registration"),
-            ForeignStoreError::RegistrationDecode => write!(f, "failed to decode registration"),
-            ForeignStoreError::Status(status) => write!(f, "store callback returned {status:?}"),
-        }
-    }
-}
-
-impl std::error::Error for ForeignStoreError {}
-
 impl ForeignNodeStateStore {
-    pub fn new(callbacks: WispersNodeStorageCallbacks) -> Result<Self, ForeignStoreError> {
+    pub fn new(callbacks: WispersNodeStorageCallbacks) -> Result<Self, StorageError> {
         if callbacks.load_root_key.is_none() {
-            return Err(ForeignStoreError::MissingCallback("load_root_key"));
+            return Err(StorageError::MissingCallback("load_root_key"));
         }
         if callbacks.save_root_key.is_none() {
-            return Err(ForeignStoreError::MissingCallback("save_root_key"));
+            return Err(StorageError::MissingCallback("save_root_key"));
         }
         if callbacks.delete_root_key.is_none() {
-            return Err(ForeignStoreError::MissingCallback("delete_root_key"));
+            return Err(StorageError::MissingCallback("delete_root_key"));
         }
         if callbacks.load_registration.is_none() {
-            return Err(ForeignStoreError::MissingCallback("load_registration"));
+            return Err(StorageError::MissingCallback("load_registration"));
         }
         if callbacks.save_registration.is_none() {
-            return Err(ForeignStoreError::MissingCallback("save_registration"));
+            return Err(StorageError::MissingCallback("save_registration"));
         }
         if callbacks.delete_registration.is_none() {
-            return Err(ForeignStoreError::MissingCallback("delete_registration"));
+            return Err(StorageError::MissingCallback("delete_registration"));
         }
 
         Ok(Self { callbacks })
@@ -89,7 +67,7 @@ impl ForeignNodeStateStore {
 
     fn call_load_root_key(
         &self,
-    ) -> Result<Option<[u8; crate::types::ROOT_KEY_LEN]>, ForeignStoreError> {
+    ) -> Result<Option<[u8; crate::types::ROOT_KEY_LEN]>, StorageError> {
         let mut buffer = [0u8; crate::types::ROOT_KEY_LEN];
         let callback = self.callbacks.load_root_key.unwrap();
         let status =
@@ -97,32 +75,32 @@ impl ForeignNodeStateStore {
         match status {
             WispersStatus::Success => Ok(Some(buffer)),
             WispersStatus::NotFound => Ok(None),
-            other => Err(ForeignStoreError::Status(other)),
+            other => Err(StorageError::ForeignStatus(other)),
         }
     }
 
     fn call_save_root_key(
         &self,
         root_key: &[u8; crate::types::ROOT_KEY_LEN],
-    ) -> Result<(), ForeignStoreError> {
+    ) -> Result<(), StorageError> {
         let callback = self.callbacks.save_root_key.unwrap();
         let status = unsafe { callback(self.callbacks.ctx, root_key.as_ptr(), root_key.len()) };
         match status {
             WispersStatus::Success => Ok(()),
-            other => Err(ForeignStoreError::Status(other)),
+            other => Err(StorageError::ForeignStatus(other)),
         }
     }
 
-    fn call_delete_root_key(&self) -> Result<(), ForeignStoreError> {
+    fn call_delete_root_key(&self) -> Result<(), StorageError> {
         let callback = self.callbacks.delete_root_key.unwrap();
         let status = unsafe { callback(self.callbacks.ctx) };
         match status {
             WispersStatus::Success | WispersStatus::NotFound => Ok(()),
-            other => Err(ForeignStoreError::Status(other)),
+            other => Err(StorageError::ForeignStatus(other)),
         }
     }
 
-    fn call_load_registration(&self) -> Result<Option<NodeRegistration>, ForeignStoreError> {
+    fn call_load_registration(&self) -> Result<Option<NodeRegistration>, StorageError> {
         let callback = self.callbacks.load_registration.unwrap();
         let mut buffer = vec![0u8; INITIAL_REGISTRATION_BUFFER];
         let mut required = 0usize;
@@ -141,16 +119,16 @@ impl ForeignNodeStateStore {
                 WispersStatus::Success => {
                     buffer.truncate(required);
                     return deserialize_registration(&buffer)
-                        .map_err(|_| ForeignStoreError::RegistrationDecode);
+                        .map_err(|_| StorageError::RegistrationDecode);
                 }
                 WispersStatus::NotFound => return Ok(None),
                 WispersStatus::BufferTooSmall => {
                     if required == 0 {
-                        return Err(ForeignStoreError::Status(WispersStatus::BufferTooSmall));
+                        return Err(StorageError::ForeignStatus(WispersStatus::BufferTooSmall));
                     }
                     buffer.resize(required, 0);
                 }
-                other => return Err(ForeignStoreError::Status(other)),
+                other => return Err(StorageError::ForeignStatus(other)),
             }
         }
     }
@@ -158,23 +136,23 @@ impl ForeignNodeStateStore {
     fn call_save_registration(
         &self,
         registration: Option<&NodeRegistration>,
-    ) -> Result<(), ForeignStoreError> {
+    ) -> Result<(), StorageError> {
         let callback = self.callbacks.save_registration.unwrap();
         let bytes =
-            serialize_registration(registration).map_err(|_| ForeignStoreError::RegistrationEncode)?;
+            serialize_registration(registration).map_err(|_| StorageError::RegistrationEncode)?;
         let status = unsafe { callback(self.callbacks.ctx, bytes.as_ptr(), bytes.len()) };
         match status {
             WispersStatus::Success => Ok(()),
-            other => Err(ForeignStoreError::Status(other)),
+            other => Err(StorageError::ForeignStatus(other)),
         }
     }
 
-    fn call_delete_registration(&self) -> Result<(), ForeignStoreError> {
+    fn call_delete_registration(&self) -> Result<(), StorageError> {
         let callback = self.callbacks.delete_registration.unwrap();
         let status = unsafe { callback(self.callbacks.ctx) };
         match status {
             WispersStatus::Success | WispersStatus::NotFound => Ok(()),
-            other => Err(ForeignStoreError::Status(other)),
+            other => Err(StorageError::ForeignStatus(other)),
         }
     }
 }
@@ -183,9 +161,7 @@ unsafe impl Send for ForeignNodeStateStore {}
 unsafe impl Sync for ForeignNodeStateStore {}
 
 impl NodeStateStore for ForeignNodeStateStore {
-    type Error = ForeignStoreError;
-
-    fn load(&self) -> Result<Option<PersistedNodeState>, Self::Error> {
+    fn load(&self) -> Result<Option<PersistedNodeState>, StorageError> {
         let root_key = match self.call_load_root_key()? {
             Some(bytes) => bytes,
             None => return Ok(None),
@@ -198,13 +174,13 @@ impl NodeStateStore for ForeignNodeStateStore {
         }))
     }
 
-    fn save(&self, state: &PersistedNodeState) -> Result<(), Self::Error> {
+    fn save(&self, state: &PersistedNodeState) -> Result<(), StorageError> {
         self.call_save_root_key(state.root_key.as_bytes())?;
         self.call_save_registration(state.registration.as_ref())?;
         Ok(())
     }
 
-    fn delete(&self) -> Result<(), Self::Error> {
+    fn delete(&self) -> Result<(), StorageError> {
         self.call_delete_root_key()?;
         self.call_delete_registration()?;
         Ok(())

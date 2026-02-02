@@ -1,5 +1,5 @@
-use super::callbacks::{CallbackContext, WispersCallback, WispersNodeListCallback};
-use super::handles::{NodeImpl, WispersNodeHandle};
+use super::callbacks::{CallbackContext, WispersCallback, WispersNodeListCallback, WispersNodeState};
+use super::handles::WispersNodeHandle;
 use super::helpers::{c_str_to_string, WispersNodeList};
 use super::runtime;
 use crate::errors::WispersStatus;
@@ -19,21 +19,16 @@ pub extern "C" fn wispers_node_free(handle: *mut WispersNodeHandle) {
 
 /// Get the current state/stage of the node.
 #[unsafe(no_mangle)]
-pub extern "C" fn wispers_node_state(handle: *mut WispersNodeHandle) -> super::callbacks::WispersNodeState {
+pub extern "C" fn wispers_node_state(handle: *mut WispersNodeHandle) -> WispersNodeState {
     if handle.is_null() {
-        return super::callbacks::WispersNodeState::Pending;
+        return WispersNodeState::Pending;
     }
 
     let wrapper = unsafe { &*handle };
-    let state = match &wrapper.0 {
-        NodeImpl::InMemory(node) => node.state(),
-        NodeImpl::Foreign(node) => node.state(),
-    };
-
-    match state {
-        NodeState::Pending => super::callbacks::WispersNodeState::Pending,
-        NodeState::Registered => super::callbacks::WispersNodeState::Registered,
-        NodeState::Activated => super::callbacks::WispersNodeState::Activated,
+    match wrapper.0.state() {
+        NodeState::Pending => WispersNodeState::Pending,
+        NodeState::Registered => WispersNodeState::Registered,
+        NodeState::Activated => WispersNodeState::Activated,
     }
 }
 
@@ -70,14 +65,11 @@ pub extern "C" fn wispers_node_register_async(
     runtime::spawn(async move {
         // Safety: caller must ensure handle is valid and not used concurrently
         let wrapper = unsafe { handle_ptr.get_mut() };
-        let result = match &mut wrapper.0 {
-            NodeImpl::InMemory(node) => node.register(&token_str).await.map_err(map_error_in_memory),
-            NodeImpl::Foreign(node) => node.register(&token_str).await.map_err(map_error_foreign),
-        };
+        let result = wrapper.0.register(&token_str).await;
 
         let status = match result {
             Ok(()) => WispersStatus::Success,
-            Err(status) => status,
+            Err(e) => e.into(),
         };
         unsafe {
             callback(ctx.ptr(), status);
@@ -119,14 +111,11 @@ pub extern "C" fn wispers_node_activate_async(
     runtime::spawn(async move {
         // Safety: caller must ensure handle is valid and not used concurrently
         let wrapper = unsafe { handle_ptr.get_mut() };
-        let result = match &mut wrapper.0 {
-            NodeImpl::InMemory(node) => node.activate(&pairing_code_str).await.map_err(map_error_in_memory),
-            NodeImpl::Foreign(node) => node.activate(&pairing_code_str).await.map_err(map_error_foreign),
-        };
+        let result = wrapper.0.activate(&pairing_code_str).await;
 
         let status = match result {
             Ok(()) => WispersStatus::Success,
-            Err(status) => status,
+            Err(e) => e.into(),
         };
         unsafe {
             callback(ctx.ptr(), status);
@@ -159,14 +148,11 @@ pub extern "C" fn wispers_node_logout_async(
     let ctx = CallbackContext(ctx);
 
     runtime::spawn(async move {
-        let result = match wrapper.0 {
-            NodeImpl::InMemory(node) => node.logout().await.map_err(map_error_in_memory),
-            NodeImpl::Foreign(node) => node.logout().await.map_err(map_error_foreign),
-        };
+        let result = wrapper.0.logout().await;
 
         let status = match result {
             Ok(()) => WispersStatus::Success,
-            Err(status) => status,
+            Err(e) => e.into(),
         };
         unsafe {
             callback(ctx.ptr(), status);
@@ -201,10 +187,7 @@ pub extern "C" fn wispers_node_list_nodes_async(
     runtime::spawn(async move {
         // Safety: caller must ensure handle is valid and not used concurrently
         let wrapper = unsafe { handle_ptr.get() };
-        let result = match &wrapper.0 {
-            NodeImpl::InMemory(node) => node.list_nodes().await.map_err(map_error_in_memory),
-            NodeImpl::Foreign(node) => node.list_nodes().await.map_err(map_error_foreign),
-        };
+        let result = wrapper.0.list_nodes().await.map_err(|e| e.into());
         handle_list_nodes_result(result, ctx, callback);
     });
 
@@ -229,42 +212,6 @@ impl SendableNodePtr {
     /// SAFETY: The caller must ensure the pointer is valid.
     unsafe fn get_mut(&self) -> &mut WispersNodeHandle {
         unsafe { &mut *self.0 }
-    }
-}
-
-fn map_error_in_memory(
-    e: crate::errors::NodeStateError<crate::storage::InMemoryStoreError>,
-) -> WispersStatus {
-    use crate::errors::NodeStateError;
-    match e {
-        NodeStateError::Store(_) => WispersStatus::StoreError,
-        NodeStateError::Hub(_) => WispersStatus::HubError,
-        NodeStateError::AlreadyRegistered => WispersStatus::AlreadyRegistered,
-        NodeStateError::NotRegistered => WispersStatus::NotRegistered,
-        NodeStateError::InvalidPairingCode(_) => WispersStatus::InvalidPairingCode,
-        NodeStateError::MacVerificationFailed => WispersStatus::ActivationFailed,
-        NodeStateError::MissingEndorserResponse => WispersStatus::ActivationFailed,
-        NodeStateError::RosterVerificationFailed(_) => WispersStatus::ActivationFailed,
-        NodeStateError::InvalidState { .. } => WispersStatus::InvalidState,
-    }
-}
-
-fn map_error_foreign(
-    e: crate::errors::NodeStateError<crate::storage::foreign::ForeignStoreError>,
-) -> WispersStatus {
-    use crate::errors::NodeStateError;
-    use crate::storage::foreign::ForeignStoreError;
-    match e {
-        NodeStateError::Store(ForeignStoreError::Status(s)) => s,
-        NodeStateError::Store(_) => WispersStatus::StoreError,
-        NodeStateError::Hub(_) => WispersStatus::HubError,
-        NodeStateError::AlreadyRegistered => WispersStatus::AlreadyRegistered,
-        NodeStateError::NotRegistered => WispersStatus::NotRegistered,
-        NodeStateError::InvalidPairingCode(_) => WispersStatus::InvalidPairingCode,
-        NodeStateError::MacVerificationFailed => WispersStatus::ActivationFailed,
-        NodeStateError::MissingEndorserResponse => WispersStatus::ActivationFailed,
-        NodeStateError::RosterVerificationFailed(_) => WispersStatus::ActivationFailed,
-        NodeStateError::InvalidState { .. } => WispersStatus::InvalidState,
     }
 }
 

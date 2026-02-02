@@ -1,5 +1,5 @@
 use super::callbacks::{CallbackContext, WispersInitCallback, WispersNodeState};
-use super::handles::{ManagerImpl, NodeImpl, WispersNodeHandle, WispersNodeStorageHandle};
+use super::handles::{WispersNodeHandle, WispersNodeStorageHandle};
 use super::helpers::{c_str_to_string, WispersRegistrationInfo};
 use super::runtime;
 use crate::errors::WispersStatus;
@@ -13,9 +13,7 @@ use std::os::raw::c_char;
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_storage_new_in_memory() -> *mut WispersNodeStorageHandle {
     let storage = NodeStorage::new(InMemoryNodeStateStore::new());
-    Box::into_raw(Box::new(WispersNodeStorageHandle(ManagerImpl::InMemory(
-        storage,
-    ))))
+    Box::into_raw(Box::new(WispersNodeStorageHandle(storage)))
 }
 
 #[unsafe(no_mangle)]
@@ -32,9 +30,7 @@ pub extern "C" fn wispers_storage_new_with_callbacks(
         Err(_) => return std::ptr::null_mut(),
     };
     let storage = NodeStorage::new(store);
-    Box::into_raw(Box::new(WispersNodeStorageHandle(ManagerImpl::Foreign(
-        storage,
-    ))))
+    Box::into_raw(Box::new(WispersNodeStorageHandle(storage)))
 }
 
 #[unsafe(no_mangle)]
@@ -71,7 +67,7 @@ pub extern "C" fn wispers_storage_read_registration(
             unsafe { *out_info = WispersRegistrationInfo::null() };
             WispersStatus::NotFound
         }
-        Err(status) => status,
+        Err(_) => WispersStatus::StoreError,
     }
 }
 
@@ -115,102 +111,34 @@ pub extern "C" fn wispers_storage_restore_or_init_async(
     };
 
     let wrapper = unsafe { &*handle };
+    let storage = wrapper.0.clone();
     let ctx = CallbackContext(ctx);
 
-    wrapper.0.restore_or_init_async(ctx, callback);
+    runtime::spawn(async move {
+        let result = storage.restore_or_init_node().await;
+        match result {
+            Ok(node) => {
+                let state = node_state_to_ffi(node.state());
+                let handle = Box::into_raw(Box::new(WispersNodeHandle(node)));
+                unsafe {
+                    callback(ctx.ptr(), WispersStatus::Success, handle, state);
+                }
+            }
+            Err(e) => {
+                let status: WispersStatus = e.into();
+                unsafe {
+                    callback(
+                        ctx.ptr(),
+                        status,
+                        std::ptr::null_mut(),
+                        WispersNodeState::Pending,
+                    );
+                }
+            }
+        }
+    });
 
     WispersStatus::Success
-}
-
-// Helper methods on ManagerImpl to reduce duplication
-impl ManagerImpl {
-    fn read_registration(&self) -> Result<Option<crate::types::NodeRegistration>, WispersStatus> {
-        match self {
-            ManagerImpl::InMemory(storage) => storage
-                .read_registration()
-                .map_err(|_| WispersStatus::StoreError),
-            ManagerImpl::Foreign(storage) => storage
-                .read_registration()
-                .map_err(|_| WispersStatus::StoreError),
-        }
-    }
-
-    fn override_hub_addr(&self, addr: String) {
-        match self {
-            ManagerImpl::InMemory(storage) => storage.override_hub_addr(addr),
-            ManagerImpl::Foreign(storage) => storage.override_hub_addr(addr),
-        }
-    }
-
-    fn restore_or_init_async(
-        &self,
-        ctx: CallbackContext,
-        callback: unsafe extern "C" fn(
-            *mut c_void,
-            WispersStatus,
-            *mut WispersNodeHandle,
-            WispersNodeState,
-        ),
-    ) {
-        match self {
-            ManagerImpl::InMemory(storage) => {
-                let storage = storage.clone();
-                runtime::spawn(async move {
-                    let result = storage.restore_or_init_node().await;
-                    match result {
-                        Ok(node) => {
-                            let state = node_state_to_ffi(node.state());
-                            let handle = Box::into_raw(Box::new(WispersNodeHandle(
-                                NodeImpl::InMemory(node),
-                            )));
-                            unsafe {
-                                callback(ctx.ptr(), WispersStatus::Success, handle, state);
-                            }
-                        }
-                        Err(e) => {
-                            let status: WispersStatus = e.into();
-                            unsafe {
-                                callback(
-                                    ctx.ptr(),
-                                    status,
-                                    std::ptr::null_mut(),
-                                    WispersNodeState::Pending,
-                                );
-                            }
-                        }
-                    }
-                });
-            }
-            ManagerImpl::Foreign(storage) => {
-                let storage = storage.clone();
-                runtime::spawn(async move {
-                    let result = storage.restore_or_init_node().await;
-                    match result {
-                        Ok(node) => {
-                            let state = node_state_to_ffi(node.state());
-                            let handle = Box::into_raw(Box::new(WispersNodeHandle(
-                                NodeImpl::Foreign(node),
-                            )));
-                            unsafe {
-                                callback(ctx.ptr(), WispersStatus::Success, handle, state);
-                            }
-                        }
-                        Err(e) => {
-                            let status: WispersStatus = e.into();
-                            unsafe {
-                                callback(
-                                    ctx.ptr(),
-                                    status,
-                                    std::ptr::null_mut(),
-                                    WispersNodeState::Pending,
-                                );
-                            }
-                        }
-                    }
-                });
-            }
-        }
-    }
 }
 
 fn node_state_to_ffi(state: NodeState) -> WispersNodeState {

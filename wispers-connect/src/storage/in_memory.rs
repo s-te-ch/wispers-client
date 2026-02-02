@@ -1,7 +1,6 @@
-use crate::storage::NodeStateStore;
+use crate::storage::{NodeStateStore, StorageError};
 use crate::types::PersistedNodeState;
 use std::sync::RwLock;
-use thiserror::Error;
 
 /// Simple, non-persistent store useful for testing and sketches.
 #[derive(Default)]
@@ -16,29 +15,20 @@ impl InMemoryNodeStateStore {
 }
 
 impl NodeStateStore for InMemoryNodeStateStore {
-    type Error = InMemoryStoreError;
-
-    fn load(&self) -> Result<Option<PersistedNodeState>, Self::Error> {
-        let state = self.state.read().map_err(|_| InMemoryStoreError::Poisoned)?;
+    fn load(&self) -> Result<Option<PersistedNodeState>, StorageError> {
+        let state = self.state.read().map_err(|_| StorageError::Poisoned)?;
         Ok(state.clone())
     }
 
-    fn save(&self, state: &PersistedNodeState) -> Result<(), Self::Error> {
-        let mut stored = self.state.write().map_err(|_| InMemoryStoreError::Poisoned)?;
+    fn save(&self, state: &PersistedNodeState) -> Result<(), StorageError> {
+        let mut stored = self.state.write().map_err(|_| StorageError::Poisoned)?;
         *stored = Some(state.clone());
         Ok(())
     }
 
-    fn delete(&self) -> Result<(), Self::Error> {
-        let mut stored = self.state.write().map_err(|_| InMemoryStoreError::Poisoned)?;
+    fn delete(&self) -> Result<(), StorageError> {
+        let mut stored = self.state.write().map_err(|_| StorageError::Poisoned)?;
         *stored = None;
         Ok(())
     }
-}
-
-/// Errors that can arise from the in-memory store (primarily poisoning).
-#[derive(Debug, Error)]
-pub enum InMemoryStoreError {
-    #[error("in-memory state lock was poisoned")]
-    Poisoned,
 }

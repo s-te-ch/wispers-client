@@ -1,11 +1,12 @@
+use crate::storage::StorageError;
 use std::fmt;
 
 // Re-export NodeState from node module for use in error types
 pub use crate::node::NodeState;
 
 #[derive(Debug)]
-pub enum NodeStateError<StoreError> {
-    Store(StoreError),
+pub enum NodeStateError {
+    Store(StorageError),
     Hub(crate::hub::HubError),
     AlreadyRegistered,
     NotRegistered,
@@ -20,8 +21,8 @@ pub enum NodeStateError<StoreError> {
     },
 }
 
-impl<StoreError> NodeStateError<StoreError> {
-    pub fn store(error: StoreError) -> Self {
+impl NodeStateError {
+    pub fn store(error: StorageError) -> Self {
         Self::Store(error)
     }
 
@@ -30,7 +31,7 @@ impl<StoreError> NodeStateError<StoreError> {
     }
 }
 
-impl<StoreError: fmt::Display> fmt::Display for NodeStateError<StoreError> {
+impl fmt::Display for NodeStateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             NodeStateError::Store(err) => write!(f, "store error: {err}"),
@@ -50,10 +51,7 @@ impl<StoreError: fmt::Display> fmt::Display for NodeStateError<StoreError> {
     }
 }
 
-impl<StoreError> std::error::Error for NodeStateError<StoreError> where
-    StoreError: std::error::Error + 'static
-{
-}
+impl std::error::Error for NodeStateError {}
 
 /// Status codes shared across the FFI boundary.
 #[repr(C)]

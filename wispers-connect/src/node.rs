@@ -1,6 +1,6 @@
 //! Unified node type with runtime state checks.
 //!
-//! This module provides a single `Node<S>` type that replaces the previous
+//! This module provides a single `Node` type that replaces the previous
 //! typestate pattern (`PendingNodeState`, `RegisteredNodeState`, `ActivatedNode`).
 //! Operations that require a specific state will return `InvalidState` errors
 //! if called in the wrong state.
@@ -15,7 +15,7 @@ use crate::roster::{
     build_activation_payload, create_activation_roster, create_bootstrap_roster, verify_roster,
 };
 use crate::state::{RuntimeConfig, SharedConfig};
-use crate::storage::{NodeStateStore, SharedStore};
+use crate::storage::SharedStore;
 use crate::types::{NodeInfo, NodeRegistration, PersistedNodeState};
 use prost::Message;
 
@@ -44,9 +44,9 @@ impl fmt::Display for NodeState {
 ///
 /// Operations check the current state at runtime and return `InvalidState` errors
 /// if called in the wrong state. Use `state()` to check the current state.
-pub struct Node<S: NodeStateStore> {
+pub struct Node {
     persisted: PersistedNodeState,
-    store: SharedStore<S>,
+    store: SharedStore,
     config: SharedConfig,
     // Present after activation:
     signing_key: Option<SigningKeyPair>,
@@ -54,11 +54,11 @@ pub struct Node<S: NodeStateStore> {
     roster: Option<proto::roster::Roster>,
 }
 
-impl<S: NodeStateStore> Node<S> {
+impl Node {
     /// Create a new pending node from initial state.
     pub(crate) fn new_pending(
         persisted: PersistedNodeState,
-        store: SharedStore<S>,
+        store: SharedStore,
         config: SharedConfig,
     ) -> Self {
         Self {
@@ -74,9 +74,9 @@ impl<S: NodeStateStore> Node<S> {
     /// Create a registered node (has registration but no roster).
     pub(crate) fn new_registered(
         persisted: PersistedNodeState,
-        store: SharedStore<S>,
+        store: SharedStore,
         config: SharedConfig,
-    ) -> Result<Self, NodeStateError<S::Error>> {
+    ) -> Result<Self, NodeStateError> {
         if persisted.registration.is_none() {
             return Err(NodeStateError::NotRegistered);
         }
@@ -93,7 +93,7 @@ impl<S: NodeStateStore> Node<S> {
     /// Create an activated node (has registration, signing key, encryption key, and roster).
     pub(crate) fn new_activated(
         persisted: PersistedNodeState,
-        store: SharedStore<S>,
+        store: SharedStore,
         config: SharedConfig,
         signing_key: SigningKeyPair,
         encryption_key: X25519KeyPair,
@@ -154,7 +154,7 @@ impl<S: NodeStateStore> Node<S> {
     // State-checked accessors (return InvalidState if wrong state)
     // -------------------------------------------------------------------------
 
-    fn require_pending(&self) -> Result<(), NodeStateError<S::Error>> {
+    fn require_pending(&self) -> Result<(), NodeStateError> {
         if self.state() != NodeState::Pending {
             return Err(NodeStateError::InvalidState {
                 current: self.state(),
@@ -164,7 +164,7 @@ impl<S: NodeStateStore> Node<S> {
         Ok(())
     }
 
-    fn require_registered(&self) -> Result<&NodeRegistration, NodeStateError<S::Error>> {
+    fn require_registered(&self) -> Result<&NodeRegistration, NodeStateError> {
         if self.state() != NodeState::Registered {
             return Err(NodeStateError::InvalidState {
                 current: self.state(),
@@ -174,7 +174,7 @@ impl<S: NodeStateStore> Node<S> {
         Ok(self.persisted.registration.as_ref().expect("checked above"))
     }
 
-    fn require_at_least_registered(&self) -> Result<&NodeRegistration, NodeStateError<S::Error>> {
+    fn require_at_least_registered(&self) -> Result<&NodeRegistration, NodeStateError> {
         match self.state() {
             NodeState::Pending => Err(NodeStateError::InvalidState {
                 current: NodeState::Pending,
@@ -184,7 +184,8 @@ impl<S: NodeStateStore> Node<S> {
         }
     }
 
-    fn require_activated(&self) -> Result<(), NodeStateError<S::Error>> {
+    #[allow(dead_code)]
+    fn require_activated(&self) -> Result<(), NodeStateError> {
         if self.state() != NodeState::Activated {
             return Err(NodeStateError::InvalidState {
                 current: self.state(),
@@ -231,7 +232,7 @@ impl<S: NodeStateStore> Node<S> {
     pub(crate) fn complete_registration(
         &mut self,
         registration: NodeRegistration,
-    ) -> Result<(), NodeStateError<S::Error>> {
+    ) -> Result<(), NodeStateError> {
         self.require_pending()?;
 
         if self.persisted.is_registered() {
@@ -249,7 +250,7 @@ impl<S: NodeStateStore> Node<S> {
     ///
     /// Requires: Pending state.
     /// Transitions to: Registered state.
-    pub async fn register(&mut self, token: &str) -> Result<(), NodeStateError<S::Error>> {
+    pub async fn register(&mut self, token: &str) -> Result<(), NodeStateError> {
         use crate::hub::HubClient;
 
         self.require_pending()?;
@@ -281,7 +282,7 @@ impl<S: NodeStateStore> Node<S> {
     /// - Basic info (node_number, name, last_seen) from the hub
     /// - Activation status from the roster (if this node is activated)
     /// - `is_self` indicates whether this is the current node
-    pub async fn list_nodes(&self) -> Result<Vec<NodeInfo>, NodeStateError<S::Error>> {
+    pub async fn list_nodes(&self) -> Result<Vec<NodeInfo>, NodeStateError> {
         use crate::hub::HubClient;
 
         let registration = self.require_at_least_registered()?;
@@ -334,7 +335,7 @@ impl<S: NodeStateStore> Node<S> {
             crate::serving::ServingSession,
             Option<crate::serving::IncomingConnections>,
         ),
-        NodeStateError<S::Error>,
+        NodeStateError,
     > {
         let registration = self.require_at_least_registered()?;
         let hub_addr = self.hub_addr();
@@ -385,7 +386,7 @@ impl<S: NodeStateStore> Node<S> {
     /// Transitions to: Activated state.
     ///
     /// The pairing code format is "node_number-secret" where secret is 10 base36 characters.
-    pub async fn activate(&mut self, pairing_code: &str) -> Result<(), NodeStateError<S::Error>> {
+    pub async fn activate(&mut self, pairing_code: &str) -> Result<(), NodeStateError> {
         use crate::hub::HubClient;
 
         let registration = self.require_registered()?.clone();
@@ -738,7 +739,7 @@ impl<S: NodeStateStore> Node<S> {
     /// - Pending: just deletes local state
     /// - Registered: deregisters from hub, then deletes local state
     /// - Activated: self-revokes from roster, deregisters from hub, deletes local state
-    pub async fn logout(self) -> Result<(), NodeStateError<S::Error>> {
+    pub async fn logout(self) -> Result<(), NodeStateError> {
         use crate::hub::HubClient;
 
         match self.state() {
@@ -804,7 +805,7 @@ impl<S: NodeStateStore> Node<S> {
 
 /// Test helper for creating Node instances.
 #[doc(hidden)]
-impl Node<crate::storage::InMemoryNodeStateStore> {
+impl Node {
     /// Create an activated Node for testing with explicit configuration.
     pub fn new_activated_for_test(
         root_key: [u8; 32],
@@ -869,20 +870,18 @@ mod tests {
 
     #[test]
     fn state_detection_works() {
-        let store = Arc::new(InMemoryNodeStateStore::new());
+        let store: SharedStore = Arc::new(InMemoryNodeStateStore::new());
         let config = Arc::new(std::sync::RwLock::new(RuntimeConfig::new()));
 
         // Pending
         let persisted = PersistedNodeState::new();
-        let node: Node<InMemoryNodeStateStore> =
-            Node::new_pending(persisted, store.clone(), config.clone());
+        let node = Node::new_pending(persisted, store.clone(), config.clone());
         assert_eq!(node.state(), NodeState::Pending);
 
         // Registered
         let mut persisted = PersistedNodeState::new();
         persisted.set_registration(crate::types::registration_fixture());
-        let node: Node<InMemoryNodeStateStore> =
-            Node::new_registered(persisted, store.clone(), config.clone()).unwrap();
+        let node = Node::new_registered(persisted, store.clone(), config.clone()).unwrap();
         assert_eq!(node.state(), NodeState::Registered);
     }
 }

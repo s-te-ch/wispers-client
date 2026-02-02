@@ -1,7 +1,7 @@
 //! FFI bindings for P2P connections.
 
 use super::callbacks::CallbackContext;
-use super::handles::{NodeImpl, WispersNodeHandle};
+use super::handles::WispersNodeHandle;
 use super::runtime;
 use crate::errors::WispersStatus;
 use crate::p2p::{QuicConnection, QuicStream, UdpConnection};
@@ -88,10 +88,7 @@ pub extern "C" fn wispers_node_connect_udp_async(
 
     runtime::spawn(async move {
         let wrapper = unsafe { node_ptr.get() };
-        let result = match &wrapper.0 {
-            NodeImpl::InMemory(node) => node.connect_udp(peer_node_number).await,
-            NodeImpl::Foreign(node) => node.connect_udp(peer_node_number).await,
-        };
+        let result = wrapper.0.connect_udp(peer_node_number).await;
 
         match result {
             Ok(conn) => {
@@ -290,10 +287,7 @@ pub extern "C" fn wispers_node_connect_quic_async(
 
     runtime::spawn(async move {
         let wrapper = unsafe { node_ptr.get() };
-        let result = match &wrapper.0 {
-            NodeImpl::InMemory(node) => node.connect_quic(peer_node_number).await,
-            NodeImpl::Foreign(node) => node.connect_quic(peer_node_number).await,
-        };
+        let result = wrapper.0.connect_quic(peer_node_number).await;
 
         match result {
             Ok(conn) => {

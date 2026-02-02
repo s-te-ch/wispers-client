@@ -39,24 +39,14 @@ impl Default for RuntimeConfig {
 pub(crate) type SharedConfig = Arc<RwLock<RuntimeConfig>>;
 
 /// High-level storage handle that drives state initialization and persistence.
-pub struct NodeStorage<S: NodeStateStore> {
-    store: SharedStore<S>,
+#[derive(Clone)]
+pub struct NodeStorage {
+    store: SharedStore,
     config: SharedConfig,
 }
 
-// Manual Clone impl because #[derive(Clone)] adds unnecessary S: Clone bound.
-// Arc<S> is always Clone regardless of S.
-impl<S: NodeStateStore> Clone for NodeStorage<S> {
-    fn clone(&self) -> Self {
-        Self {
-            store: self.store.clone(),
-            config: self.config.clone(),
-        }
-    }
-}
-
-impl<S: NodeStateStore> NodeStorage<S> {
-    pub fn new(store: S) -> Self {
+impl NodeStorage {
+    pub fn new(store: impl NodeStateStore + 'static) -> Self {
         Self {
             store: Arc::new(store),
             config: Arc::new(RwLock::new(RuntimeConfig {
@@ -74,21 +64,21 @@ impl<S: NodeStateStore> NodeStorage<S> {
     ///
     /// Returns `None` if not registered. This is useful when you need
     /// registration info before starting an async runtime.
-    pub fn read_registration(&self) -> Result<Option<NodeRegistration>, NodeStateError<S::Error>> {
+    pub fn read_registration(&self) -> Result<Option<NodeRegistration>, NodeStateError> {
         let state = self.store.load().map_err(NodeStateError::store)?;
         Ok(state.and_then(|s| s.registration))
     }
 
     /// Initialize or restore node state.
     ///
-    /// Returns a `Node<S>` in the appropriate state:
+    /// Returns a `Node` in the appropriate state:
     /// - `Pending` if not registered
     /// - `Registered` if registered but not in the roster
     /// - `Activated` if registered and in the roster
     ///
     /// This method fetches the roster from the hub when the node is registered
     /// to determine if it has been activated.
-    pub async fn restore_or_init_node(&self) -> Result<Node<S>, NodeStateError<S::Error>> {
+    pub async fn restore_or_init_node(&self) -> Result<Node, NodeStateError> {
         use crate::hub::HubClient;
 
         let state = match self.store.load().map_err(NodeStateError::store)? {
@@ -186,8 +176,18 @@ mod tests {
 
     #[tokio::test]
     async fn completing_registration_persists_and_transitions() {
+        let store = Arc::new(InMemoryNodeStateStore::new());
         let storage = NodeStorage::new(InMemoryNodeStateStore::new());
-        let mut node = storage.restore_or_init_node().await.unwrap();
+        // Create a new storage with the same store for verification
+        let verify_store = store.clone();
+
+        // Use a storage that shares the store for this test
+        let shared_storage = NodeStorage {
+            store: store as SharedStore,
+            config: Arc::new(RwLock::new(RuntimeConfig::new())),
+        };
+
+        let mut node = shared_storage.restore_or_init_node().await.unwrap();
         assert_eq!(node.state(), NodeState::Pending);
         let registration = crate::types::registration_fixture();
 
@@ -196,12 +196,13 @@ mod tests {
         assert_eq!(node.registration(), Some(&registration));
 
         // Verify registration was persisted by checking the store directly
-        let loaded = storage
-            .store
+        let loaded = verify_store
             .load()
             .unwrap()
             .expect("state should be persisted");
         assert!(loaded.is_registered());
         assert_eq!(loaded.registration.as_ref().unwrap(), &registration);
+
+        drop(storage); // silence unused warning
     }
 }

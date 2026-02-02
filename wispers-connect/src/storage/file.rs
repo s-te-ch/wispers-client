@@ -1,9 +1,8 @@
 //! File-based storage for node state.
 
-use crate::storage::NodeStateStore;
+use crate::storage::{NodeStateStore, StorageError};
 use crate::types::{NodeRegistration, PersistedNodeState, RootKey, ROOT_KEY_LEN};
 use std::fs;
-use std::io;
 use std::path::PathBuf;
 
 /// File-based node state store.
@@ -19,37 +18,6 @@ use std::path::PathBuf;
 /// namespacing (e.g., `base_dir.join(app).join(profile)`).
 pub struct FileNodeStateStore {
     dir: PathBuf,
-}
-
-#[derive(Debug)]
-pub enum FileStoreError {
-    Io(io::Error),
-    Json(serde_json::Error),
-    InvalidRootKey,
-}
-
-impl std::fmt::Display for FileStoreError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FileStoreError::Io(e) => write!(f, "I/O error: {e}"),
-            FileStoreError::Json(e) => write!(f, "JSON error: {e}"),
-            FileStoreError::InvalidRootKey => write!(f, "invalid root key length"),
-        }
-    }
-}
-
-impl std::error::Error for FileStoreError {}
-
-impl From<io::Error> for FileStoreError {
-    fn from(e: io::Error) -> Self {
-        FileStoreError::Io(e)
-    }
-}
-
-impl From<serde_json::Error> for FileStoreError {
-    fn from(e: serde_json::Error) -> Self {
-        FileStoreError::Json(e)
-    }
 }
 
 impl FileNodeStateStore {
@@ -70,9 +38,7 @@ impl FileNodeStateStore {
 }
 
 impl NodeStateStore for FileNodeStateStore {
-    type Error = FileStoreError;
-
-    fn load(&self) -> Result<Option<PersistedNodeState>, Self::Error> {
+    fn load(&self) -> Result<Option<PersistedNodeState>, StorageError> {
         let root_key_path = self.root_key_path();
 
         // If root key doesn't exist, state doesn't exist
@@ -83,7 +49,7 @@ impl NodeStateStore for FileNodeStateStore {
         // Load root key
         let root_key_bytes = fs::read(&root_key_path)?;
         if root_key_bytes.len() != ROOT_KEY_LEN {
-            return Err(FileStoreError::InvalidRootKey);
+            return Err(StorageError::InvalidRootKey);
         }
         let mut key_array = [0u8; ROOT_KEY_LEN];
         key_array.copy_from_slice(&root_key_bytes);
@@ -103,7 +69,7 @@ impl NodeStateStore for FileNodeStateStore {
         }))
     }
 
-    fn save(&self, state: &PersistedNodeState) -> Result<(), Self::Error> {
+    fn save(&self, state: &PersistedNodeState) -> Result<(), StorageError> {
         fs::create_dir_all(&self.dir)?;
 
         // Save root key
@@ -121,7 +87,7 @@ impl NodeStateStore for FileNodeStateStore {
         Ok(())
     }
 
-    fn delete(&self) -> Result<(), Self::Error> {
+    fn delete(&self) -> Result<(), StorageError> {
         if self.dir.exists() {
             fs::remove_dir_all(&self.dir)?;
         }

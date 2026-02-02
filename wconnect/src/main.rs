@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use wispers_connect::{FileNodeStateStore, Node, NodeState, NodeStorage};
+use wispers_connect::{FileNodeStateStore, NodeState, NodeStorage};
 
 #[derive(Parser)]
 #[command(name = "wconnect")]
@@ -141,7 +141,7 @@ fn daemonize_serve(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     Ok(())
 }
 
-fn get_storage(hub_override: Option<&str>, profile: &str) -> Result<NodeStorage<FileNodeStateStore>> {
+fn get_storage(hub_override: Option<&str>, profile: &str) -> Result<NodeStorage> {
     let config_dir = dirs::config_dir().context("could not determine config directory")?;
     let store_dir = config_dir.join("wconnect").join(profile);
     let store = FileNodeStateStore::new(store_dir);
@@ -844,8 +844,8 @@ async fn ping(hub_override: Option<&str>, profile: &str, target_node: i32, use_q
     }
 }
 
-async fn ping_udp<S: wispers_connect::NodeStateStore>(
-    node: &Node<S>,
+async fn ping_udp(
+    node: &wispers_connect::Node,
     target_node: i32,
     start: std::time::Instant,
 ) -> Result<()> {
@@ -883,8 +883,8 @@ async fn ping_udp<S: wispers_connect::NodeStateStore>(
     Ok(())
 }
 
-async fn ping_quic<S: wispers_connect::NodeStateStore>(
-    node: &Node<S>,
+async fn ping_quic(
+    node: &wispers_connect::Node,
     target_node: i32,
     start: std::time::Instant,
 ) -> Result<()> {

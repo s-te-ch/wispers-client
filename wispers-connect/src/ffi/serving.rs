@@ -1,14 +1,14 @@
 //! FFI bindings for serving sessions.
 
 use super::callbacks::CallbackContext;
-use super::handles::{NodeImpl, WispersNodeHandle};
+use super::handles::WispersNodeHandle;
 use super::p2p::{
     WispersQuicConnectionCallback, WispersQuicConnectionHandle, WispersUdpConnectionCallback,
     WispersUdpConnectionHandle,
 };
 use super::runtime;
 use crate::errors::WispersStatus;
-use crate::node::NodeState;
+use crate::node::{Node, NodeState};
 use crate::serving::{IncomingConnections, ServingHandle, ServingSession};
 use std::ffi::{c_void, CString};
 use std::os::raw::c_char;
@@ -226,11 +226,8 @@ pub extern "C" fn wispers_node_start_serving_async(
     let wrapper = unsafe { &*handle };
     let ctx = CallbackContext(ctx);
 
-    // Extract what we need before spawning based on state
-    let serving_params = match &wrapper.0 {
-        NodeImpl::InMemory(node) => extract_serving_params(node),
-        NodeImpl::Foreign(node) => extract_serving_params(node),
-    };
+    // Extract what we need before spawning
+    let serving_params = extract_serving_params(&wrapper.0);
 
     let params = match serving_params {
         Ok(p) => p,
@@ -410,9 +407,7 @@ struct ServingParams {
     p2p_config: Option<crate::serving::P2pConfig>,
 }
 
-fn extract_serving_params<S: crate::storage::NodeStateStore>(
-    node: &crate::node::Node<S>,
-) -> Result<ServingParams, WispersStatus> {
+fn extract_serving_params(node: &Node) -> Result<ServingParams, WispersStatus> {
     let state = node.state();
     if state == NodeState::Pending {
         return Err(WispersStatus::InvalidState);
