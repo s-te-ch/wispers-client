@@ -2550,6 +2550,7 @@ dependencies = [
  "clap",
  "daemonize",
  "dirs",
+ "httparse",
  "serde",
  "serde_json",
  "tokio",
