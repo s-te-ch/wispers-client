@@ -5,10 +5,19 @@
 //! hostnames like `http://3.wispers.link/`.
 
 use anyhow::{bail, Context, Result};
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use wispers_connect::{Node, NodeState};
+use tokio::sync::Mutex;
+use wispers_connect::{Node, NodeState, QuicConnection};
+
+/// Default idle timeout for pooled connections (60 seconds).
+const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Interval for checking and cleaning up idle connections.
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Run the HTTP proxy server.
 pub async fn run(hub_override: Option<&str>, profile: &str, bind_addr: &str) -> Result<()> {
@@ -34,14 +43,25 @@ pub async fn run(hub_override: Option<&str>, profile: &str, bind_addr: &str) -> 
     println!("Example: curl --proxy http://{} http://3.wispers.link/", bind_addr);
 
     let node = Arc::new(node);
+    let pool = ConnectionPool::new();
+
+    // Start background cleanup task
+    let cleanup_pool = pool.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(CLEANUP_INTERVAL).await;
+            cleanup_pool.cleanup_idle().await;
+        }
+    });
 
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
                 println!("Accepted connection from {}", addr);
                 let node = Arc::clone(&node);
+                let pool = pool.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, node).await {
+                    if let Err(e) = handle_connection(stream, node, pool).await {
                         eprintln!("Connection error: {}", e);
                     }
                 });
@@ -49,6 +69,85 @@ pub async fn run(hub_override: Option<&str>, profile: &str, bind_addr: &str) -> 
             Err(e) => {
                 eprintln!("Accept error: {}", e);
             }
+        }
+    }
+}
+
+/// A pooled QUIC connection with last-used timestamp.
+struct PooledConnection {
+    conn: Arc<QuicConnection>,
+    last_used: Instant,
+}
+
+/// Pool of QUIC connections to remote nodes.
+#[derive(Clone)]
+struct ConnectionPool {
+    /// Connections keyed by node number.
+    connections: Arc<Mutex<HashMap<i32, PooledConnection>>>,
+}
+
+impl ConnectionPool {
+    fn new() -> Self {
+        Self {
+            connections: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Get an existing connection or create a new one.
+    ///
+    /// Returns an Arc to the connection so multiple requests can share it.
+    async fn get_or_connect(
+        &self,
+        node: &Node,
+        target_node: i32,
+    ) -> Result<Arc<QuicConnection>, wispers_connect::p2p::P2pError> {
+        // Check if we have an existing connection
+        {
+            let mut pool = self.connections.lock().await;
+            if let Some(pooled) = pool.get_mut(&target_node) {
+                pooled.last_used = Instant::now();
+                println!("  Reusing existing QUIC connection to node {}", target_node);
+                return Ok(Arc::clone(&pooled.conn));
+            }
+        }
+
+        // Create a new connection
+        println!("  Creating new QUIC connection to node {}", target_node);
+        let conn = node.connect_quic(target_node).await?;
+        let conn = Arc::new(conn);
+
+        // Store in pool
+        {
+            let mut pool = self.connections.lock().await;
+            pool.insert(
+                target_node,
+                PooledConnection {
+                    conn: Arc::clone(&conn),
+                    last_used: Instant::now(),
+                },
+            );
+        }
+
+        Ok(conn)
+    }
+
+    /// Clean up idle connections.
+    async fn cleanup_idle(&self) {
+        let mut pool = self.connections.lock().await;
+        let now = Instant::now();
+        let before = pool.len();
+
+        pool.retain(|node, pooled| {
+            let keep = now.duration_since(pooled.last_used) < IDLE_TIMEOUT;
+            if !keep {
+                println!("  Closing idle connection to node {}", node);
+            }
+            keep
+        });
+
+        let removed = before - pool.len();
+        if removed > 0 {
+            println!("  Cleaned up {} idle connection(s)", removed);
         }
     }
 }
@@ -80,7 +179,11 @@ struct ParsedRequest {
 }
 
 /// Handle a single client connection.
-async fn handle_connection(mut stream: TcpStream, _node: Arc<Node>) -> Result<()> {
+async fn handle_connection(
+    mut stream: TcpStream,
+    node: Arc<Node>,
+    pool: ConnectionPool,
+) -> Result<()> {
     let peer = stream.peer_addr()?;
 
     // Read the HTTP request
@@ -122,11 +225,20 @@ async fn handle_connection(mut stream: TcpStream, _node: Arc<Node>) -> Result<()
         request.target.path, request.keep_alive
     );
 
-    // TODO: Phase 3 - Get/create QUIC connection from pool
-    // TODO: Phase 4 - Forward request to target node
-    // TODO: Phase 5 - Handle keep-alive
+    // Get or create QUIC connection to target node
+    let quic_conn = match pool.get_or_connect(&node, request.target.node_number).await {
+        Ok(conn) => conn,
+        Err(e) => {
+            send_error(&mut stream, 502, &format!("Failed to connect to node: {}", e)).await?;
+            return Ok(());
+        }
+    };
 
-    // For now, return 502 since we can't forward yet
+    // TODO: Phase 4 - Forward request to target node using quic_conn.open_stream()
+    // TODO: Phase 5 - Handle keep-alive
+    let _ = &quic_conn; // Silence unused warning for now
+
+    // For now, return 502 since forwarding isn't complete yet
     send_error(&mut stream, 502, "Forwarding not yet implemented").await?;
 
     println!("Connection from {} closed", peer);
