@@ -234,15 +234,107 @@ async fn handle_connection(
         }
     };
 
-    // TODO: Phase 4 - Forward request to target node using quic_conn.open_stream()
-    // TODO: Phase 5 - Handle keep-alive
-    let _ = &quic_conn; // Silence unused warning for now
+    // Forward the request
+    if let Err(e) = forward_request(&mut stream, &quic_conn, &request).await {
+        eprintln!("  Forward error: {}", e);
+        // Don't send error response here - we may have already started sending the response
+    }
 
-    // For now, return 502 since forwarding isn't complete yet
-    send_error(&mut stream, 502, "Forwarding not yet implemented").await?;
+    // TODO: Phase 5 - Handle keep-alive (loop back to read next request)
 
     println!("Connection from {} closed", peer);
     Ok(())
+}
+
+/// Forward an HTTP request through a QUIC stream to the target node.
+async fn forward_request(
+    client_stream: &mut TcpStream,
+    quic_conn: &QuicConnection,
+    request: &ParsedRequest,
+) -> Result<()> {
+    // Open a new stream for this request
+    let quic_stream = quic_conn
+        .open_stream()
+        .await
+        .context("failed to open QUIC stream")?;
+
+    // Send FORWARD command
+    let forward_cmd = format!("FORWARD {}\n", request.target.port);
+    quic_stream
+        .write_all(forward_cmd.as_bytes())
+        .await
+        .context("failed to send FORWARD command")?;
+
+    // Read response (OK or ERROR)
+    let mut response_buf = [0u8; 256];
+    let n = quic_stream
+        .read(&mut response_buf)
+        .await
+        .context("failed to read FORWARD response")?;
+
+    let response = String::from_utf8_lossy(&response_buf[..n]);
+    let response = response.trim();
+
+    if response.starts_with("ERROR ") {
+        let error_msg = &response[6..];
+        send_error(client_stream, 502, &format!("Remote error: {}", error_msg)).await?;
+        return Ok(());
+    }
+
+    if response != "OK" {
+        send_error(client_stream, 502, &format!("Unexpected response: {}", response)).await?;
+        return Ok(());
+    }
+
+    // Build and send the HTTP request to the remote server
+    let http_request = build_http_request(request);
+    quic_stream
+        .write_all(http_request.as_bytes())
+        .await
+        .context("failed to send HTTP request")?;
+
+    // Relay the response back to the client
+    // We read from the QUIC stream and write to the client TCP stream
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = quic_stream
+            .read(&mut buf)
+            .await
+            .context("failed to read from remote")?;
+
+        if n == 0 {
+            break;
+        }
+
+        client_stream
+            .write_all(&buf[..n])
+            .await
+            .context("failed to write to client")?;
+    }
+
+    Ok(())
+}
+
+/// Build an HTTP request string from the parsed request.
+fn build_http_request(request: &ParsedRequest) -> String {
+    let mut http = String::new();
+
+    // Request line: METHOD /path HTTP/1.1
+    let version = if request.version == 0 { "1.0" } else { "1.1" };
+    http.push_str(&format!(
+        "{} {} HTTP/{}\r\n",
+        request.method, request.target.path, version
+    ));
+
+    // Headers
+    for (name, value) in &request.headers {
+        http.push_str(&format!("{}: {}\r\n", name, value));
+    }
+
+    // End of headers
+    http.push_str("\r\n");
+
+    http
 }
 
 /// Parse an HTTP request from a buffer.
@@ -459,5 +551,47 @@ mod tests {
         assert!(is_hop_by_hop_header("transfer-encoding"));
         assert!(!is_hop_by_hop_header("content-type"));
         assert!(!is_hop_by_hop_header("host"));
+    }
+
+    #[test]
+    fn test_build_http_request() {
+        let request = ParsedRequest {
+            target: ProxyTarget {
+                node_number: 3,
+                port: 80,
+                path: "/api/test".to_string(),
+            },
+            method: "GET".to_string(),
+            version: 1,
+            headers: vec![
+                ("Host".to_string(), "3.wispers.link".to_string()),
+                ("User-Agent".to_string(), "test/1.0".to_string()),
+            ],
+            keep_alive: true,
+        };
+
+        let http = build_http_request(&request);
+        assert_eq!(
+            http,
+            "GET /api/test HTTP/1.1\r\nHost: 3.wispers.link\r\nUser-Agent: test/1.0\r\n\r\n"
+        );
+    }
+
+    #[test]
+    fn test_build_http_request_http10() {
+        let request = ParsedRequest {
+            target: ProxyTarget {
+                node_number: 5,
+                port: 8080,
+                path: "/".to_string(),
+            },
+            method: "POST".to_string(),
+            version: 0,
+            headers: vec![("Host".to_string(), "5.wispers.link:8080".to_string())],
+            keep_alive: false,
+        };
+
+        let http = build_http_request(&request);
+        assert!(http.starts_with("POST / HTTP/1.0\r\n"));
     }
 }
