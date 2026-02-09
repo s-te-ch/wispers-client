@@ -51,6 +51,12 @@ enum Command {
         /// Stop a running daemon
         #[arg(long)]
         stop: bool,
+
+        /// Allow port forwarding (FORWARD command) from other nodes.
+        /// Without value: allow all ports. With value: allow only listed ports.
+        /// Examples: --allow-port-forwarding or --allow-port-forwarding=80,443
+        #[arg(long, value_name = "PORTS", num_args = 0..=1, default_missing_value = "")]
+        allow_port_forwarding: Option<String>,
     },
     /// Ping another node via P2P connection
     Ping {
@@ -79,6 +85,14 @@ fn main() -> Result<()> {
     let hub_override: Option<String> = cli.hub.clone();
     let profile = cli.profile.clone();
 
+    // Parse allowed ports before daemonizing since we need it after.
+    let allowed_ports = match &cli.command {
+        Command::Serve { allow_port_forwarding: Some(ports), .. } => {
+            Some(serving::AllowedPorts::parse(ports)?)
+        }
+        _ => None,
+    };
+
     // serve --stop and serve --daemon need to be handled before starting tokio.
     match &cli.command {
         Command::Serve { stop: true, .. } => {
@@ -97,7 +111,7 @@ fn main() -> Result<()> {
         .enable_all()
         .build()
         .context("failed to create tokio runtime")?
-        .block_on(async_main(cli.command, hub_override, profile))
+        .block_on(async_main(cli.command, hub_override, profile, allowed_ports))
 }
 
 //-- Daemon Control Functions --------------------------------------------------
@@ -184,7 +198,12 @@ fn get_storage(hub_override: Option<&str>, profile: &str) -> Result<NodeStorage>
 
 //-- Async Main ----------------------------------------------------------------
 
-async fn async_main(command: Command, hub_override: Option<String>, profile: String) -> Result<()> {
+async fn async_main(
+    command: Command,
+    hub_override: Option<String>,
+    profile: String,
+    allowed_ports: Option<serving::AllowedPorts>,
+) -> Result<()> {
     let hub_override = hub_override.as_deref();
     let profile = profile.as_str();
     match command {
@@ -194,7 +213,7 @@ async fn async_main(command: Command, hub_override: Option<String>, profile: Str
         Command::Logout => logout(hub_override, profile).await,
         Command::Nodes => nodes(hub_override, profile).await,
         Command::Status => status(hub_override, profile).await,
-        Command::Serve { daemon: _, stop: _ } => serving::serve(hub_override, profile).await,
+        Command::Serve { .. } => serving::serve(hub_override, profile, allowed_ports).await,
         Command::Ping { node_number, quic } => p2p::ping(hub_override, profile, node_number, quic).await,
         Command::Forward { local_port, node, remote_port } => {
             p2p::forward(hub_override, profile, local_port, node, remote_port).await

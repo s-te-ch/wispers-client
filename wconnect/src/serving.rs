@@ -1,6 +1,7 @@
 //! Serving mode - handles hub connection and incoming P2P connections.
 
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -12,7 +13,57 @@ use wispers_connect::{
 
 use crate::daemon;
 
-pub async fn serve(hub_override: Option<&str>, profile: &str) -> Result<()> {
+/// Port forwarding allowlist configuration.
+#[derive(Clone, Debug)]
+pub enum AllowedPorts {
+    /// Allow FORWARD to any port
+    All,
+    /// Allow FORWARD only to specific ports
+    Whitelist(HashSet<u16>),
+}
+
+impl AllowedPorts {
+    /// Parse the CLI argument value.
+    /// Empty string means allow all ports.
+    /// Comma-separated list means allow only those ports.
+    pub fn parse(value: &str) -> Result<Self> {
+        if value.is_empty() {
+            return Ok(AllowedPorts::All);
+        }
+
+        let mut ports = HashSet::new();
+        for part in value.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let port: u16 = part
+                .parse()
+                .with_context(|| format!("invalid port number: {}", part))?;
+            ports.insert(port);
+        }
+
+        if ports.is_empty() {
+            Ok(AllowedPorts::All)
+        } else {
+            Ok(AllowedPorts::Whitelist(ports))
+        }
+    }
+
+    /// Check if a port is allowed.
+    pub fn is_allowed(&self, port: u16) -> bool {
+        match self {
+            AllowedPorts::All => true,
+            AllowedPorts::Whitelist(ports) => ports.contains(&port),
+        }
+    }
+}
+
+pub async fn serve(
+    hub_override: Option<&str>,
+    profile: &str,
+    allowed_ports: Option<AllowedPorts>,
+) -> Result<()> {
     let storage = super::get_storage(hub_override, profile)?;
     let node = storage
         .restore_or_init_node()
@@ -31,12 +82,30 @@ pub async fn serve(hub_override: Option<&str>, profile: &str) -> Result<()> {
         .await
         .context("failed to start daemon")?;
 
+    // Share allowed_ports with spawned tasks
+    let allowed_ports = Arc::new(allowed_ports);
+
     println!(
         "Serving node {} in group {} (socket: {:?})",
         node_number,
         cg_id,
         daemon.path()
     );
+    if let Some(ref ports) = *allowed_ports {
+        match ports {
+            AllowedPorts::All => println!("  Port forwarding: all ports allowed"),
+            AllowedPorts::Whitelist(set) => {
+                let mut ports: Vec<_> = set.iter().collect();
+                ports.sort();
+                println!(
+                    "  Port forwarding: allowed ports {:?}",
+                    ports
+                );
+            }
+        }
+    } else {
+        println!("  Port forwarding: disabled");
+    }
 
     // Shared state for the serving handle (None until hub connects)
     let handle_state: Arc<RwLock<Option<ServingHandle>>> = Arc::new(RwLock::new(None));
@@ -134,7 +203,8 @@ pub async fn serve(hub_override: Option<&str>, profile: &str) -> Result<()> {
                 match result {
                     Ok(conn) => {
                         println!("Incoming QUIC P2P connection from node {}", conn.peer_node_number);
-                        tokio::spawn(handle_quic_connection(conn));
+                        let allowed_ports = Arc::clone(&allowed_ports);
+                        tokio::spawn(handle_quic_connection(conn, allowed_ports));
                     }
                     Err(e) => {
                         eprintln!("QUIC connection handshake failed: {}", e);
@@ -192,7 +262,7 @@ async fn handle_udp_connection(conn: UdpConnection) {
 }
 
 /// Handle an incoming QUIC P2P connection.
-async fn handle_quic_connection(conn: QuicConnection) {
+async fn handle_quic_connection(conn: QuicConnection, allowed_ports: Arc<Option<AllowedPorts>>) {
     let peer = conn.peer_node_number;
     println!(
         "  QUIC connected to node {} (connection already established)",
@@ -204,7 +274,8 @@ async fn handle_quic_connection(conn: QuicConnection) {
             Ok(stream) => {
                 let stream_id = stream.id();
                 println!("  Accepted stream {} from node {}", stream_id, peer);
-                tokio::spawn(handle_quic_stream(stream, peer, stream_id));
+                let allowed_ports = Arc::clone(&allowed_ports);
+                tokio::spawn(handle_quic_stream(stream, peer, stream_id, allowed_ports));
             }
             Err(e) => {
                 println!("  QUIC connection to node {} closed: {}", peer, e);
@@ -215,7 +286,12 @@ async fn handle_quic_connection(conn: QuicConnection) {
 }
 
 /// Handle a single QUIC stream - read command and dispatch.
-async fn handle_quic_stream(stream: wispers_connect::QuicStream, _peer: i32, stream_id: u64) {
+async fn handle_quic_stream(
+    stream: wispers_connect::QuicStream,
+    _peer: i32,
+    stream_id: u64,
+    allowed_ports: Arc<Option<AllowedPorts>>,
+) {
     let mut buf = [0u8; 1024];
     let n = match stream.read(&mut buf).await {
         Ok(0) => {
@@ -250,7 +326,7 @@ async fn handle_quic_stream(stream: wispers_connect::QuicStream, _peer: i32, str
             match port_str.trim().parse::<u16>() {
                 Ok(port) => {
                     println!("  Received FORWARD {} on stream {}", port, stream_id);
-                    handle_forward_stream(stream, port).await;
+                    handle_forward_stream(stream, port, &allowed_ports).await;
                 }
                 Err(_) => {
                     let _ = stream.write_all(b"ERROR invalid port\n").await;
@@ -271,7 +347,24 @@ async fn handle_quic_stream(stream: wispers_connect::QuicStream, _peer: i32, str
 }
 
 /// Handle a FORWARD command - connect to local port and relay.
-async fn handle_forward_stream(stream: wispers_connect::QuicStream, port: u16) {
+async fn handle_forward_stream(
+    stream: wispers_connect::QuicStream,
+    port: u16,
+    allowed_ports: &Option<AllowedPorts>,
+) {
+    // Check if port forwarding is allowed
+    let allowed = match allowed_ports {
+        None => false,
+        Some(ports) => ports.is_allowed(port),
+    };
+
+    if !allowed {
+        println!("  FORWARD to port {} denied (not in allowlist)", port);
+        let _ = stream.write_all(b"ERROR port not allowed\n").await;
+        let _ = stream.finish().await;
+        return;
+    }
+
     let stream = Arc::new(stream);
 
     // Connect to localhost:port
@@ -339,4 +432,49 @@ async fn handle_forward_stream(stream: wispers_connect::QuicStream, port: u16) {
     };
 
     tokio::join!(quic_to_tcp, tcp_to_quic);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_allowed_ports_parse_empty() {
+        let ports = AllowedPorts::parse("").unwrap();
+        assert!(matches!(ports, AllowedPorts::All));
+        assert!(ports.is_allowed(80));
+        assert!(ports.is_allowed(443));
+        assert!(ports.is_allowed(8080));
+    }
+
+    #[test]
+    fn test_allowed_ports_parse_single() {
+        let ports = AllowedPorts::parse("80").unwrap();
+        assert!(ports.is_allowed(80));
+        assert!(!ports.is_allowed(443));
+    }
+
+    #[test]
+    fn test_allowed_ports_parse_multiple() {
+        let ports = AllowedPorts::parse("80,443,8080").unwrap();
+        assert!(ports.is_allowed(80));
+        assert!(ports.is_allowed(443));
+        assert!(ports.is_allowed(8080));
+        assert!(!ports.is_allowed(22));
+    }
+
+    #[test]
+    fn test_allowed_ports_parse_with_spaces() {
+        let ports = AllowedPorts::parse("80, 443, 8080").unwrap();
+        assert!(ports.is_allowed(80));
+        assert!(ports.is_allowed(443));
+        assert!(ports.is_allowed(8080));
+    }
+
+    #[test]
+    fn test_allowed_ports_parse_invalid() {
+        assert!(AllowedPorts::parse("abc").is_err());
+        assert!(AllowedPorts::parse("80,abc").is_err());
+        assert!(AllowedPorts::parse("99999").is_err()); // > u16::MAX
+    }
 }
