@@ -88,8 +88,8 @@ enum Command {
     },
     /// Start HTTP proxy for accessing web servers on remote nodes
     ProxyHttp {
-        /// Address to bind the proxy server (default: 127.0.0.111:8080)
-        #[arg(long, default_value = "127.0.0.111:8080")]
+        /// Address to bind the proxy server (default: 127.0.0.1:8080)
+        #[arg(long, default_value = "127.0.0.1:8080")]
         bind: String,
 
         /// Node number to use as egress point for non-wispers.link traffic.
@@ -99,8 +99,8 @@ enum Command {
     },
     /// Start SOCKS5 proxy for accessing services on remote nodes
     ProxySocks {
-        /// Address to bind the proxy server (default: 127.0.0.111:1080)
-        #[arg(long, default_value = "127.0.0.111:1080")]
+        /// Address to bind the proxy server (default: 127.0.0.1:1080)
+        #[arg(long, default_value = "127.0.0.1:1080")]
         bind: String,
 
         /// Node number to use as egress point for non-wispers.link traffic.
