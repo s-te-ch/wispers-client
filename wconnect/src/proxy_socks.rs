@@ -59,11 +59,12 @@ pub async fn run(
     println!("SOCKS5 proxy listening on {}", bind_addr);
     if let Some(egress) = egress_node {
         println!("  Internet egress: enabled via node {}", egress);
-        println!("Example: curl --proxy socks5://{} https://example.com/", bind_addr);
+        println!("Example: curl --proxy socks5h://{} https://example.com/", bind_addr);
     } else {
         println!("  Internet egress: disabled (wispers.link only)");
-        println!("Example: curl --proxy socks5://{} http://3.wispers.link/", bind_addr);
+        println!("Example: curl --proxy socks5h://{} http://3.wispers.link/", bind_addr);
     }
+    println!("  (Use socks5h:// so the proxy resolves hostnames, not curl)");
 
     let node = Arc::new(node);
     let pool = ConnectionPool::new();
