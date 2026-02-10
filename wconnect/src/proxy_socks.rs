@@ -34,7 +34,12 @@ const REP_COMMAND_NOT_SUPPORTED: u8 = 0x07;
 const REP_ADDRESS_TYPE_NOT_SUPPORTED: u8 = 0x08;
 
 /// Run the SOCKS5 proxy server.
-pub async fn run(hub_override: Option<&str>, profile: &str, bind_addr: &str) -> Result<()> {
+pub async fn run(
+    hub_override: Option<&str>,
+    profile: &str,
+    bind_addr: &str,
+    egress_node: Option<i32>,
+) -> Result<()> {
     let storage = super::get_storage(hub_override, profile)?;
     let node = storage
         .restore_or_init_node()
@@ -53,8 +58,13 @@ pub async fn run(hub_override: Option<&str>, profile: &str, bind_addr: &str) -> 
         .with_context(|| format!("failed to bind to {}", bind_addr))?;
 
     println!("SOCKS5 proxy listening on {}", bind_addr);
-    println!("Configure your browser/client to use this as SOCKS5 proxy");
-    println!("Example: curl --proxy socks5://{} http://3.wispers.link/", bind_addr);
+    if let Some(egress) = egress_node {
+        println!("  Internet egress: enabled via node {}", egress);
+        println!("Example: curl --proxy socks5://{} https://example.com/", bind_addr);
+    } else {
+        println!("  Internet egress: disabled (wispers.link only)");
+        println!("Example: curl --proxy socks5://{} http://3.wispers.link/", bind_addr);
+    }
 
     let node = Arc::new(node);
     let pool = ConnectionPool::new();
@@ -75,7 +85,7 @@ pub async fn run(hub_override: Option<&str>, profile: &str, bind_addr: &str) -> 
                 let node = Arc::clone(&node);
                 let pool = pool.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, node, pool).await {
+                    if let Err(e) = handle_connection(stream, node, pool, egress_node).await {
                         eprintln!("Connection error: {}", e);
                     }
                 });
@@ -101,6 +111,7 @@ async fn handle_connection(
     mut stream: TcpStream,
     node: Arc<Node>,
     pool: ConnectionPool,
+    egress_node: Option<i32>,
 ) -> Result<()> {
     let peer = stream.peer_addr()?;
 
@@ -122,7 +133,7 @@ async fn handle_connection(
     println!("  CONNECT {}:{}", request.host, request.port);
 
     // Step 3: Route based on destination
-    match route_connection(&mut stream, &node, &pool, &request).await {
+    match route_connection(&mut stream, &node, &pool, &request, egress_node).await {
         Ok(()) => {}
         Err(e) => {
             eprintln!("  Routing failed: {}", e);
@@ -258,6 +269,7 @@ async fn route_connection(
     node: &Node,
     pool: &ConnectionPool,
     request: &ConnectRequest,
+    egress_node: Option<i32>,
 ) -> Result<()> {
     // Check if it's a wispers.link hostname
     match parse_wispers_host(&request.host) {
@@ -266,10 +278,18 @@ async fn route_connection(
             forward_to_node(stream, node, pool, wispers_host.node_number, request.port).await
         }
         Err(None) => {
-            // Not a wispers.link hostname - no egress support yet
-            println!("  Rejected: {} (egress not enabled)", request.host);
-            send_reply(stream, REP_NOT_ALLOWED).await;
-            Err(anyhow::anyhow!("egress not enabled"))
+            // Not a wispers.link hostname - try egress if configured
+            match egress_node {
+                Some(egress) => {
+                    println!("  Egress via node {}", egress);
+                    egress_to_node(stream, node, pool, egress, &request.host, request.port).await
+                }
+                None => {
+                    println!("  Rejected: {} (egress not enabled)", request.host);
+                    send_reply(stream, REP_NOT_ALLOWED).await;
+                    Err(anyhow::anyhow!("egress not enabled"))
+                }
+            }
         }
         Err(Some(e)) => {
             // Invalid wispers.link hostname
@@ -327,6 +347,54 @@ async fn forward_to_node(
     Ok(())
 }
 
+/// Egress connection through a wispers node using CONNECT command.
+async fn egress_to_node(
+    stream: &mut TcpStream,
+    node: &Node,
+    pool: &ConnectionPool,
+    egress_node: i32,
+    host: &str,
+    port: u16,
+) -> Result<()> {
+    // Get or create QUIC connection to egress node
+    let quic_conn = match tokio::time::timeout(
+        REQUEST_TIMEOUT,
+        pool.get_or_connect(node, egress_node),
+    )
+    .await
+    {
+        Ok(Ok(conn)) => conn,
+        Ok(Err(e)) => {
+            println!("  Failed to connect to egress node {}: {}", egress_node, e);
+            send_reply(stream, REP_HOST_UNREACHABLE).await;
+            return Err(anyhow::anyhow!("failed to connect to egress node: {}", e));
+        }
+        Err(_) => {
+            println!("  Timeout connecting to egress node {}", egress_node);
+            send_reply(stream, REP_TTL_EXPIRED).await;
+            return Err(anyhow::anyhow!("connection timeout"));
+        }
+    };
+
+    // Open stream and send CONNECT command
+    let quic_stream = match open_connect_stream(&quic_conn, host, port).await {
+        Ok(s) => s,
+        Err(e) => {
+            println!("  CONNECT failed: {}", e);
+            send_reply(stream, REP_CONNECTION_REFUSED).await;
+            return Err(e);
+        }
+    };
+
+    // Send success reply to client
+    send_reply(stream, REP_SUCCESS).await;
+
+    // Bidirectional relay
+    relay(stream, quic_stream).await;
+
+    Ok(())
+}
+
 /// Open a QUIC stream and send FORWARD command.
 async fn open_forward_stream(
     quic_conn: &QuicConnection,
@@ -350,6 +418,45 @@ async fn open_forward_stream(
         .read(&mut response_buf)
         .await
         .context("failed to read FORWARD response")?;
+
+    let response = String::from_utf8_lossy(&response_buf[..n]);
+    let response = response.trim();
+
+    if response.starts_with("ERROR ") {
+        anyhow::bail!("remote error: {}", &response[6..]);
+    }
+
+    if response != "OK" {
+        anyhow::bail!("unexpected response: {}", response);
+    }
+
+    Ok(quic_stream)
+}
+
+/// Open a QUIC stream and send CONNECT command for egress.
+async fn open_connect_stream(
+    quic_conn: &QuicConnection,
+    host: &str,
+    port: u16,
+) -> Result<wispers_connect::QuicStream> {
+    let quic_stream = quic_conn
+        .open_stream()
+        .await
+        .context("failed to open QUIC stream")?;
+
+    // Send CONNECT command
+    let connect_cmd = format!("CONNECT {}:{}\n", host, port);
+    quic_stream
+        .write_all(connect_cmd.as_bytes())
+        .await
+        .context("failed to send CONNECT command")?;
+
+    // Read response
+    let mut response_buf = [0u8; 256];
+    let n = quic_stream
+        .read(&mut response_buf)
+        .await
+        .context("failed to read CONNECT response")?;
 
     let response = String::from_utf8_lossy(&response_buf[..n]);
     let response = response.trim();

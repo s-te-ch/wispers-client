@@ -97,6 +97,11 @@ enum Command {
         /// Address to bind the proxy server (default: 127.0.0.111:1080)
         #[arg(long, default_value = "127.0.0.111:1080")]
         bind: String,
+
+        /// Node number to use as egress point for non-wispers.link traffic.
+        /// Without this, only *.wispers.link destinations are allowed.
+        #[arg(long)]
+        egress_node: Option<i32>,
     },
 }
 
@@ -244,7 +249,9 @@ async fn async_main(
             p2p::forward(hub_override, profile, local_port, node, remote_port).await
         }
         Command::ProxyHttp { bind } => proxy_http::run(hub_override, profile, &bind).await,
-        Command::ProxySocks { bind } => proxy_socks::run(hub_override, profile, &bind).await,
+        Command::ProxySocks { bind, egress_node } => {
+            proxy_socks::run(hub_override, profile, &bind, egress_node).await
+        }
     }
 }
 
