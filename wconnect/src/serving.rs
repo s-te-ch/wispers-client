@@ -63,6 +63,7 @@ pub async fn serve(
     hub_override: Option<&str>,
     profile: &str,
     allowed_ports: Option<AllowedPorts>,
+    allow_egress: bool,
 ) -> Result<()> {
     let storage = super::get_storage(hub_override, profile)?;
     let node = storage
@@ -105,6 +106,11 @@ pub async fn serve(
         }
     } else {
         println!("  Port forwarding: disabled");
+    }
+    if allow_egress {
+        println!("  Internet egress: enabled");
+    } else {
+        println!("  Internet egress: disabled");
     }
 
     // Shared state for the serving handle (None until hub connects)
@@ -204,7 +210,7 @@ pub async fn serve(
                     Ok(conn) => {
                         println!("Incoming QUIC P2P connection from node {}", conn.peer_node_number);
                         let allowed_ports = Arc::clone(&allowed_ports);
-                        tokio::spawn(handle_quic_connection(conn, allowed_ports));
+                        tokio::spawn(handle_quic_connection(conn, allowed_ports, allow_egress));
                     }
                     Err(e) => {
                         eprintln!("QUIC connection handshake failed: {}", e);
@@ -262,7 +268,11 @@ async fn handle_udp_connection(conn: UdpConnection) {
 }
 
 /// Handle an incoming QUIC P2P connection.
-async fn handle_quic_connection(conn: QuicConnection, allowed_ports: Arc<Option<AllowedPorts>>) {
+async fn handle_quic_connection(
+    conn: QuicConnection,
+    allowed_ports: Arc<Option<AllowedPorts>>,
+    allow_egress: bool,
+) {
     let peer = conn.peer_node_number;
     println!(
         "  QUIC connected to node {} (connection already established)",
@@ -275,7 +285,7 @@ async fn handle_quic_connection(conn: QuicConnection, allowed_ports: Arc<Option<
                 let stream_id = stream.id();
                 println!("  Accepted stream {} from node {}", stream_id, peer);
                 let allowed_ports = Arc::clone(&allowed_ports);
-                tokio::spawn(handle_quic_stream(stream, peer, stream_id, allowed_ports));
+                tokio::spawn(handle_quic_stream(stream, peer, stream_id, allowed_ports, allow_egress));
             }
             Err(e) => {
                 println!("  QUIC connection to node {} closed: {}", peer, e);
@@ -291,6 +301,7 @@ async fn handle_quic_stream(
     _peer: i32,
     stream_id: u64,
     allowed_ports: Arc<Option<AllowedPorts>>,
+    allow_egress: bool,
 ) {
     let mut buf = [0u8; 1024];
     let n = match stream.read(&mut buf).await {
@@ -333,6 +344,11 @@ async fn handle_quic_stream(
                     let _ = stream.finish().await;
                 }
             }
+        }
+        cmd if cmd.starts_with(b"CONNECT ") => {
+            let target = String::from_utf8_lossy(&cmd[8..]).trim().to_string();
+            println!("  Received CONNECT {} on stream {}", target, stream_id);
+            handle_connect_stream(stream, &target, allow_egress).await;
         }
         _ => {
             println!(
@@ -434,6 +450,119 @@ async fn handle_forward_stream(
     tokio::join!(quic_to_tcp, tcp_to_quic);
 }
 
+/// Handle a CONNECT command - connect to arbitrary host:port and relay.
+async fn handle_connect_stream(
+    stream: wispers_connect::QuicStream,
+    target: &str,
+    allow_egress: bool,
+) {
+    // Check if egress is allowed
+    if !allow_egress {
+        println!("  CONNECT to {} denied (egress not enabled)", target);
+        let _ = stream.write_all(b"ERROR egress not allowed\n").await;
+        let _ = stream.finish().await;
+        return;
+    }
+
+    // Parse host:port
+    let (host, port) = match parse_host_port(target) {
+        Some(hp) => hp,
+        None => {
+            println!("  CONNECT invalid target: {}", target);
+            let _ = stream.write_all(b"ERROR invalid target format\n").await;
+            let _ = stream.finish().await;
+            return;
+        }
+    };
+
+    let stream = Arc::new(stream);
+
+    // Connect to remote host:port
+    let tcp = match TcpStream::connect((host.as_str(), port)).await {
+        Ok(tcp) => {
+            if let Err(e) = stream.write_all(b"OK\n").await {
+                eprintln!("  Failed to send OK: {}", e);
+                return;
+            }
+            tcp
+        }
+        Err(e) => {
+            let msg = format!("ERROR {}\n", e);
+            let _ = stream.write_all(msg.as_bytes()).await;
+            let _ = stream.finish().await;
+            return;
+        }
+    };
+
+    let (mut tcp_read, mut tcp_write) = tcp.into_split();
+
+    let stream_read = Arc::clone(&stream);
+    let stream_write = Arc::clone(&stream);
+
+    // QUIC -> TCP
+    let quic_to_tcp = async move {
+        let mut buf = [0u8; 8192];
+        loop {
+            match stream_read.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    if let Err(e) = tcp_write.write_all(&buf[..n]).await {
+                        eprintln!("  TCP write error: {}", e);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("  QUIC read error: {}", e);
+                    break;
+                }
+            }
+        }
+        let _ = tcp_write.shutdown().await;
+    };
+
+    // TCP -> QUIC
+    let tcp_to_quic = async move {
+        let mut buf = [0u8; 8192];
+        loop {
+            match tcp_read.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    if let Err(e) = stream_write.write_all(&buf[..n]).await {
+                        eprintln!("  QUIC write error: {}", e);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("  TCP read error: {}", e);
+                    break;
+                }
+            }
+        }
+        let _ = stream_write.finish().await;
+    };
+
+    tokio::join!(quic_to_tcp, tcp_to_quic);
+}
+
+/// Parse a "host:port" string into (host, port).
+fn parse_host_port(target: &str) -> Option<(String, u16)> {
+    // Find the last colon (to handle IPv6 addresses like [::1]:8080)
+    let colon_pos = target.rfind(':')?;
+
+    let host = &target[..colon_pos];
+    let port_str = &target[colon_pos + 1..];
+
+    // Host must not be empty
+    if host.is_empty() {
+        return None;
+    }
+
+    // Parse port
+    let port: u16 = port_str.parse().ok()?;
+
+    Some((host.to_string(), port))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,5 +605,41 @@ mod tests {
         assert!(AllowedPorts::parse("abc").is_err());
         assert!(AllowedPorts::parse("80,abc").is_err());
         assert!(AllowedPorts::parse("99999").is_err()); // > u16::MAX
+    }
+
+    #[test]
+    fn test_parse_host_port_basic() {
+        let (host, port) = parse_host_port("example.com:443").unwrap();
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 443);
+    }
+
+    #[test]
+    fn test_parse_host_port_localhost() {
+        let (host, port) = parse_host_port("localhost:8080").unwrap();
+        assert_eq!(host, "localhost");
+        assert_eq!(port, 8080);
+    }
+
+    #[test]
+    fn test_parse_host_port_ipv4() {
+        let (host, port) = parse_host_port("192.168.1.1:80").unwrap();
+        assert_eq!(host, "192.168.1.1");
+        assert_eq!(port, 80);
+    }
+
+    #[test]
+    fn test_parse_host_port_ipv6() {
+        let (host, port) = parse_host_port("[::1]:8080").unwrap();
+        assert_eq!(host, "[::1]");
+        assert_eq!(port, 8080);
+    }
+
+    #[test]
+    fn test_parse_host_port_invalid() {
+        assert!(parse_host_port("example.com").is_none()); // no port
+        assert!(parse_host_port(":8080").is_none()); // no host
+        assert!(parse_host_port("example.com:abc").is_none()); // invalid port
+        assert!(parse_host_port("example.com:99999").is_none()); // port too large
     }
 }
