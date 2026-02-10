@@ -160,10 +160,7 @@ async fn handle_client_connection(
         // Get target node based on destination
         let (target_node, routing_via_egress) = match &request.target.destination {
             Destination::WispersNode { node_number, .. } => (*node_number, false),
-            Destination::Internet { .. } => {
-                // Safe: parse_request only returns Internet if egress_node is Some
-                (egress_node.unwrap(), true)
-            }
+            Destination::Internet { .. } => (egress_node.unwrap(), true)
         };
 
         // Log the request
@@ -226,7 +223,7 @@ async fn handle_client_connection(
                         // Use FORWARD for wispers nodes
                         tokio::time::timeout(
                             REQUEST_TIMEOUT,
-                            forward_request(&mut stream, &quic_conn, &request, *port, path),
+                            handle_wispers_request(&mut stream, &quic_conn, &request, *port, path),
                         )
                         .await
                     }
@@ -234,7 +231,7 @@ async fn handle_client_connection(
                         // Use CONNECT for internet egress
                         tokio::time::timeout(
                             REQUEST_TIMEOUT,
-                            egress_request(&mut stream, &quic_conn, &request, host, *port, path),
+                            handle_egress_request(&mut stream, &quic_conn, &request, host, *port, path),
                         )
                         .await
                     }
@@ -259,7 +256,7 @@ async fn handle_client_connection(
                         // Use FORWARD for wispers nodes tunnel
                         tokio::time::timeout(
                             REQUEST_TIMEOUT,
-                            handle_forward_tunnel(&mut stream, &quic_conn, *port),
+                            handle_wispers_tunnel(&mut stream, &quic_conn, *port),
                         )
                         .await
                     }
@@ -267,7 +264,7 @@ async fn handle_client_connection(
                         // Use CONNECT for internet tunnel
                         tokio::time::timeout(
                             REQUEST_TIMEOUT,
-                            handle_connect_tunnel(&mut stream, &quic_conn, host, *port),
+                            handle_egress_tunnel(&mut stream, &quic_conn, host, *port),
                         )
                         .await
                     }
@@ -350,7 +347,7 @@ async fn read_request_bytes(stream: &mut TcpStream) -> Result<ReadResult, ProxyE
 }
 
 /// Forward an HTTP request through a QUIC stream to the target node using FORWARD command.
-async fn forward_request(
+async fn handle_wispers_request(
     client_stream: &mut TcpStream,
     quic_conn: &QuicConnection,
     request: &ParsedRequest,
@@ -420,7 +417,7 @@ async fn forward_request(
 }
 
 /// Forward an HTTP request through a QUIC stream via egress using CONNECT command.
-async fn egress_request(
+async fn handle_egress_request(
     client_stream: &mut TcpStream,
     quic_conn: &QuicConnection,
     request: &ParsedRequest,
@@ -491,7 +488,7 @@ async fn egress_request(
 }
 
 /// Handle HTTP CONNECT tunnel to a wispers node using FORWARD command.
-async fn handle_forward_tunnel(
+async fn handle_wispers_tunnel(
     client_stream: &mut TcpStream,
     quic_conn: &QuicConnection,
     port: u16,
@@ -583,7 +580,7 @@ async fn handle_forward_tunnel(
 }
 
 /// Handle HTTP CONNECT tunnel for HTTPS traffic via egress.
-async fn handle_connect_tunnel(
+async fn handle_egress_tunnel(
     client_stream: &mut TcpStream,
     quic_conn: &QuicConnection,
     host: &str,
