@@ -482,7 +482,7 @@ impl Node {
         let hub_addr = self.hub_addr();
 
         let is_activated = self.state() == NodeState::Activated;
-        println!(
+        log::info!(
             "Starting serving session for node {} in group {}{}",
             registration.node_number,
             registration.connectivity_group_id,

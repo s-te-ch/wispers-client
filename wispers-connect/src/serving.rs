@@ -188,7 +188,7 @@ impl ServingSession {
     ///
     /// This processes hub requests and local commands until shutdown or error.
     pub async fn run(mut self) -> Result<(), ServingError> {
-        println!("ServingSession running for node {}", self.node_number);
+        log::info!("ServingSession running for node {}", self.node_number);
 
         loop {
             tokio::select! {
@@ -204,12 +204,12 @@ impl ServingSession {
                             let _ = reply.send(result);
                         }
                         Some(Command::Shutdown) => {
-                            println!("Shutdown requested");
+                            log::info!("Shutdown requested");
                             break;
                         }
                         None => {
                             // All handles dropped
-                            println!("All handles dropped, shutting down");
+                            log::info!("All handles dropped, shutting down");
                             break;
                         }
                     }
@@ -222,11 +222,11 @@ impl ServingSession {
                             self.handle_hub_request(request).await;
                         }
                         Ok(None) => {
-                            println!("Hub stream ended");
+                            log::info!("Hub stream ended");
                             break;
                         }
                         Err(e) => {
-                            eprintln!("Hub stream error: {}", e);
+                            log::error!("Hub stream error: {}", e);
                             return Err(ServingError::Hub(crate::hub::HubError::Rpc(e)));
                         }
                     }
@@ -234,7 +234,7 @@ impl ServingSession {
             }
         }
 
-        println!("ServingSession ended");
+        log::info!("ServingSession ended");
         Ok(())
     }
 
@@ -267,19 +267,19 @@ impl ServingSession {
         let code = PairingCode::new(self.node_number, secret.clone());
         self.pairing_secret = Some(secret);
 
-        println!("Generated pairing code: {}", code.format());
+        log::info!("Generated pairing code: {}", code.format());
         Ok(code)
     }
 
     async fn handle_hub_request(&mut self, request: proto::ServingRequest) {
-        println!(
+        log::debug!(
             "Received request: id={} src_node={} dest_node={}",
             request.request_id, request.source_node_number, request.dest_node_number
         );
 
         match request.kind {
             Some(proto::serving_request::Kind::Welcome(_)) => {
-                println!("  Welcome received");
+                log::debug!("  Welcome received");
             }
             Some(proto::serving_request::Kind::PairNodesMessage(msg)) => {
                 self.handle_pair_nodes_message(request.request_id, msg).await;
@@ -291,25 +291,25 @@ impl ServingSession {
                 self.handle_start_connection_request(request.request_id, request.source_node_number, req).await;
             }
             None => {
-                println!("  Unknown request kind");
+                log::warn!("  Unknown request kind");
             }
         }
     }
 
     async fn handle_pair_nodes_message(&mut self, request_id: i64, msg: proto::PairNodesMessage) {
         let Some(payload) = &msg.payload else {
-            eprintln!("  PairNodesMessage missing payload");
+            log::warn!("  PairNodesMessage missing payload");
             return;
         };
 
-        println!(
+        log::debug!(
             "  PairNodesMessage: sender={} receiver={}",
             payload.sender_node_number, payload.receiver_node_number
         );
 
         // Check we have an active pairing secret
         let Some(secret) = &self.pairing_secret else {
-            eprintln!("  No active pairing session, ignoring");
+            log::warn!("  No active pairing session, ignoring");
             self.send_error_response(request_id, "no active pairing session").await;
             return;
         };
@@ -317,12 +317,12 @@ impl ServingSession {
         // Verify MAC
         let payload_bytes = payload.encode_to_vec();
         if !secret.verify_mac(&payload_bytes, &msg.mac) {
-            eprintln!("  MAC verification failed");
+            log::warn!("  MAC verification failed");
             self.send_error_response(request_id, "MAC verification failed").await;
             return;
         }
 
-        println!("  MAC verified successfully");
+        log::debug!("  MAC verified successfully");
 
         // Store the new node info and generate our nonce
         let our_nonce = generate_nonce();
@@ -357,9 +357,9 @@ impl ServingSession {
         };
 
         if let Err(e) = self.conn.response_tx.send(response).await {
-            eprintln!("  Failed to send response: {}", e);
+            log::error!("  Failed to send response: {}", e);
         } else {
-            println!("  Sent pairing reply");
+            log::debug!("  Sent pairing reply");
         }
 
         // Clear pairing secret (used), keep pending_endorsement for cosign
@@ -367,18 +367,18 @@ impl ServingSession {
     }
 
     async fn handle_roster_cosign_request(&mut self, request_id: i64, req: proto::RosterCosignRequest) {
-        println!("  RosterCosignRequest: new_node={}", req.new_node_number);
+        log::debug!("  RosterCosignRequest: new_node={}", req.new_node_number);
 
         // Check we have a pending endorsement
         let Some(pending) = &self.pending_endorsement else {
-            eprintln!("  No pending endorsement, ignoring");
+            log::warn!("  No pending endorsement, ignoring");
             self.send_error_response(request_id, "no pending endorsement").await;
             return;
         };
 
         // Verify it's for the node we paired with
         if req.new_node_number as i32 != pending.new_node_number {
-            eprintln!(
+            log::warn!(
                 "  Wrong node number: expected {}, got {}",
                 pending.new_node_number, req.new_node_number
             );
@@ -388,7 +388,7 @@ impl ServingSession {
 
         // Get the roster and find the activation addendum
         let Some(roster) = &req.new_roster else {
-            eprintln!("  Missing roster in cosign request");
+            log::warn!("  Missing roster in cosign request");
             self.send_error_response(request_id, "missing roster").await;
             return;
         };
@@ -402,39 +402,39 @@ impl ServingSession {
         });
 
         let Some(activation) = activation else {
-            eprintln!("  No activation addendum found");
+            log::warn!("  No activation addendum found");
             self.send_error_response(request_id, "no activation addendum").await;
             return;
         };
 
         let Some(activation_payload) = &activation.payload else {
-            eprintln!("  Activation missing payload");
+            log::warn!("  Activation missing payload");
             self.send_error_response(request_id, "activation missing payload").await;
             return;
         };
 
         // Verify base_version_hash by reconstructing base roster from new_roster
         if !self.verify_base_version_hash(roster, activation_payload, pending.new_node_number) {
-            eprintln!("  Base version hash mismatch");
+            log::warn!("  Base version hash mismatch");
             self.send_error_response(request_id, "base version hash mismatch").await;
             return;
         }
 
         // Verify nonces match
         if activation_payload.new_node_nonce != pending.new_node_nonce {
-            eprintln!("  New node nonce mismatch");
+            log::warn!("  New node nonce mismatch");
             self.send_error_response(request_id, "new node nonce mismatch").await;
             return;
         }
         if activation_payload.endorser_nonce != pending.our_nonce {
-            eprintln!("  Endorser nonce mismatch");
+            log::warn!("  Endorser nonce mismatch");
             self.send_error_response(request_id, "endorser nonce mismatch").await;
             return;
         }
 
         // Verify endorser node number
         if activation_payload.endorser_node_number != self.node_number {
-            eprintln!("  Wrong endorser node number");
+            log::warn!("  Wrong endorser node number");
             self.send_error_response(request_id, "wrong endorser node number").await;
             return;
         }
@@ -442,17 +442,17 @@ impl ServingSession {
         // Verify new node's public key in roster matches what we received in pairing
         let new_node_in_roster = roster.nodes.iter().find(|n| n.node_number == pending.new_node_number);
         let Some(new_node_in_roster) = new_node_in_roster else {
-            eprintln!("  New node not found in roster");
+            log::warn!("  New node not found in roster");
             self.send_error_response(request_id, "new node not in roster").await;
             return;
         };
         if new_node_in_roster.public_key_spki != pending.new_node_pubkey {
-            eprintln!("  Public key mismatch");
+            log::warn!("  Public key mismatch");
             self.send_error_response(request_id, "public key mismatch").await;
             return;
         }
 
-        println!("  All verifications passed, signing activation");
+        log::debug!("  All verifications passed, signing activation");
 
         // Sign the activation payload
         let payload_bytes = activation_payload.encode_to_vec();
@@ -470,9 +470,9 @@ impl ServingSession {
         };
 
         if let Err(e) = self.conn.response_tx.send(response).await {
-            eprintln!("  Failed to send cosign response: {}", e);
+            log::error!("  Failed to send cosign response: {}", e);
         } else {
-            println!("  Sent cosign response");
+            log::debug!("  Sent cosign response");
         }
 
         // Clear pending endorsement
@@ -516,7 +516,7 @@ impl ServingSession {
 
         // Compare
         if computed_hash != activation_payload.base_version_hash {
-            eprintln!(
+            log::warn!(
                 "  Base hash mismatch: computed {:?}, expected {:?}",
                 &computed_hash[..8],
                 &activation_payload.base_version_hash[..activation_payload.base_version_hash.len().min(8)]
@@ -524,7 +524,7 @@ impl ServingSession {
             return false;
         }
 
-        println!("  Base version hash verified");
+        log::debug!("  Base version hash verified");
         true
     }
 
@@ -536,7 +536,7 @@ impl ServingSession {
     ) {
         use crate::hub::HubClient;
 
-        println!(
+        log::debug!(
             "  StartConnectionRequest from node {}, answerer_node={}",
             caller_node_number, req.answerer_node_number
         );
@@ -545,7 +545,7 @@ impl ServingSession {
         let caller_x25519_public: [u8; 32] = match req.caller_x25519_public_key.clone().try_into() {
             Ok(key) => key,
             Err(_) => {
-                println!("  Invalid X25519 public key length");
+                log::warn!("  Invalid X25519 public key length");
                 self.send_error_response(request_id, "invalid X25519 public key").await;
                 return;
             }
@@ -555,7 +555,7 @@ impl ServingSession {
         let mut client = match HubClient::connect(&self.p2p_config.hub_addr).await {
             Ok(c) => c,
             Err(e) => {
-                println!("  Failed to connect to hub: {}", e);
+                log::error!("  Failed to connect to hub: {}", e);
                 self.send_error_response(request_id, "internal error").await;
                 return;
             }
@@ -570,12 +570,12 @@ impl ServingSession {
                 crate::roster::RosterVerificationError::VerifierNotInRoster(_),
             )) => {
                 // We're not in the roster yet - not activated
-                println!("  Node not yet activated, cannot accept P2P connections");
+                log::info!("  Node not yet activated, cannot accept P2P connections");
                 self.send_error_response(request_id, "node not yet activated").await;
                 return;
             }
             Err(e) => {
-                println!("  Failed to fetch/verify roster: {}", e);
+                log::error!("  Failed to fetch/verify roster: {}", e);
                 self.send_error_response(request_id, "internal error").await;
                 return;
             }
@@ -583,13 +583,13 @@ impl ServingSession {
 
         // Look up caller's Ed25519 public key in roster
         let Some(caller_node) = roster.nodes.iter().find(|n| n.node_number == caller_node_number) else {
-            println!("  Caller node {} not found in roster", caller_node_number);
+            log::warn!("  Caller node {} not found in roster", caller_node_number);
             self.send_error_response(request_id, "caller not in roster").await;
             return;
         };
 
         let Ok(verifying_key) = VerifyingKey::from_public_key_der(&caller_node.public_key_spki) else {
-            println!("  Invalid public key format for node {}", caller_node_number);
+            log::warn!("  Invalid public key format for node {}", caller_node_number);
             self.send_error_response(request_id, "invalid caller public key").await;
             return;
         };
@@ -601,19 +601,19 @@ impl ServingSession {
         message_to_verify.extend_from_slice(req.caller_sdp.as_bytes());
 
         let Ok(signature_bytes): Result<[u8; 64], _> = req.signature.clone().try_into() else {
-            println!("  Invalid signature format");
+            log::warn!("  Invalid signature format");
             self.send_error_response(request_id, "invalid signature").await;
             return;
         };
         let signature = Signature::from_bytes(&signature_bytes);
 
         if verifying_key.verify(&message_to_verify, &signature).is_err() {
-            println!("  Signature verification failed for node {}", caller_node_number);
+            log::warn!("  Signature verification failed for node {}", caller_node_number);
             self.send_error_response(request_id, "signature verification failed").await;
             return;
         }
 
-        println!("  Verified caller signature: node {}", caller_node_number);
+        log::debug!("  Verified caller signature: node {}", caller_node_number);
 
         // Generate connection ID
         let connection_id = self.connection_id_counter.fetch_add(1, Ordering::Relaxed);
@@ -621,14 +621,14 @@ impl ServingSession {
         // Create IceAnswerer with caller's SDP
         // Use the STUN/TURN config provided by caller to ensure TURN relaying works
         let Some(stun_turn_config) = &req.stun_turn_config else {
-            println!("  Missing STUN/TURN config in request");
+            log::warn!("  Missing STUN/TURN config in request");
             self.send_error_response(request_id, "missing STUN/TURN config").await;
             return;
         };
         let ice_answerer = match IceAnswerer::new(&req.caller_sdp, stun_turn_config) {
             Ok(answerer) => answerer,
             Err(e) => {
-                println!("  Failed to create ICE answerer: {}", e);
+                log::error!("  Failed to create ICE answerer: {}", e);
                 self.send_error_response(request_id, &format!("ICE error: {}", e)).await;
                 return;
             }
@@ -661,11 +661,11 @@ impl ServingSession {
         };
 
         if let Err(e) = self.conn.response_tx.send(response).await {
-            eprintln!("  Failed to send StartConnectionResponse: {}", e);
+            log::error!("  Failed to send StartConnectionResponse: {}", e);
             return;
         }
 
-        println!("  Sent StartConnectionResponse, connection_id={}", connection_id);
+        log::debug!("  Sent StartConnectionResponse, connection_id={}", connection_id);
 
         // Handle based on requested transport type
         let transport = req.transport();
@@ -675,7 +675,7 @@ impl ServingSession {
                 // The channel receives a fully-connected UdpConnection (or error)
                 let tx = self.incoming_udp_tx.clone();
                 tokio::spawn(async move {
-                    println!("  Starting UDP ICE for connection_id={}", connection_id);
+                    log::debug!("  Starting UDP ICE for connection_id={}", connection_id);
                     let result = UdpConnection::connect_answerer(
                         caller_node_number,
                         connection_id,
@@ -685,22 +685,22 @@ impl ServingSession {
                     .await;
 
                     match &result {
-                        Ok(_) => println!("  UDP ICE completed for connection_id={}", connection_id),
-                        Err(e) => eprintln!("  UDP ICE failed for connection_id={}: {}", connection_id, e),
+                        Ok(_) => log::info!("  UDP ICE completed for connection_id={}", connection_id),
+                        Err(e) => log::error!("  UDP ICE failed for connection_id={}: {}", connection_id, e),
                     }
 
                     if let Err(e) = tx.send(result).await {
-                        eprintln!("  Failed to deliver incoming UDP connection: {}", e);
+                        log::error!("  Failed to deliver incoming UDP connection: {}", e);
                     }
                 });
-                println!("  Spawned UDP ICE task");
+                log::debug!("  Spawned UDP ICE task");
             }
             proto::Transport::Stream => {
                 // QUIC: Spawn a task to complete ICE + QUIC handshake
                 // The channel receives a fully-connected QuicConnection (or error)
                 let tx = self.incoming_quic_tx.clone();
                 tokio::spawn(async move {
-                    println!("  Starting QUIC handshake for connection_id={}", connection_id);
+                    log::debug!("  Starting QUIC handshake for connection_id={}", connection_id);
                     let result = QuicConnection::connect_answerer(
                         caller_node_number,
                         connection_id,
@@ -710,15 +710,15 @@ impl ServingSession {
                     .await;
 
                     match &result {
-                        Ok(_) => println!("  QUIC handshake completed for connection_id={}", connection_id),
-                        Err(e) => eprintln!("  QUIC handshake failed for connection_id={}: {}", connection_id, e),
+                        Ok(_) => log::info!("  QUIC handshake completed for connection_id={}", connection_id),
+                        Err(e) => log::error!("  QUIC handshake failed for connection_id={}: {}", connection_id, e),
                     }
 
                     if let Err(e) = tx.send(result).await {
-                        eprintln!("  Failed to deliver incoming QUIC connection: {}", e);
+                        log::error!("  Failed to deliver incoming QUIC connection: {}", e);
                     }
                 });
-                println!("  Spawned QUIC handshake task");
+                log::debug!("  Spawned QUIC handshake task");
             }
         }
     }
