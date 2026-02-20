@@ -61,7 +61,13 @@ impl HubClient {
 
         // Configure TLS for https:// URLs
         if addr.starts_with("https://") {
-            endpoint = endpoint.tls_config(ClientTlsConfig::new().with_native_roots())?;
+            // On Android, rustls-native-certs can't find the system CA store,
+            // so we use Mozilla's bundled root certificates instead.
+            #[cfg(target_os = "android")]
+            let tls = ClientTlsConfig::new().with_webpki_roots();
+            #[cfg(not(target_os = "android"))]
+            let tls = ClientTlsConfig::new().with_native_roots();
+            endpoint = endpoint.tls_config(tls)?;
         }
 
         let channel = endpoint.connect().await?;
