@@ -1,4 +1,4 @@
-package wispers
+package wispersgo
 
 // This file contains //export functions callable from C. Per CGo rules, files
 // with //export directives may only include declarations (not definitions) in

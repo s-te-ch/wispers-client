@@ -1,4 +1,4 @@
-package wispers
+package wispersgo
 
 /*
 #include "wispers_helpers.h"

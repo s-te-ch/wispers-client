@@ -1,4 +1,4 @@
-package wispers
+package wispersgo
 
 import (
 	"sync/atomic"
