@@ -110,6 +110,7 @@ message Node {
   string name = 2;
   int64 last_seen_at_millis = 3;
   string metadata = 4;
+  bool is_online = 5;
 }
 
 message RosterRequest {
