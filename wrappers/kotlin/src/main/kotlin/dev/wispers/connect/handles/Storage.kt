@@ -45,7 +45,8 @@ class Storage internal constructor(
             WispersStatus.SUCCESS.code -> {
                 val result = RegistrationInfo(
                     connectivityGroupId = info.connectivityGroupId?.getString(0, "UTF-8") ?: "",
-                    nodeNumber = info.nodeNumber
+                    nodeNumber = info.nodeNumber,
+                    attestationJwt = info.attestationJwt?.getString(0, "UTF-8")
                 )
                 lib.wispers_registration_info_free(info)
                 result

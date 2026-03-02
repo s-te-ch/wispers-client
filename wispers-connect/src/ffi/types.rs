@@ -96,6 +96,7 @@ pub struct WispersRegistrationInfo {
     pub connectivity_group_id: *mut c_char,
     pub node_number: c_int,
     pub auth_token: *mut c_char,
+    pub attestation_jwt: *mut c_char,
 }
 
 impl WispersRegistrationInfo {
@@ -105,11 +106,18 @@ impl WispersRegistrationInfo {
             .map_err(|_| WispersStatus::InvalidUtf8)?;
         let token_str = reg.auth_token().map(|t| t.as_str()).unwrap_or("");
         let token = CString::new(token_str).map_err(|_| WispersStatus::InvalidUtf8)?;
+        let jwt_ptr = match &reg.attestation_jwt {
+            Some(jwt) => CString::new(jwt.as_str())
+                .map_err(|_| WispersStatus::InvalidUtf8)?
+                .into_raw(),
+            None => ptr::null_mut(),
+        };
 
         Ok(Self {
             connectivity_group_id: cg_id.into_raw(),
             node_number: reg.node_number,
             auth_token: token.into_raw(),
+            attestation_jwt: jwt_ptr,
         })
     }
 
@@ -119,6 +127,7 @@ impl WispersRegistrationInfo {
             connectivity_group_id: ptr::null_mut(),
             node_number: 0,
             auth_token: ptr::null_mut(),
+            attestation_jwt: ptr::null_mut(),
         }
     }
 }
@@ -137,6 +146,10 @@ pub extern "C" fn wispers_registration_info_free(info: *mut WispersRegistrationI
         if !info.auth_token.is_null() {
             drop(CString::from_raw(info.auth_token));
             info.auth_token = ptr::null_mut();
+        }
+        if !info.attestation_jwt.is_null() {
+            drop(CString::from_raw(info.attestation_jwt));
+            info.attestation_jwt = ptr::null_mut();
         }
     }
 }

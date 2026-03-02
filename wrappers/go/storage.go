@@ -57,10 +57,15 @@ func (s *NodeStorage) ReadRegistration() (*RegistrationInfo, error) {
 	if err := errorFromStatus(int(status)); err != nil {
 		return nil, err
 	}
+	var attestationJWT string
+	if cInfo.attestation_jwt != nil {
+		attestationJWT = C.GoString(cInfo.attestation_jwt)
+	}
 	info := &RegistrationInfo{
 		ConnectivityGroupID: C.GoString(cInfo.connectivity_group_id),
 		NodeNumber:          int32(cInfo.node_number),
 		AuthToken:           C.GoString(cInfo.auth_token),
+		AttestationJWT:      attestationJWT,
 	}
 	C.wispers_registration_info_free(&cInfo)
 	return info, nil

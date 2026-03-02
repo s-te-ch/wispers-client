@@ -44,6 +44,8 @@ pub struct NodeRegistration {
     pub node_number: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     auth_token: Option<AuthToken>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attestation_jwt: Option<String>,
 }
 
 impl NodeRegistration {
@@ -51,11 +53,13 @@ impl NodeRegistration {
         connectivity_group_id: ConnectivityGroupId,
         node_number: i32,
         auth_token: AuthToken,
+        attestation_jwt: Option<String>,
     ) -> Self {
         Self {
             connectivity_group_id,
             node_number,
             auth_token: Some(auth_token),
+            attestation_jwt,
         }
     }
 
@@ -190,6 +194,7 @@ pub(crate) fn registration_fixture() -> NodeRegistration {
         ConnectivityGroupId::from("group-123"),
         1,
         AuthToken::new("test-token-456"),
+        None,
     )
 }
 

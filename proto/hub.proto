@@ -50,6 +50,7 @@ message NodeRegistration {
   string connectivity_group_id = 1;
   int32 node_number = 2;
   string auth_token = 3;
+  string attestation_jwt = 4;  // Signed JWT attesting to (cg_id, node_number)
 }
 
 message DeregisterNodeRequest {

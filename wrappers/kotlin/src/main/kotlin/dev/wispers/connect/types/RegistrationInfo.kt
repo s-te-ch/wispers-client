@@ -9,5 +9,8 @@ data class RegistrationInfo(
     val connectivityGroupId: String,
 
     /** The node's unique number within the connectivity group. */
-    val nodeNumber: Int
+    val nodeNumber: Int,
+
+    /** Signed JWT attesting to (connectivity_group_id, node_number). Null if not available. */
+    val attestationJwt: String? = null
 )

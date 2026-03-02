@@ -53,6 +53,7 @@ type RegistrationInfo struct {
 	ConnectivityGroupID string
 	NodeNumber          int32
 	AuthToken           string
+	AttestationJWT      string // Signed JWT attesting to (cg_id, node_number); may be empty
 }
 
 // initResult is the internal type sent through the bridge channel for RestoreOrInit.

@@ -177,6 +177,7 @@ typedef struct {
     char *connectivity_group_id;  // Owned, free with wispers_string_free()
     int32_t node_number;
     char *auth_token;             // Owned, free with wispers_string_free()
+    char *attestation_jwt;        // Owned, free with wispers_string_free(); may be NULL
 } WispersRegistrationInfo;
 
 // Free a registration info struct and its strings.

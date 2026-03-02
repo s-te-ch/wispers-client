@@ -12,11 +12,12 @@ object NativeTypes {
      * Registration info returned by wispers_storage_read_registration.
      * Strings are owned and must be freed with wispers_string_free().
      */
-    @Structure.FieldOrder("connectivityGroupId", "nodeNumber", "authToken")
+    @Structure.FieldOrder("connectivityGroupId", "nodeNumber", "authToken", "attestationJwt")
     open class WispersRegistrationInfo : Structure() {
         @JvmField var connectivityGroupId: Pointer? = null
         @JvmField var nodeNumber: Int = 0
         @JvmField var authToken: Pointer? = null
+        @JvmField var attestationJwt: Pointer? = null
 
         class ByReference : WispersRegistrationInfo(), Structure.ByReference
         class ByValue : WispersRegistrationInfo(), Structure.ByValue
