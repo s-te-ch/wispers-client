@@ -42,6 +42,18 @@ impl HubError {
     pub fn is_unauthenticated(&self) -> bool {
         matches!(self, HubError::Rpc(s) if s.code() == tonic::Code::Unauthenticated)
     }
+
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, HubError::Rpc(s) if s.code() == tonic::Code::NotFound)
+    }
+
+    pub fn is_peer_rejected(&self) -> bool {
+        matches!(self, HubError::Rpc(s) if s.code() == tonic::Code::FailedPrecondition)
+    }
+
+    pub fn is_peer_unavailable(&self) -> bool {
+        matches!(self, HubError::Rpc(s) if s.code() == tonic::Code::Unavailable)
+    }
 }
 
 /// A node in a connectivity group.

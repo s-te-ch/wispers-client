@@ -33,6 +33,18 @@ impl NodeStateError {
     pub fn is_unauthenticated(&self) -> bool {
         matches!(self, NodeStateError::Hub(e) if e.is_unauthenticated())
     }
+
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, NodeStateError::Hub(e) if e.is_not_found())
+    }
+
+    pub fn is_peer_rejected(&self) -> bool {
+        matches!(self, NodeStateError::Hub(e) if e.is_peer_rejected())
+    }
+
+    pub fn is_peer_unavailable(&self) -> bool {
+        matches!(self, NodeStateError::Hub(e) if e.is_peer_unavailable())
+    }
 }
 
 impl fmt::Display for NodeStateError {
@@ -78,4 +90,6 @@ pub enum WispersStatus {
     Timeout = 14,
     InvalidState = 15,
     Unauthenticated = 16,
+    PeerRejected = 17,
+    PeerUnavailable = 18,
 }

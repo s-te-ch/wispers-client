@@ -23,6 +23,8 @@ const (
 	StatusTimeout            Status = 14
 	StatusInvalidState       Status = 15
 	StatusUnauthenticated    Status = 16
+	StatusPeerRejected       Status = 17
+	StatusPeerUnavailable    Status = 18
 )
 
 // Error wraps a non-success WispersStatus code.
@@ -62,6 +64,10 @@ func (e *Error) Error() string {
 		return "wispers: invalid state"
 	case StatusUnauthenticated:
 		return "wispers: unauthenticated (node removed)"
+	case StatusPeerRejected:
+		return "wispers: peer rejected request"
+	case StatusPeerUnavailable:
+		return "wispers: peer unavailable"
 	default:
 		return fmt.Sprintf("wispers: unknown status %d", e.Status)
 	}
@@ -84,6 +90,8 @@ var (
 	ErrTimeout            = &Error{StatusTimeout}
 	ErrInvalidState       = &Error{StatusInvalidState}
 	ErrUnauthenticated    = &Error{StatusUnauthenticated}
+	ErrPeerRejected       = &Error{StatusPeerRejected}
+	ErrPeerUnavailable    = &Error{StatusPeerUnavailable}
 )
 
 // Is implements errors.Is support so callers can match sentinel values.

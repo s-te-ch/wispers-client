@@ -247,6 +247,12 @@ pub extern "C" fn wispers_node_start_serving_async(
             Err(e) => {
                 let status = if e.is_unauthenticated() {
                     WispersStatus::Unauthenticated
+                } else if e.is_peer_rejected() {
+                    WispersStatus::PeerRejected
+                } else if e.is_peer_unavailable() {
+                    WispersStatus::PeerUnavailable
+                } else if e.is_not_found() {
+                    WispersStatus::NotFound
                 } else {
                     WispersStatus::HubError
                 };
@@ -355,9 +361,11 @@ pub extern "C" fn wispers_serving_session_run_async(
 
     runtime::spawn(async move {
         let result = session.run().await;
-        let status = match result {
+        let status = match &result {
             Ok(()) => WispersStatus::Success,
-            Err(ref e) if e.is_unauthenticated() => WispersStatus::Unauthenticated,
+            Err(e) if e.is_unauthenticated() => WispersStatus::Unauthenticated,
+            Err(e) if e.is_peer_rejected() => WispersStatus::PeerRejected,
+            Err(e) if e.is_peer_unavailable() => WispersStatus::PeerUnavailable,
             Err(_) => WispersStatus::HubError,
         };
         unsafe {

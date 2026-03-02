@@ -3,9 +3,23 @@
 use super::types::{CallbackContext, WispersCallback, WispersNodeHandle};
 use super::runtime;
 use crate::errors::WispersStatus;
-use crate::p2p::{QuicConnection, QuicStream, UdpConnection};
+use crate::p2p::{P2pError, QuicConnection, QuicStream, UdpConnection};
 use std::ffi::c_void;
 use std::os::raw::c_int;
+
+fn p2p_error_to_status(e: &P2pError) -> WispersStatus {
+    match e {
+        P2pError::PeerRejected(_) | P2pError::SignatureVerificationFailed => {
+            WispersStatus::PeerRejected
+        }
+        P2pError::Hub(h) if h.is_unauthenticated() => WispersStatus::Unauthenticated,
+        P2pError::Hub(h) if h.is_peer_unavailable() => WispersStatus::PeerUnavailable,
+        P2pError::Hub(h) if h.is_peer_rejected() => WispersStatus::PeerRejected,
+        P2pError::Hub(h) if h.is_not_found() => WispersStatus::NotFound,
+        P2pError::NotActivated => WispersStatus::InvalidState,
+        _ => WispersStatus::ConnectionFailed,
+    }
+}
 
 // Helpers to send raw pointers across threads
 
@@ -96,9 +110,9 @@ pub extern "C" fn wispers_node_connect_udp_async(
                     callback(ctx.ptr(), WispersStatus::Success, h);
                 }
             }
-            Err(_) => {
+            Err(ref e) => {
                 unsafe {
-                    callback(ctx.ptr(), WispersStatus::ConnectionFailed, std::ptr::null_mut());
+                    callback(ctx.ptr(), p2p_error_to_status(e), std::ptr::null_mut());
                 }
             }
         }
@@ -295,9 +309,9 @@ pub extern "C" fn wispers_node_connect_quic_async(
                     callback(ctx.ptr(), WispersStatus::Success, h);
                 }
             }
-            Err(_) => {
+            Err(ref e) => {
                 unsafe {
-                    callback(ctx.ptr(), WispersStatus::ConnectionFailed, std::ptr::null_mut());
+                    callback(ctx.ptr(), p2p_error_to_status(e), std::ptr::null_mut());
                 }
             }
         }

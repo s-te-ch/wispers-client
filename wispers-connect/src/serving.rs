@@ -32,6 +32,14 @@ impl ServingError {
     pub fn is_unauthenticated(&self) -> bool {
         matches!(self, ServingError::Hub(e) if e.is_unauthenticated())
     }
+
+    pub fn is_peer_rejected(&self) -> bool {
+        matches!(self, ServingError::Hub(e) if e.is_peer_rejected())
+    }
+
+    pub fn is_peer_unavailable(&self) -> bool {
+        matches!(self, ServingError::Hub(e) if e.is_peer_unavailable())
+    }
 }
 
 /// Configuration for P2P connection handling.

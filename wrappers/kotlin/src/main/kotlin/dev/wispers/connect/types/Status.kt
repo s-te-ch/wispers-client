@@ -22,7 +22,9 @@ enum class WispersStatus(val code: Int) {
     CONNECTION_FAILED(13),
     TIMEOUT(14),
     INVALID_STATE(15),
-    UNAUTHENTICATED(16);
+    UNAUTHENTICATED(16),
+    PEER_REJECTED(17),
+    PEER_UNAVAILABLE(18);
 
     companion object {
         private val codeMap = entries.associateBy { it.code }

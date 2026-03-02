@@ -76,6 +76,14 @@ sealed class WispersException(
     class Unauthenticated(message: String = "Node removed from connectivity group") :
         WispersException(message, WispersStatus.UNAUTHENTICATED)
 
+    /** Peer explicitly rejected the request. */
+    class PeerRejected(message: String = "Peer rejected request") :
+        WispersException(message, WispersStatus.PEER_REJECTED)
+
+    /** Peer node is offline or unreachable. */
+    class PeerUnavailable(message: String = "Peer unavailable") :
+        WispersException(message, WispersStatus.PEER_UNAVAILABLE)
+
     /** Unknown error status. */
     class Unknown(status: WispersStatus, message: String = "Unknown error: $status") :
         WispersException(message, status)
@@ -115,6 +123,8 @@ sealed class WispersException(
             WispersStatus.TIMEOUT -> Timeout()
             WispersStatus.INVALID_STATE -> InvalidState()
             WispersStatus.UNAUTHENTICATED -> Unauthenticated()
+            WispersStatus.PEER_REJECTED -> PeerRejected()
+            WispersStatus.PEER_UNAVAILABLE -> PeerUnavailable()
         }
     }
 }
