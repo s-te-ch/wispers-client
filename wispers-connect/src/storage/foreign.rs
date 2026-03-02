@@ -118,8 +118,17 @@ impl ForeignNodeStateStore {
             match status {
                 WispersStatus::Success => {
                     buffer.truncate(required);
-                    return deserialize_registration(&buffer)
-                        .map_err(|_| StorageError::RegistrationDecode);
+                    match deserialize_registration(&buffer) {
+                        Ok(reg) => return Ok(reg),
+                        Err(_) => {
+                            // Old format without attestation_jwt — discard and
+                            // let the caller treat it as missing so restoreOrInit
+                            // re-registers.
+                            log::warn!("Registration decode failed (schema change?), treating as empty");
+                            let _ = self.call_delete_registration();
+                            return Ok(None);
+                        }
+                    }
                 }
                 WispersStatus::NotFound => return Ok(None),
                 WispersStatus::BufferTooSmall => {

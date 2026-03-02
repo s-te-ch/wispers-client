@@ -66,14 +66,14 @@ interface NodeStorageCallbacks {
     /**
      * Load registration data from storage.
      *
-     * @return The serialized registration data (bincode format), or null if not stored
+     * @return The serialized registration data (protobuf format, see storage.proto), or null if not stored
      */
     fun loadRegistration(): ByteArray?
 
     /**
      * Save registration data to storage.
      *
-     * @param data The serialized registration data (bincode format)
+     * @param data The serialized registration data (protobuf format, see storage.proto)
      */
     fun saveRegistration(data: ByteArray)
 
