@@ -78,8 +78,8 @@ async fn test_p2p_connection_via_hub() {
 
     // Create registrations
     let group_id = ConnectivityGroupId::from("test-group");
-    let registration_1 = NodeRegistration::new(group_id.clone(), 1, AuthToken::new("token1"), None);
-    let registration_2 = NodeRegistration::new(group_id, 2, AuthToken::new("token2"), None);
+    let registration_1 = NodeRegistration::new(group_id.clone(), 1, AuthToken::new("token1"), String::new());
+    let registration_2 = NodeRegistration::new(group_id, 2, AuthToken::new("token2"), String::new());
 
     // Create activated nodes
     let node1 = Node::new_activated_for_test(root_key_1, roster.clone(), registration_1, hub_url.clone());
@@ -136,13 +136,13 @@ async fn test_p2p_multiple_messages() {
     let node1 = Node::new_activated_for_test(
         root_key_1,
         roster.clone(),
-        NodeRegistration::new(group_id.clone(), 1, AuthToken::new("t1"), None),
+        NodeRegistration::new(group_id.clone(), 1, AuthToken::new("t1"), String::new()),
         hub_url.clone(),
     );
     let node2 = Node::new_activated_for_test(
         root_key_2,
         roster,
-        NodeRegistration::new(group_id, 2, AuthToken::new("t2"), None),
+        NodeRegistration::new(group_id, 2, AuthToken::new("t2"), String::new()),
         hub_url,
     );
 

@@ -66,7 +66,7 @@ typedef struct {
     WispersStatus (*save_root_key)(void *ctx, const uint8_t *key, size_t key_len);
     WispersStatus (*delete_root_key)(void *ctx);
 
-    // Registration payloads are serialized by Rust (currently using bincode).
+    // Registration payloads are serialized by Rust (protobuf, see storage.proto).
     WispersStatus (*load_registration)(void *ctx, uint8_t *buffer, size_t buffer_len, size_t *out_len);
     WispersStatus (*save_registration)(void *ctx, const uint8_t *buffer, size_t buffer_len);
     WispersStatus (*delete_registration)(void *ctx);
@@ -177,7 +177,7 @@ typedef struct {
     char *connectivity_group_id;  // Owned, free with wispers_string_free()
     int32_t node_number;
     char *auth_token;             // Owned, free with wispers_string_free()
-    char *attestation_jwt;        // Owned, free with wispers_string_free(); may be NULL
+    char *attestation_jwt;        // Owned, free with wispers_string_free()
 } WispersRegistrationInfo;
 
 // Free a registration info struct and its strings.

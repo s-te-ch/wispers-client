@@ -1,9 +1,15 @@
 //! File-based storage for node state.
 
 use crate::storage::{NodeStateStore, StorageError};
-use crate::types::{NodeRegistration, PersistedNodeState, ROOT_KEY_LEN};
+use crate::types::{AuthToken, ConnectivityGroupId, NodeRegistration, PersistedNodeState, ROOT_KEY_LEN};
+use prost::Message;
 use std::fs;
 use std::path::PathBuf;
+
+/// Proto-generated storage types.
+mod proto {
+    tonic::include_proto!("connect.storage");
+}
 
 /// File-based node state store.
 ///
@@ -11,7 +17,7 @@ use std::path::PathBuf;
 /// ```text
 /// dir/
 ///   root_key.bin
-///   registration.json
+///   registration.pb
 /// ```
 ///
 /// The caller is responsible for constructing the path with any desired
@@ -33,6 +39,11 @@ impl FileNodeStateStore {
     }
 
     fn registration_path(&self) -> PathBuf {
+        self.dir.join("registration.pb")
+    }
+
+    /// Legacy JSON path for migration.
+    fn legacy_registration_path(&self) -> PathBuf {
         self.dir.join("registration.json")
     }
 }
@@ -57,9 +68,26 @@ impl NodeStateStore for FileNodeStateStore {
         // Load registration if present
         let registration_path = self.registration_path();
         let registration = if registration_path.exists() {
-            let json = fs::read_to_string(&registration_path)?;
-            Some(serde_json::from_str::<NodeRegistration>(&json)?)
+            let bytes = fs::read(&registration_path)?;
+            match proto::NodeRegistration::decode(bytes.as_slice()) {
+                Ok(proto_reg) => Some(NodeRegistration::new(
+                    ConnectivityGroupId::new(proto_reg.connectivity_group_id),
+                    proto_reg.node_number,
+                    AuthToken::new(proto_reg.auth_token),
+                    proto_reg.attestation_jwt,
+                )),
+                Err(_) => {
+                    log::warn!("Registration decode failed, treating as empty");
+                    None
+                }
+            }
         } else {
+            // Migrate from legacy JSON format: delete it and let the node re-register.
+            let legacy = self.legacy_registration_path();
+            if legacy.exists() {
+                log::warn!("Found legacy registration.json, removing (re-registration required)");
+                let _ = fs::remove_file(&legacy);
+            }
             None
         };
 
@@ -75,8 +103,13 @@ impl NodeStateStore for FileNodeStateStore {
         // Save registration if present
         let registration_path = self.registration_path();
         if let Some(registration) = state.registration() {
-            let json = serde_json::to_string_pretty(registration)?;
-            fs::write(&registration_path, json)?;
+            let proto_reg = proto::NodeRegistration {
+                connectivity_group_id: registration.connectivity_group_id.to_string(),
+                node_number: registration.node_number,
+                auth_token: registration.auth_token().map(|t| t.as_str().to_string()).unwrap_or_default(),
+                attestation_jwt: registration.attestation_jwt.clone(),
+            };
+            fs::write(&registration_path, proto_reg.encode_to_vec())?;
         } else if registration_path.exists() {
             fs::remove_file(&registration_path)?;
         }

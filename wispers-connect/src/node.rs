@@ -297,12 +297,12 @@ impl Node {
             .map(|r| &r.connectivity_group_id)
     }
 
-    /// Get the attestation JWT. Returns None if not registered or not available.
+    /// Get the attestation JWT. Returns None if not registered.
     pub fn attestation_jwt(&self) -> Option<&str> {
         self.persisted
             .registration
             .as_ref()
-            .and_then(|r| r.attestation_jwt.as_deref())
+            .map(|r| r.attestation_jwt.as_str())
     }
 
     /// Get the root key bytes (internal use only).

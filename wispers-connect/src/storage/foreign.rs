@@ -1,10 +1,15 @@
 use crate::errors::WispersStatus;
 use crate::storage::{NodeStateStore, StorageError};
-use crate::types::{NodeRegistration, PersistedNodeState};
-use bincode;
+use crate::types::{AuthToken, ConnectivityGroupId, NodeRegistration, PersistedNodeState};
+use prost::Message;
 use std::ffi::c_void;
 
 const INITIAL_REGISTRATION_BUFFER: usize = 256;
+
+/// Proto-generated storage types.
+mod proto {
+    tonic::include_proto!("connect.storage");
+}
 
 /// Host-provided storage callbacks.
 ///
@@ -121,10 +126,9 @@ impl ForeignNodeStateStore {
                     match deserialize_registration(&buffer) {
                         Ok(reg) => return Ok(reg),
                         Err(_) => {
-                            // Old format without attestation_jwt — discard and
-                            // let the caller treat it as missing so restoreOrInit
-                            // re-registers.
-                            log::warn!("Registration decode failed (schema change?), treating as empty");
+                            // Old format (bincode) — discard and let the caller
+                            // treat it as missing so restoreOrInit re-registers.
+                            log::warn!("Registration decode failed (format migration), treating as empty");
                             let _ = self.call_delete_registration();
                             return Ok(None);
                         }
@@ -147,8 +151,7 @@ impl ForeignNodeStateStore {
         registration: Option<&NodeRegistration>,
     ) -> Result<(), StorageError> {
         let callback = self.callbacks.save_registration.unwrap();
-        let bytes =
-            serialize_registration(registration).map_err(|_| StorageError::RegistrationEncode)?;
+        let bytes = serialize_registration(registration);
         let status = unsafe { callback(self.callbacks.ctx, bytes.as_ptr(), bytes.len()) };
         match status {
             WispersStatus::Success => Ok(()),
@@ -193,10 +196,32 @@ impl NodeStateStore for ForeignNodeStateStore {
     }
 }
 
-fn serialize_registration(registration: Option<&NodeRegistration>) -> Result<Vec<u8>, bincode::Error> {
-    bincode::serialize(&registration)
+fn serialize_registration(registration: Option<&NodeRegistration>) -> Vec<u8> {
+    match registration {
+        Some(reg) => {
+            let proto_reg = proto::NodeRegistration {
+                connectivity_group_id: reg.connectivity_group_id.to_string(),
+                node_number: reg.node_number,
+                auth_token: reg.auth_token().map(|t| t.as_str().to_string()).unwrap_or_default(),
+                attestation_jwt: reg.attestation_jwt.clone(),
+            };
+
+            proto_reg.encode_to_vec()
+        }
+        None => Vec::new(),
+    }
 }
 
-fn deserialize_registration(bytes: &[u8]) -> Result<Option<NodeRegistration>, bincode::Error> {
-    bincode::deserialize(bytes)
+fn deserialize_registration(bytes: &[u8]) -> Result<Option<NodeRegistration>, prost::DecodeError> {
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    let proto_reg = proto::NodeRegistration::decode(bytes)?;
+    Ok(Some(NodeRegistration::new(
+        ConnectivityGroupId::new(proto_reg.connectivity_group_id),
+        proto_reg.node_number,
+        AuthToken::new(proto_reg.auth_token),
+        proto_reg.attestation_jwt,
+    )))
+
 }

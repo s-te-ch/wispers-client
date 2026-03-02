@@ -104,16 +104,11 @@ impl HubClient {
         });
         let response = self.client.complete_node_registration(request).await?;
         let reg = response.into_inner();
-        let attestation_jwt = if reg.attestation_jwt.is_empty() {
-            None
-        } else {
-            Some(reg.attestation_jwt)
-        };
         Ok(NodeRegistration::new(
             ConnectivityGroupId::new(reg.connectivity_group_id),
             reg.node_number,
             AuthToken::new(reg.auth_token),
-            attestation_jwt,
+            reg.attestation_jwt,
         ))
     }
 

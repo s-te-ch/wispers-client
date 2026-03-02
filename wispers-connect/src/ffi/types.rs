@@ -106,12 +106,9 @@ impl WispersRegistrationInfo {
             .map_err(|_| WispersStatus::InvalidUtf8)?;
         let token_str = reg.auth_token().map(|t| t.as_str()).unwrap_or("");
         let token = CString::new(token_str).map_err(|_| WispersStatus::InvalidUtf8)?;
-        let jwt_ptr = match &reg.attestation_jwt {
-            Some(jwt) => CString::new(jwt.as_str())
-                .map_err(|_| WispersStatus::InvalidUtf8)?
-                .into_raw(),
-            None => ptr::null_mut(),
-        };
+        let jwt_ptr = CString::new(reg.attestation_jwt.as_str())
+            .map_err(|_| WispersStatus::InvalidUtf8)?
+            .into_raw();
 
         Ok(Self {
             connectivity_group_id: cg_id.into_raw(),

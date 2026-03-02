@@ -1,5 +1,4 @@
 use rand::{RngCore, rngs::OsRng};
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use zeroize::Zeroize;
 
@@ -38,14 +37,12 @@ impl Drop for RootKey {
 }
 
 /// Connectivity metadata produced after remote registration.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeRegistration {
     pub connectivity_group_id: ConnectivityGroupId,
     pub node_number: i32,
-    #[serde(skip_serializing_if = "Option::is_none")]
     auth_token: Option<AuthToken>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub attestation_jwt: Option<String>,
+    pub attestation_jwt: String,
 }
 
 impl NodeRegistration {
@@ -53,7 +50,7 @@ impl NodeRegistration {
         connectivity_group_id: ConnectivityGroupId,
         node_number: i32,
         auth_token: AuthToken,
-        attestation_jwt: Option<String>,
+        attestation_jwt: String,
     ) -> Self {
         Self {
             connectivity_group_id,
@@ -69,7 +66,7 @@ impl NodeRegistration {
 }
 
 /// Authentication token for node-to-hub communication.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AuthToken(String);
 
 impl AuthToken {
@@ -95,7 +92,7 @@ impl Drop for AuthToken {
 }
 
 /// Identifier describing which connectivity group the node belongs to.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ConnectivityGroupId(String);
 
 impl ConnectivityGroupId {
@@ -194,7 +191,7 @@ pub(crate) fn registration_fixture() -> NodeRegistration {
         ConnectivityGroupId::from("group-123"),
         1,
         AuthToken::new("test-token-456"),
-        None,
+        String::new(),
     )
 }
 
