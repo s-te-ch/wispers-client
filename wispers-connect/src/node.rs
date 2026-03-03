@@ -621,21 +621,8 @@ impl Node {
             .await
             .map_err(NodeStateError::hub)?;
 
-        // Detect dead roster: version > 0 but no non-revoked member is still
-        // registered with the hub.
-        let is_dead_roster = current_roster.version > 0 && {
-            use crate::roster::active_nodes;
-            let hub_nodes = client
-                .list_nodes(&registration)
-                .await
-                .map_err(NodeStateError::hub)?;
-            let hub_numbers: std::collections::HashSet<i32> =
-                hub_nodes.iter().map(|n| n.node_number).collect();
-            !active_nodes(&current_roster).any(|n| hub_numbers.contains(&n.node_number))
-        };
-
-        // Verify the base roster if not bootstrap and not dead
-        if current_roster.version > 0 && !is_dead_roster {
+        // Verify the base roster if not bootstrap
+        if current_roster.version > 0 {
             verify_roster(
                 &current_roster,
                 endorser_node_number,
@@ -656,7 +643,7 @@ impl Node {
         let new_node_signature = self.signing_key.sign(&activation_payload_bytes);
 
         // Build the new roster
-        let new_roster = if current_roster.version == 0 || is_dead_roster {
+        let new_roster = if current_roster.version == 0 {
             create_bootstrap_roster(
                 endorser_node_number,
                 &response_payload.public_key_spki,
@@ -925,10 +912,16 @@ impl Node {
             }
             NodeState::Activated => {
                 use crate::hub::proto::roster::revocation;
-                use crate::roster::{compute_roster_hash, create_revocation_roster};
+                use crate::roster::{active_nodes, compute_roster_hash, create_revocation_roster};
 
                 let registration = self.persisted.registration.as_ref().expect("activated");
                 let roster = self.roster.as_ref().expect("activated");
+
+                // Check: prevent revoking the last active node
+                let active_count = active_nodes(roster).count();
+                if active_count <= 1 {
+                    return Err(NodeStateError::LastActiveNode);
+                }
 
                 let mut client = HubClient::connect(self.hub_addr())
                     .await

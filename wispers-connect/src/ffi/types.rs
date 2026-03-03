@@ -356,6 +356,7 @@ impl From<NodeStateError> for WispersStatus {
             NodeStateError::MacVerificationFailed => WispersStatus::ActivationFailed,
             NodeStateError::MissingEndorserResponse => WispersStatus::ActivationFailed,
             NodeStateError::RosterVerificationFailed(_) => WispersStatus::ActivationFailed,
+            NodeStateError::LastActiveNode => WispersStatus::InvalidState,
             NodeStateError::InvalidState { .. } => WispersStatus::InvalidState,
         }
     }

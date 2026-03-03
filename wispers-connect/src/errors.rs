@@ -14,6 +14,8 @@ pub enum NodeStateError {
     MacVerificationFailed,
     MissingEndorserResponse,
     RosterVerificationFailed(crate::roster::RosterVerificationError),
+    /// Cannot logout: this is the last active node in the roster.
+    LastActiveNode,
     /// Operation requires a different node state than the current one.
     InvalidState {
         current: NodeState,
@@ -59,6 +61,9 @@ impl fmt::Display for NodeStateError {
             NodeStateError::MissingEndorserResponse => write!(f, "missing endorser response"),
             NodeStateError::RosterVerificationFailed(err) => {
                 write!(f, "roster verification failed: {err}")
+            }
+            NodeStateError::LastActiveNode => {
+                write!(f, "cannot logout: this is the last active node in the roster — use group reset instead")
             }
             NodeStateError::InvalidState { current, required } => {
                 write!(f, "invalid state: node is {current}, but {required} is required")
