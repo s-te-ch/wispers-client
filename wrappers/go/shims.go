@@ -172,6 +172,7 @@ func goStorageLoadRegistration(ctx unsafe.Pointer, buffer *C.uint8_t, bufferLen 
 		return C.int(StatusNotFound)
 	}
 	if len(data) > int(bufferLen) {
+		*outLen = C.size_t(len(data))
 		return C.int(StatusBufferTooSmall)
 	}
 	dst := unsafe.Slice((*byte)(unsafe.Pointer(buffer)), int(bufferLen))
