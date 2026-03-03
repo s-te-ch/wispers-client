@@ -81,23 +81,23 @@ func (e *Error) Error() string {
 
 // Sentinel errors for use with errors.Is().
 var (
-	ErrNullPointer        = &Error{StatusNullPointer}
-	ErrInvalidUTF8        = &Error{StatusInvalidUTF8}
-	ErrStoreError         = &Error{StatusStoreError}
-	ErrAlreadyRegistered  = &Error{StatusAlreadyRegistered}
-	ErrNotRegistered      = &Error{StatusNotRegistered}
-	ErrNotFound           = &Error{StatusNotFound}
-	ErrBufferTooSmall     = &Error{StatusBufferTooSmall}
-	ErrMissingCallback    = &Error{StatusMissingCallback}
-	ErrInvalidPairingCode = &Error{StatusInvalidPairingCode}
-	ErrActivationFailed   = &Error{StatusActivationFailed}
-	ErrHubError           = &Error{StatusHubError}
-	ErrConnectionFailed   = &Error{StatusConnectionFailed}
-	ErrTimeout            = &Error{StatusTimeout}
-	ErrInvalidState       = &Error{StatusInvalidState}
-	ErrUnauthenticated    = &Error{StatusUnauthenticated}
-	ErrPeerRejected       = &Error{StatusPeerRejected}
-	ErrPeerUnavailable    = &Error{StatusPeerUnavailable}
+	ErrNullPointer        = &Error{Status: StatusNullPointer}
+	ErrInvalidUTF8        = &Error{Status: StatusInvalidUTF8}
+	ErrStoreError         = &Error{Status: StatusStoreError}
+	ErrAlreadyRegistered  = &Error{Status: StatusAlreadyRegistered}
+	ErrNotRegistered      = &Error{Status: StatusNotRegistered}
+	ErrNotFound           = &Error{Status: StatusNotFound}
+	ErrBufferTooSmall     = &Error{Status: StatusBufferTooSmall}
+	ErrMissingCallback    = &Error{Status: StatusMissingCallback}
+	ErrInvalidPairingCode = &Error{Status: StatusInvalidPairingCode}
+	ErrActivationFailed   = &Error{Status: StatusActivationFailed}
+	ErrHubError           = &Error{Status: StatusHubError}
+	ErrConnectionFailed   = &Error{Status: StatusConnectionFailed}
+	ErrTimeout            = &Error{Status: StatusTimeout}
+	ErrInvalidState       = &Error{Status: StatusInvalidState}
+	ErrUnauthenticated    = &Error{Status: StatusUnauthenticated}
+	ErrPeerRejected       = &Error{Status: StatusPeerRejected}
+	ErrPeerUnavailable    = &Error{Status: StatusPeerUnavailable}
 )
 
 // Is implements errors.Is support so callers can match sentinel values.
