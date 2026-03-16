@@ -209,4 +209,4 @@ See **[How to use it](docs/HOW_TO_USE.md)** for wrapper-specific integration det
 
 ## License
 
-<!-- TODO -->
+This project is licensed under the [MIT License](LICENSE).
