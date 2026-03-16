@@ -13,7 +13,7 @@ pub mod serving;
 pub mod storage;
 pub mod types;
 
-pub use crypto::{PairingCode, PairingSecret, SigningKeyPair};
+pub use crypto::SigningKeyPair;
 pub use errors::{NodeStateError, WispersStatus};
 pub use node::{Node, NodeState, NodeStorage};
 pub use hub::HubError;
