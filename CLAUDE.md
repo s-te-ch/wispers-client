@@ -3,7 +3,7 @@
 ## Quick Orientation
 
 - **What is this?** Rust client library + CLI for peer-to-peer connectivity
-- **Start here:** [ARCHITECTURE.md](./ARCHITECTURE.md) for code structure, [../DESIGN.md](../DESIGN.md) for protocol
+- **Start here:** [docs/INTERNALS.md](./docs/INTERNALS.md) for code structure, [../DESIGN.md](../DESIGN.md) for protocol
 - **Build:** `cargo build` from this directory
 - **Test:** `cargo test`
 

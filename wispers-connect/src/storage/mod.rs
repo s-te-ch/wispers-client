@@ -1,3 +1,5 @@
+//! Node state persistence: `NodeStateStore` trait with file-based and in-memory implementations.
+
 use crate::errors::WispersStatus;
 use crate::types::PersistedNodeState;
 use std::fmt;

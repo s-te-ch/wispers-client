@@ -13,7 +13,7 @@ other, how they establish trust, and how data moves between them.
 
 <!-- TODO: state diagram (mermaid) showing Pending -> Registered -> Activated.
      Explain what each state means and what operations are available.
-     Source material: ARCHITECTURE.md "Node State Machine" section. -->
+     Source material: INTERNALS.md "Node State Machine" section. -->
 
 ## Registration
 
@@ -48,20 +48,20 @@ other, how they establish trust, and how data moves between them.
      - X25519 key exchange for forward secrecy
      - Signature verification against the roster
      Source material: connect/DESIGN.md "Peer-to-peer connection setup"
-     and ARCHITECTURE.md "P2P Transport Architecture". -->
+     and INTERNALS.md "P2P Transport Architecture". -->
 
 ### UDP transport
 
 <!-- TODO: raw UDP with AES-GCM encryption. When to use it
      (low-latency, loss-tolerant).
-     Source material: ARCHITECTURE.md "Transport Types" table. -->
+     Source material: INTERNALS.md "Transport Types" table. -->
 
 ### QUIC transport
 
 <!-- TODO: reliable multiplexed streams over the ICE-established UDP path.
      TLS 1.3 PSK authentication (no certificates). When to use it.
      Source material: connect/DESIGN.md "QUIC setup" and
-     ARCHITECTURE.md "QUIC Authentication". -->
+     INTERNALS.md "QUIC Authentication". -->
 
 ## Security properties
 

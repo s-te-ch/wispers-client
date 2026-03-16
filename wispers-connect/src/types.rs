@@ -1,3 +1,5 @@
+//! Shared data types: `NodeInfo`, `GroupInfo`, `NodeRegistration`, and related structures.
+
 use rand::{RngCore, rngs::OsRng};
 use std::fmt;
 use zeroize::Zeroize;

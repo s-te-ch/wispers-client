@@ -1,3 +1,5 @@
+//! Error types and `WispersStatus` codes for the C FFI API.
+
 use crate::storage::StorageError;
 use std::fmt;
 

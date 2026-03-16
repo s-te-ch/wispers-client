@@ -1,4 +1,5 @@
-//! Cryptographic primitives for Wispers Connect.
+//! Cryptographic primitives: Ed25519 signing keys, X25519 key exchange,
+//! and pairing codes/secrets used during the activation protocol.
 
 use ed25519_dalek::pkcs8::{DecodePublicKey, EncodePublicKey};
 use ed25519_dalek::{Signature, SigningKey, Signer, VerifyingKey, Verifier};
