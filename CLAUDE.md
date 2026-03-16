@@ -36,7 +36,7 @@ The daemon starts the UDS listener *before* connecting to the hub. While connect
 Daemonization (`daemonize` crate) must happen *before* creating the tokio runtime. See `daemonize_serve()` in main.rs.
 
 ### Self-endorsement
-A node cannot activate using its own pairing code. The `activate` command checks this.
+A node cannot activate using its own activation code. The `activate` command checks this.
 
 ## Code Style
 

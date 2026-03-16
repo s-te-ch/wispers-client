@@ -15,7 +15,7 @@ curious integrators.
      │   │   ├── hub.rs      # gRPC client for Hub
      │   │   ├── serving.rs  # ServingSession + ServingHandle
      │   │   ├── types.rs    # NodeInfo, GroupInfo, NodeRegistration
-     │   │   ├── crypto.rs   # Signing keys, X25519, pairing codes
+     │   │   ├── crypto.rs   # Signing keys, X25519, activation codes
      │   │   ├── roster.rs   # Roster verification, creation
      │   │   ├── p2p.rs      # UdpConnection, QuicConnection
      │   │   ├── ice.rs      # ICE negotiation (libjuice wrapper)
@@ -59,7 +59,7 @@ curious integrators.
 <!-- TODO: explain the Handle + Runner split:
      - ServingSession owns the gRPC stream, runs as spawned task
      - ServingHandle is Clone-able, communicates via channels
-     - How pairing code generation and endorsement work during serving
+     - How activation code generation and endorsement work during serving
      Source material: ARCHITECTURE.md "Serving Architecture" diagram. -->
 
 ## Activation flow (code path)

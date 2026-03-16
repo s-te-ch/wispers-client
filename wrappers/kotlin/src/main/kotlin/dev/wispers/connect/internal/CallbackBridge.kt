@@ -137,11 +137,11 @@ object Callbacks {
     }
 
     /**
-     * Pairing code callback - resumes with Pointer to string on success.
+     * Activation code callback - resumes with Pointer to string on success.
      */
-    val pairingCode = NativeCallbacks.WispersPairingCodeCallback { ctx, status, errorDetail, pairingCode ->
+    val activationCode = NativeCallbacks.WispersActivationCodeCallback { ctx, status, errorDetail, activationCode ->
         if (status == WispersStatus.SUCCESS.code) {
-            CallbackBridge.resumeSuccess(ctx, pairingCode)
+            CallbackBridge.resumeSuccess(ctx, activationCode)
         } else {
             CallbackBridge.resumeException(ctx, WispersException.fromStatus(status, errorDetail))
         }

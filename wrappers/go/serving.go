@@ -17,12 +17,12 @@ type ServingSession struct {
 	Incoming *IncomingConnections
 }
 
-// GeneratePairingCode generates a pairing code for endorsing a new node.
-func (s *ServingSession) GeneratePairingCode() (string, error) {
+// GenerateActivationCode generates an activation code for endorsing a new node.
+func (s *ServingSession) GenerateActivationCode() (string, error) {
 	ptr := s.serving.requireOpen()
 	call := newPendingCall()
 	defer call.cancel()
-	status := C.callGeneratePairingCodeAsync(
+	status := C.callGenerateActivationCodeAsync(
 		(*C.WispersServingHandle)(ptr),
 		call.ctx(),
 	)

@@ -93,7 +93,7 @@ object NativeCallbacks {
     }
 
     /**
-     * Callback that receives a pairing code string.
+     * Callback that receives an activation code string.
      *
      * C signature:
      * ```
@@ -105,8 +105,8 @@ object NativeCallbacks {
      * );
      * ```
      */
-    fun interface WispersPairingCodeCallback : Callback {
-        fun invoke(ctx: Pointer?, status: Int, errorDetail: String?, pairingCode: Pointer?)
+    fun interface WispersActivationCodeCallback : Callback {
+        fun invoke(ctx: Pointer?, status: Int, errorDetail: String?, activationCode: Pointer?)
     }
 
     /**

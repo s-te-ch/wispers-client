@@ -24,7 +24,7 @@ pub fn socket_path(connectivity_group_id: &str, node_number: i32) -> PathBuf {
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Request {
     Status,
-    GetPairingCode,
+    GetActivationCode,
     Shutdown,
 }
 
@@ -41,7 +41,7 @@ pub enum Response {
 #[serde(untagged)]
 pub enum ResponseData {
     Status(StatusData),
-    PairingCode(PairingCodeData),
+    ActivationCode(ActivationCodeData),
     Empty,
 }
 
@@ -61,8 +61,8 @@ pub enum EndorsingData {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PairingCodeData {
-    pub pairing_code: String,
+pub struct ActivationCodeData {
+    pub activation_code: String,
 }
 
 impl Response {
@@ -283,9 +283,9 @@ async fn process_request(line: &str, handle: &ServingHandle) -> Response {
             Err(e) => Response::error(format!("status failed: {}", e)),
         },
 
-        Request::GetPairingCode => match handle.generate_pairing_secret().await {
-            Ok(code) => Response::success(ResponseData::PairingCode(PairingCodeData {
-                pairing_code: code.format(),
+        Request::GetActivationCode => match handle.generate_activation_code().await {
+            Ok(code) => Response::success(ResponseData::ActivationCode(ActivationCodeData {
+                activation_code: code.format(),
             })),
             Err(e) => Response::error(format!("{}", e)),
         },

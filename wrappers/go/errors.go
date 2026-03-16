@@ -15,7 +15,7 @@ const (
 	StatusNotFound           Status = 6
 	StatusBufferTooSmall     Status = 7
 	StatusMissingCallback    Status = 8
-	StatusInvalidPairingCode Status = 9
+	StatusInvalidActivationCode Status = 9
 	StatusActivationFailed   Status = 10
 	StatusHubError           Status = 11
 	StatusConnectionFailed   Status = 12
@@ -51,8 +51,8 @@ func (e *Error) Error() string {
 		base = "wispers: buffer too small"
 	case StatusMissingCallback:
 		base = "wispers: missing callback"
-	case StatusInvalidPairingCode:
-		base = "wispers: invalid pairing code"
+	case StatusInvalidActivationCode:
+		base = "wispers: invalid activation code"
 	case StatusActivationFailed:
 		base = "wispers: activation failed"
 	case StatusHubError:
@@ -88,7 +88,7 @@ var (
 	ErrNotFound           = &Error{Status: StatusNotFound}
 	ErrBufferTooSmall     = &Error{Status: StatusBufferTooSmall}
 	ErrMissingCallback    = &Error{Status: StatusMissingCallback}
-	ErrInvalidPairingCode = &Error{Status: StatusInvalidPairingCode}
+	ErrInvalidActivationCode = &Error{Status: StatusInvalidActivationCode}
 	ErrActivationFailed   = &Error{Status: StatusActivationFailed}
 	ErrHubError           = &Error{Status: StatusHubError}
 	ErrConnectionFailed   = &Error{Status: StatusConnectionFailed}

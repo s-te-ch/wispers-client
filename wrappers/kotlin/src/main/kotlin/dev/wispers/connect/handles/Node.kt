@@ -21,7 +21,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  *
  * Available operations depend on the current state:
  * - **Pending**: [register] with a registration token
- * - **Registered**: [activate] with a pairing code, [groupInfo], [startServing] (for bootstrap)
+ * - **Registered**: [activate] with an activation code, [groupInfo], [startServing] (for bootstrap)
  * - **Activated**: [groupInfo], [startServing], [connectUdp], [connectQuic]
  *
  * The node remains valid across state transitions. Call [close] when done,
@@ -61,21 +61,21 @@ class Node internal constructor(
     /**
      * Activate the node by pairing with an endorser.
      *
-     * The pairing code format is "node_number-secret" (e.g., "1-abc123xyz0").
-     * Get this from an already-activated node via [ServingSession.generatePairingCode].
+     * The activation code format is "node_number-secret" (e.g., "1-abc123xyz0").
+     * Get this from an already-activated node via [ServingSession.generateActivationCode].
      *
      * Requires [NodeState.Registered]. On success, transitions to [NodeState.Activated].
      *
-     * @param pairingCode Pairing code from an endorser node
+     * @param activationCode Activation code from an endorser node
      * @throws WispersException.InvalidState if not in Registered state
-     * @throws WispersException.InvalidPairingCode if the code format is invalid
+     * @throws WispersException.InvalidActivationCode if the code format is invalid
      * @throws WispersException.ActivationFailed if pairing verification fails
      */
-    suspend fun activate(pairingCode: String): Unit = suspendCancellableCoroutine { cont ->
+    suspend fun activate(activationCode: String): Unit = suspendCancellableCoroutine { cont ->
         val ptr = requireOpen()
         val ctx = CallbackBridge.register(cont)
 
-        val status = lib.wispers_node_activate_async(ptr, pairingCode, ctx, Callbacks.basic)
+        val status = lib.wispers_node_activate_async(ptr, activationCode, ctx, Callbacks.basic)
         if (status != WispersStatus.SUCCESS.code) {
             CallbackBridge.resumeException(ctx, WispersException.fromStatus(status))
         }
@@ -159,7 +159,7 @@ class Node internal constructor(
      *
      * Serving connects to the hub and makes the node reachable by peers.
      *
-     * - **Registered nodes** can serve for bootstrapping (generate pairing codes)
+     * - **Registered nodes** can serve for bootstrapping (generate activation codes)
      *   but cannot accept P2P connections.
      * - **Activated nodes** can also accept incoming P2P connections.
      *

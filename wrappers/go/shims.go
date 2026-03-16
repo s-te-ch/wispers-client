@@ -73,8 +73,8 @@ func goWispersStartServingCallback(ctx unsafe.Pointer, status C.int, detail *C.c
 	})
 }
 
-//export goWispersPairingCodeCallback
-func goWispersPairingCodeCallback(ctx unsafe.Pointer, status C.int, detail *C.char, code *C.char) {
+//export goWispersActivationCodeCallback
+func goWispersActivationCodeCallback(ctx unsafe.Pointer, status C.int, detail *C.char, code *C.char) {
 	if int(status) != 0 {
 		resolvePendingCall(ctx, &Error{Status: Status(status), Detail: C.GoString(detail)})
 		return

@@ -24,9 +24,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  *     session.runEventLoop()
  * }
  *
- * // Generate pairing codes for new nodes
- * val code = session.generatePairingCode()
- * println("Pairing code: $code")
+ * // Generate activation codes for new nodes
+ * val code = session.generateActivationCode()
+ * println("Activation code: $code")
  *
  * // Accept incoming connections (activated nodes only)
  * scope.launch {
@@ -55,7 +55,7 @@ class ServingSession internal constructor(
      * Whether this session can accept incoming P2P connections.
      *
      * Only activated nodes can accept connections. Registered nodes can
-     * serve (for pairing code generation) but not accept P2P connections.
+     * serve (for activation code generation) but not accept P2P connections.
      */
     val canAcceptConnections: Boolean
         get() = incomingHandle != null
@@ -87,30 +87,30 @@ class ServingSession internal constructor(
     }
 
     /**
-     * Generate a pairing code for endorsing a new node.
+     * Generate an activation code for endorsing a new node.
      *
      * Share this code with a new device to allow it to activate and join
      * the connectivity group.
      *
-     * The pairing code format is "node_number-secret" (e.g., "1-abc123xyz0").
+     * The activation code format is "node_number-secret" (e.g., "1-abc123xyz0").
      *
-     * @return The pairing code string
+     * @return The activation code string
      * @throws WispersException.HubError on hub communication failure
      */
-    suspend fun generatePairingCode(): String {
+    suspend fun generateActivationCode(): String {
         val result = suspendCancellableCoroutine<Any?> { cont ->
             requireOpen()
             val ctx = CallbackBridge.register(cont)
 
             val status = lib.wispers_serving_handle_generate_pairing_code_async(
-                servingHandle, ctx, Callbacks.pairingCode
+                servingHandle, ctx, Callbacks.activationCode
             )
             if (status != WispersStatus.SUCCESS.code) {
                 CallbackBridge.resumeException(ctx, WispersException.fromStatus(status))
             }
         }
 
-        val codePtr = result as? Pointer ?: throw WispersException.NullPointer("Pairing code is null")
+        val codePtr = result as? Pointer ?: throw WispersException.NullPointer("Activation code is null")
         return try {
             codePtr.getString(0, "UTF-8")
         } finally {

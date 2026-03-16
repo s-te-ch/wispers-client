@@ -55,11 +55,11 @@ Examples are provided for each wrapper: Rust, Kotlin/Android, and Go.
 
      ### Bootstrap (first two nodes)
      - Both nodes are registered but no roster exists
-     - One node generates a pairing code, other enters it
+     - One node generates an activation code, other enters it
      - Both transition to Activated
 
      ### Endorsement (subsequent nodes)
-     - An activated node generates a pairing code while serving
+     - An activated node generates an activation code while serving
      - The new node calls node.activate(code)
 
      Show code for each wrapper. -->
@@ -70,7 +70,7 @@ Examples are provided for each wrapper: Rust, Kotlin/Android, and Go.
      - What it does (connects to Hub, makes node reachable)
      - Starting a serving session
      - Running the event loop
-     - Generating pairing codes
+     - Generating activation codes
      - Shutting down
      Show code for each wrapper. -->
 
@@ -102,7 +102,7 @@ Examples are provided for each wrapper: Rust, Kotlin/Android, and Go.
 <!-- TODO: cover common error scenarios:
      - Hub unreachable
      - Unauthenticated (node removed server-side)
-     - Invalid pairing code
+     - Invalid activation code
      - Peer rejected / unavailable
      - State-inappropriate operations (InvalidState)
      Explain the error types for each wrapper. -->

@@ -11,7 +11,7 @@ extern void goWispersCallback(void *ctx, int status, const char *detail);
 extern void goWispersInitCallback(void *ctx, int status, const char *detail, void *handle, int state);
 extern void goWispersGroupInfoCallback(void *ctx, int status, const char *detail, WispersGroupInfo *gi);
 extern void goWispersStartServingCallback(void *ctx, int status, const char *detail, void *serving, void *session, void *incoming);
-extern void goWispersPairingCodeCallback(void *ctx, int status, const char *detail, char *code);
+extern void goWispersActivationCodeCallback(void *ctx, int status, const char *detail, char *code);
 extern void goWispersUdpConnectionCallback(void *ctx, int status, const char *detail, void *conn);
 extern void goWispersDataCallback(void *ctx, int status, const char *detail, const uint8_t *data, size_t len);
 extern void goWispersQuicConnectionCallback(void *ctx, int status, const char *detail, void *conn);
@@ -43,8 +43,8 @@ static inline void shimWispersStartServingCallback(void *ctx, WispersStatus stat
 	goWispersStartServingCallback(ctx, (int)status, detail, (void*)serving, (void*)session, (void*)incoming);
 }
 
-static inline void shimWispersPairingCodeCallback(void *ctx, WispersStatus status, const char *detail, char *code) {
-	goWispersPairingCodeCallback(ctx, (int)status, detail, code);
+static inline void shimWispersActivationCodeCallback(void *ctx, WispersStatus status, const char *detail, char *code) {
+	goWispersActivationCodeCallback(ctx, (int)status, detail, code);
 }
 
 static inline void shimWispersUdpConnectionCallback(void *ctx, WispersStatus status, const char *detail, WispersUdpConnectionHandle *conn) {
@@ -142,8 +142,8 @@ static inline WispersStatus callQuicStreamShutdownAsync(WispersQuicStreamHandle 
 	return wispers_quic_stream_shutdown_async(h, ctx, shimWispersCallback);
 }
 
-static inline WispersStatus callGeneratePairingCodeAsync(WispersServingHandle *h, void *ctx) {
-	return wispers_serving_handle_generate_pairing_code_async(h, ctx, shimWispersPairingCodeCallback);
+static inline WispersStatus callGenerateActivationCodeAsync(WispersServingHandle *h, void *ctx) {
+	return wispers_serving_handle_generate_pairing_code_async(h, ctx, shimWispersActivationCodeCallback);
 }
 
 static inline WispersStatus callServingSessionRunAsync(WispersServingSession *s, void *ctx) {

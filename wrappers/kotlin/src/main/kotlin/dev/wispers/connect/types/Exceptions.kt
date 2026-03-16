@@ -42,9 +42,9 @@ sealed class WispersException(
     class MissingCallback(message: String = "Missing callback") :
         WispersException(message, WispersStatus.MISSING_CALLBACK)
 
-    /** Invalid pairing code format. */
-    class InvalidPairingCode(message: String = "Invalid pairing code") :
-        WispersException(message, WispersStatus.INVALID_PAIRING_CODE)
+    /** Invalid activation code format. */
+    class InvalidActivationCode(message: String = "Invalid activation code") :
+        WispersException(message, WispersStatus.INVALID_ACTIVATION_CODE)
 
     /** Activation with endorser failed. */
     class ActivationFailed(message: String = "Activation failed") :
@@ -113,7 +113,7 @@ sealed class WispersException(
             WispersStatus.NOT_FOUND -> NotFound(detail ?: "Not found")
             WispersStatus.BUFFER_TOO_SMALL -> BufferTooSmall(detail ?: "Buffer too small")
             WispersStatus.MISSING_CALLBACK -> MissingCallback(detail ?: "Missing callback")
-            WispersStatus.INVALID_PAIRING_CODE -> InvalidPairingCode(detail ?: "Invalid pairing code")
+            WispersStatus.INVALID_ACTIVATION_CODE -> InvalidActivationCode(detail ?: "Invalid activation code")
             WispersStatus.ACTIVATION_FAILED -> ActivationFailed(detail ?: "Activation failed")
             WispersStatus.HUB_ERROR -> HubError(detail ?: "Hub error")
             WispersStatus.CONNECTION_FAILED -> ConnectionFailed(detail ?: "Connection failed")

@@ -98,7 +98,7 @@ interface NativeLibrary : Library {
      */
     fun wispers_node_activate_async(
         handle: Pointer?,
-        pairingCode: String?,
+        activationCode: String?,
         ctx: Pointer?,
         callback: NativeCallbacks.WispersCallback?
     ): Int
@@ -271,12 +271,12 @@ interface NativeLibrary : Library {
     // =========================================================================
 
     /**
-     * Generate a pairing code for endorsing a new node.
+     * Generate an activation code for endorsing a new node.
      */
     fun wispers_serving_handle_generate_pairing_code_async(
         handle: Pointer?,
         ctx: Pointer?,
-        callback: NativeCallbacks.WispersPairingCodeCallback?
+        callback: NativeCallbacks.WispersActivationCodeCallback?
     ): Int
 
     /**

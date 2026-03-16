@@ -69,7 +69,7 @@ other, how they establish trust, and how data moves between them.
      - End-to-end encryption (Hub cannot read data)
      - Roster-based trust (Hub cannot inject nodes)
      - Forward secrecy via ephemeral X25519 keys
-     - Out-of-band pairing codes (Hub never sees the secret)
+     - Out-of-band activation codes (Hub never sees the secret)
      Also cover the known limitations:
      - Compromised node can endorse malicious nodes
      - Compromised node can revoke legitimate nodes (DoS)

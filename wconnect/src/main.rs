@@ -32,13 +32,13 @@ enum Command {
         /// The registration token from the integrator
         token: String,
     },
-    /// Activate this node by pairing with an endorser
+    /// Activate this node using an activation code from an endorser
     Activate {
-        /// The pairing code from the endorser (format: "node_number-secret")
-        pairing_code: String,
+        /// The activation code from the endorser (format: "node_number-secret")
+        activation_code: String,
     },
-    /// Get a pairing code to endorse a new node (requires running daemon)
-    GetPairingCode,
+    /// Get an activation code to endorse a new node (requires running daemon)
+    GetActivationCode,
     /// Clear stored credentials and state
     Logout,
     /// List nodes in the connectivity group
@@ -243,8 +243,8 @@ async fn async_main(
     let profile = profile.as_str();
     match command {
         Command::Register { token } => register(hub_override, profile, &token).await,
-        Command::Activate { pairing_code } => activate(hub_override, profile, &pairing_code).await,
-        Command::GetPairingCode => get_pairing_code(hub_override, profile).await,
+        Command::Activate { activation_code } => activate(hub_override, profile, &activation_code).await,
+        Command::GetActivationCode => get_activation_code(hub_override, profile).await,
         Command::Logout => logout(hub_override, profile).await,
         Command::Nodes => nodes(hub_override, profile).await,
         Command::Status => status(hub_override, profile).await,
@@ -295,8 +295,8 @@ async fn register(hub_override: Option<&str>, profile: &str, token: &str) -> Res
     Ok(())
 }
 
-async fn activate(hub_override: Option<&str>, profile: &str, pairing_code: &str) -> Result<()> {
-    use wispers_connect::PairingCode;
+async fn activate(hub_override: Option<&str>, profile: &str, activation_code: &str) -> Result<()> {
+    use wispers_connect::ActivationCode;
 
     let storage = get_storage(hub_override, profile)?;
     let mut node = storage
@@ -318,19 +318,19 @@ async fn activate(hub_override: Option<&str>, profile: &str, pairing_code: &str)
         }
     }
 
-    // Parse pairing code to check for self-endorsement
-    let parsed_code = PairingCode::parse(pairing_code)
-        .context("invalid pairing code format")?;
+    // Parse activation code to check for self-endorsement
+    let parsed_code = ActivationCode::parse(activation_code)
+        .context("invalid activation code format")?;
     let our_node_number = node.node_number().unwrap();
     if parsed_code.node_number == our_node_number {
         anyhow::bail!(
-            "Cannot activate using your own pairing code (self-endorsement). \
-             You need a pairing code from a different node."
+            "Cannot activate using your own activation code (self-endorsement). \
+             You need an activation code from a different node."
         );
     }
 
-    println!("Activating with pairing code {}...", pairing_code);
-    node.activate(pairing_code)
+    println!("Activating with activation code {}...", activation_code);
+    node.activate(activation_code)
         .await
         .context("activation failed")?;
 
@@ -340,7 +340,7 @@ async fn activate(hub_override: Option<&str>, profile: &str, pairing_code: &str)
     Ok(())
 }
 
-async fn get_pairing_code(hub_override: Option<&str>, profile: &str) -> Result<()> {
+async fn get_activation_code(hub_override: Option<&str>, profile: &str) -> Result<()> {
     let storage = get_storage(hub_override, profile)?;
     let node = storage
         .restore_or_init_node()
@@ -359,15 +359,15 @@ async fn get_pairing_code(hub_override: Option<&str>, profile: &str) -> Result<(
         .await
         .context("Daemon not running. Start it with 'wconnect serve' first.")?;
 
-    // Request pairing code
+    // Request activation code
     let response = client
-        .request(&daemon::Request::GetPairingCode)
+        .request(&daemon::Request::GetActivationCode)
         .await
         .context("failed to communicate with daemon")?;
 
     match response {
-        daemon::Response::Success { data: daemon::ResponseData::PairingCode(p), .. } => {
-            println!("{}", p.pairing_code);
+        daemon::Response::Success { data: daemon::ResponseData::ActivationCode(p), .. } => {
+            println!("{}", p.activation_code);
         }
         daemon::Response::Error { error, .. } => {
             anyhow::bail!("{}", error);

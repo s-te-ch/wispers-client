@@ -63,11 +63,11 @@ Nodes progress through distinct states, each with different capabilities:
               │  RegisteredNodeState  │
               │  - Can authenticate   │
               │  - Can serve (for     │
-              │    bootstrap pairing) │
+              │    bootstrap activate)│
               │  - Cannot connect to  │
               │    other nodes        │
               └───────────┬───────────┘
-                          │ activate(pairing_code)
+                          │ activate(activation_code)
                           ▼
               ┌───────────────────────┐
               │  ActivatedNodeState   │
@@ -98,7 +98,7 @@ match state {
         let registered = s.register(token).await?;
     }
     NodeState::Registered(s) => {
-        let activated = s.activate(pairing_code).await?;
+        let activated = s.activate(activation_code).await?;
     }
     NodeState::Activated(s) => {
         let (handle, session) = s.start_serving().await?;
@@ -130,7 +130,7 @@ When a node serves, it uses a split architecture:
 │  ┌─────────────────────────────────────────┴──────────────────┐│
 │  │  ServingHandle (Clone-able)                                ││
 │  │  - status() -> StatusInfo                                  ││
-│  │  - generate_pairing_secret() -> PairingCode                ││
+│  │  - generate_activation_code() -> ActivationCode             ││
 │  │  - shutdown()                                              ││
 │  └────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
@@ -153,7 +153,7 @@ Commands are newline-delimited JSON:
 ```json
 // Requests
 {"cmd": "status"}
-{"cmd": "get_pairing_code"}
+{"cmd": "get_activation_code"}
 {"cmd": "shutdown"}
 
 // Responses
@@ -165,7 +165,7 @@ Commands are newline-delimited JSON:
 
 Other wconnect invocations detect the daemon and communicate via UDS:
 - `wconnect status` - Shows daemon status if running
-- `wconnect get-pairing-code` - Asks daemon to generate code
+- `wconnect get-activation-code` - Asks daemon to generate code
 - `wconnect serve --stop` - Sends shutdown command
 
 ## Activation Flow (Code Path)
@@ -235,7 +235,7 @@ done, now activated
 | `ServingHandle` | `serving.rs` | Clone-able control for serving session |
 | `ServingSession` | `serving.rs` | Runner that owns hub stream |
 | `PairingSecret` | `activation.rs` | Generated secret for endorsing |
-| `PairingCode` | `activation.rs` | User-facing code: `{node}-{secret}` |
+| `ActivationCode` | `activation.rs` | User-facing code: `{node}-{secret}` |
 | `SigningKeyPair` | `keys.rs` | Ed25519 signing key |
 
 ## Proto Messages (Activation)

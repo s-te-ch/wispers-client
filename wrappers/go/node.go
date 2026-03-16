@@ -45,11 +45,11 @@ func (n *Node) Register(token string) error {
 	return nil
 }
 
-// Activate activates the node using a pairing code ("node_number-secret").
+// Activate activates the node using an activation code ("node_number-secret").
 // Requires Registered state.
-func (n *Node) Activate(pairingCode string) error {
+func (n *Node) Activate(activationCode string) error {
 	ptr := n.requireOpen()
-	cCode := C.CString(pairingCode)
+	cCode := C.CString(activationCode)
 	defer C.free(unsafe.Pointer(cCode))
 	call := newPendingCall()
 	defer call.cancel()

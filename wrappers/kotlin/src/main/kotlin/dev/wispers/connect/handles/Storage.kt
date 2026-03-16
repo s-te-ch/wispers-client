@@ -77,7 +77,7 @@ class Storage internal constructor(
      * what operations are available:
      *
      * - [NodeState.Pending]: Call [Node.register] with a registration token
-     * - [NodeState.Registered]: Call [Node.activate] with a pairing code
+     * - [NodeState.Registered]: Call [Node.activate] with an activation code
      * - [NodeState.Activated]: Ready for P2P connections
      *
      * @return Pair of node and current state

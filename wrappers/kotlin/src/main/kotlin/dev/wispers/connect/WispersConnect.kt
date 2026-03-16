@@ -22,7 +22,7 @@ import dev.wispers.connect.types.WispersException
  *
  * when (state) {
  *     NodeState.Pending -> node.register(token)
- *     NodeState.Registered -> node.activate(pairingCode)
+ *     NodeState.Registered -> node.activate(activationCode)
  *     NodeState.Activated -> {
  *         val session = node.startServing()
  *         scope.launch { session.runEventLoop() }

@@ -107,7 +107,7 @@ impl ServingHandle {
         reply_rx.await.map_err(|_| ServingError::SessionShutdown)
     }
 
-    /// Generate a pairing secret for endorsing a new node.
+    /// Generate a pairing code for endorsing a new node.
     ///
     /// Returns the pairing code to share with the new node.
     /// Only one pairing session can be active at a time.

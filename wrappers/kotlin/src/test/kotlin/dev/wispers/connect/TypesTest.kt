@@ -55,7 +55,7 @@ class TypesTest {
         assertTrue(WispersException.fromStatus(4) is WispersException.AlreadyRegistered)
         assertTrue(WispersException.fromStatus(5) is WispersException.NotRegistered)
         assertTrue(WispersException.fromStatus(7) is WispersException.NotFound)
-        assertTrue(WispersException.fromStatus(10) is WispersException.InvalidPairingCode)
+        assertTrue(WispersException.fromStatus(10) is WispersException.InvalidActivationCode)
         assertTrue(WispersException.fromStatus(11) is WispersException.ActivationFailed)
         assertTrue(WispersException.fromStatus(12) is WispersException.HubError)
         assertTrue(WispersException.fromStatus(13) is WispersException.ConnectionFailed)

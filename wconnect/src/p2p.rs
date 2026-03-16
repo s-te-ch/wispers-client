@@ -23,7 +23,7 @@ pub async fn ping(
             anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
         }
         NodeState::Registered => {
-            anyhow::bail!("Not activated. Use 'wconnect activate <pairing_code>' first.");
+            anyhow::bail!("Not activated. Use 'wconnect activate <activation_code>' first.");
         }
         NodeState::Activated => {}
     }
@@ -145,7 +145,7 @@ pub async fn forward(
             anyhow::bail!("Not registered. Use 'wconnect register <token>' first.");
         }
         NodeState::Registered => {
-            anyhow::bail!("Not activated. Use 'wconnect activate <pairing_code>' first.");
+            anyhow::bail!("Not activated. Use 'wconnect activate <activation_code>' first.");
         }
         NodeState::Activated => {}
     }
