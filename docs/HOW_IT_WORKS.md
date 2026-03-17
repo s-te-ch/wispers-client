@@ -7,7 +7,7 @@ available to integrators (i.e. you).
 
 ## Wispers architecture
 
-The basic architecture of Wispers consists of
+The basic architecture of Wispers consists of:
 * Nodes — the programs we want to communicate with each other
 * Hub — the rendezvous server for NAT traversal
 * Registration UI — here, users register their nodes. Usually a web UI, but
@@ -49,7 +49,7 @@ surface the two-phase registration to the user.
 
 Once they are registered in a connectivity group, nodes in the same group can
 exchange messages through the hub, but they still have to trust the hub to do
-nothing nefarious. After all it's the classical man-in-the-middle we know from
+nothing nefarious. After all, it's the classical man-in-the-middle we know from
 IT security. Wispers fixes this with a process called "activation".
 
 #### Pairing
@@ -104,10 +104,11 @@ stores the bytes.
 #### Bootstrapping
 
 Normally, activation involves a newly registered node (the "new node") and
-another, already activated node (the "endorser") — but in a connectivity group,
-nobody has been activated yet and the roster is empty. This is the bootstrap
-problem. We can't just consider the first registered node magically activated
-because the Hub could use this to trick nodes into trusting a fake first node.
+another, already activated node (the "endorser") — but in a new connectivity
+group, nobody has been activated yet and the roster is empty. This is the
+bootstrap problem. We can't just consider the first registered node magically
+activated because the Hub could use this to trick nodes into trusting a fake
+first node.
 
 Instead, we bootstrap the roster with the first pairing. Instead of updating the
 existing roster, the nodes co-sign a newly initialised roster that contains just
@@ -125,7 +126,7 @@ through a NAT-traversal, relaying messages through the hub.
 <center>
   <img src="images/wispers-connection-establishment.svg"
        width="860"
-       alt="Collaboration diagram connection establishment"/>
+       alt="Collaboration diagram of connection establishment"/>
 </center>
 
 There are roughly 3 steps:
@@ -137,7 +138,7 @@ There are roughly 3 steps:
 2. The answerer receives the message, gathers its own candidate addresses,
    generates its own side of the Diffie-Hellman key exchange, and sends all of
    that back.
-3. Now both, caller and answerer, have all the information they need. They start
+3. Now both caller and answerer have all the information they need. They start
    ICE connection establishment using the embedded [libjuice
    library](https://github.com/paullouisageneau/libjuice) on both ends at the
    same time.
@@ -155,86 +156,83 @@ certificates. Luckily, QUIC also supports pre-shared key (PSK) mode, and we have
 just established a shared key! So in QUIC mode, Wispers does not encrypt the UDP
 datagrams, but instead hands the key to QUIC to use it instead.
 
-## Architecture overview
+## What Wispers Connect adds
+
+Wispers Connect is how you use Wispers in your own software. There are several
+integration points:
+
+* The **wispers-connect library** implements everything a Wispers node needs to
+  do, with an interface that lets you adapt things to your use case
+* The **REST API** at https://connect.wispers.dev/api lets you implement your
+  own registration UI. For example, you could call this API from your own web
+  app
+* The **Connect web app** at https://connect.wispers.dev lets you configure the
+  Wispers infrastructure for your needs, e.g. which API keys can be used
+
+### What library clients need to provide
+
+The following diagram illustrates how things fit together when integrating with
+Wispers Connect.
 
 <center>
   <img src="images/wispers-connect-components.svg"
-       width="512" alt="Component diagram"/>
+       width="512" alt="Wispers Connect components diagram"/>
 </center>
 
-TODO
-- Basic Wispers setup first. Nodes, Hub, Web UI. With sequence diagrams to explain the procedures (registration, activation, ICE & connection setup)
-- Wispers Connect, how we make this available for integrators
+The two main things an integrator needs to build are:
+* An app linking the wispers-connect library. The library does all the
+  communication magic for you, but requires two things:
+    * A UI that allows the user to enter registration token and activation code
+      (not necessarily a _graphical_ UI)
+    * A storage implementation that stores the node's state (root key and hub
+      registration), ideally in the host platform's secure storage (e.g. the
+      Keychain on macOS)
+* An integrator service that manages creating registration tokens using the REST
+  API. This will often be your own web app, but could also just be a CLI tool.
 
+To make this more concrete, here's how Wispers Files implements its node
+registration:
 
-<!-- TODO: diagram (mermaid) showing Hub, nodes, coturn, and the
-     distinction between signaling (through Hub) and data (P2P).
-     Source material: connect/DESIGN.md "Components" section. -->
+1. On first open, the app sends the user to https://files.wispers.dev to log in
+   and enter details about the device being added. The web app forwards this
+   information to the Wispers Connect REST API and receives a registration token
+   in return
+2. The web app then re-opens the app using a deeplink, handing over the
+   registration token. The app detects this, and hands the token over to the
+   wispers-connect library, which completes the registration with the hub behind
+   the scenes.
+3. Once the registration is complete, the library calls back into the app's
+   storage implementation to securely store root key, auth token, etc.
 
-## Node lifecycle
+### Membership attestations
 
-<!-- TODO: state diagram (mermaid) showing Pending -> Registered -> Activated.
-     Explain what each state means and what operations are available.
-     Source material: INTERNALS.md "Node State Machine" section. -->
+One problem with the basic way of using Wispers Connect described above is that,
+even after registration with the hub, the app can't authenticate itself to the
+integrator service. After all, the registration was with the Wispers
+infrastructure, not that service.
 
-## Registration
-
-<!-- TODO: explain the integrator-driven registration flow.
-     Token creation via REST API, OTP handoff to the node, completing
-     registration with the Hub.
-     Source material: connect/DESIGN.md "Node registration through an
-     integrator" section. -->
-
-## Activation & the roster
-
-<!-- TODO: this is the core of the trust model. Cover:
-     - What the roster is (protobuf with public keys, co-signed addenda)
-     - Pairing: out-of-band secret, HMAC-based key exchange through Hub
-     - Roster update: new node creates roster version, endorser co-signs
-     - Bootstrap: first two nodes pair to create the initial roster
-     - Transitive trust: every node trusts all others through the chain
-     Source material: connect/DESIGN.md "Activation" section.
-     Consider a mermaid sequence diagram for the pairing flow. -->
-
-## Revocation
-
-<!-- TODO: explain how any activated node can revoke any other.
-     Cover the security trade-offs (single-revoker matches single-endorser).
-     Source material: connect/DESIGN.md "Revocation" section. -->
-
-## Peer-to-peer connections
-
-<!-- TODO: explain connection setup. Cover:
-     - ICE/STUN/TURN for NAT traversal (libjuice)
-     - Signaling through the Hub (StartConnectionRequest/Response)
-     - X25519 key exchange (currently derived from root key, not ephemeral)
-     - Signature verification against the roster
-     Source material: connect/DESIGN.md "Peer-to-peer connection setup"
-     and INTERNALS.md "P2P Transport Architecture". -->
-
-### UDP transport
-
-<!-- TODO: raw UDP with AES-GCM encryption. When to use it
-     (low-latency, loss-tolerant).
-     Source material: INTERNALS.md "Transport Types" table. -->
-
-### QUIC transport
-
-<!-- TODO: reliable multiplexed streams over the ICE-established UDP path.
-     TLS 1.3 PSK authentication (no certificates). When to use it.
-     Source material: connect/DESIGN.md "QUIC setup" and
-     INTERNALS.md "QUIC Authentication". -->
+To solve this problem, the hub issues **membership attestations** together with
+the node's registration info. These are cryptographically signed pieces of
+information confirming that the node is indeed registered with Wispers under a
+certain ID. The integrator service can verify these attestations using the
+well-known public key from Wispers and so authenticate the node.
 
 ## Security properties
 
-<!-- TODO: summarise the security guarantees:
-     - End-to-end encryption (Hub cannot read data)
-     - Roster-based trust (Hub cannot inject nodes)
-     - Out-of-band activation codes (Hub never sees the secret)
-     Also cover the known limitations:
-     - No forward secrecy: X25519 keys are derived from root key, not
-       ephemeral. Compromising the root key decrypts all past traffic.
-       (See docs/connect/wispers-without-activation.md for future work notes.)
-     - Compromised node can endorse malicious nodes
-     - Compromised node can revoke legitimate nodes (DoS)
-     Source material: connect/DESIGN.md "Security Considerations". -->
+With this design, we achieve the following security properties:
+
+* End-to-end encrypted UDP and QUIC connections between nodes that cannot be
+  MITM-ed by the Hub, or even by the cloud provider whose infrastructure the Hub
+  runs on
+* Roster-based trust that prevents the Hub from injecting nodes
+
+At the time of writing, these are the limitations we're aware of:
+
+* No forward secrecy: The X25519 keys are derived from the root key. We expect
+  this to change soon
+* If compromised, a node can do anything a normal node can do, including
+  endorsing other, malicious nodes
+
+To mitigate node compromise, Wispers Connect allows any node in the roster to
+revoke any other node. However, this comes at the price of an additional DoS
+vector — a malicious node could just revoke everyone's roster entries.
