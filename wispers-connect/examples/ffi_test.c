@@ -19,19 +19,22 @@
 //------------------------------------------------------------------------------
 
 // Test that callback types compile correctly (not invoked yet)
-static void dummy_callback(void *ctx, WispersStatus status) {
+static void dummy_callback(void *ctx, WispersStatus status, const char *error_detail) {
     (void)ctx;
     (void)status;
+    (void)error_detail;
 }
 
 static void dummy_init_callback(
     void *ctx,
     WispersStatus status,
+    const char *error_detail,
     WispersNodeHandle *handle,
     WispersNodeState state
 ) {
     (void)ctx;
     (void)status;
+    (void)error_detail;
     (void)handle;
     (void)state;
 }
@@ -55,10 +58,10 @@ static int test_status_codes(void) {
 
     // Verify status codes exist and have expected values
     if (WISPERS_STATUS_SUCCESS != 0) FAIL("SUCCESS != 0");
-    if (WISPERS_STATUS_HUB_ERROR != 12) FAIL("HUB_ERROR != 12");
-    if (WISPERS_STATUS_CONNECTION_FAILED != 13) FAIL("CONNECTION_FAILED != 13");
-    if (WISPERS_STATUS_TIMEOUT != 14) FAIL("TIMEOUT != 14");
-    if (WISPERS_STATUS_INVALID_STATE != 15) FAIL("INVALID_STATE != 15");
+    if (WISPERS_STATUS_HUB_ERROR != 11) FAIL("HUB_ERROR != 11");
+    if (WISPERS_STATUS_CONNECTION_FAILED != 12) FAIL("CONNECTION_FAILED != 12");
+    if (WISPERS_STATUS_TIMEOUT != 13) FAIL("TIMEOUT != 13");
+    if (WISPERS_STATUS_INVALID_STATE != 14) FAIL("INVALID_STATE != 14");
 
     PASS();
     return 0;
@@ -212,9 +215,11 @@ typedef struct {
 static void init_callback(
     void *ctx,
     WispersStatus status,
+    const char *error_detail,
     WispersNodeHandle *handle,
     WispersNodeState state
 ) {
+    (void)error_detail;
     InitTestCtx *test = (InitTestCtx *)ctx;
     test->called = 1;
     test->status = status;
@@ -312,7 +317,8 @@ typedef struct {
     WispersStatus status;
 } SimpleTestCtx;
 
-static void simple_callback(void *ctx, WispersStatus status) {
+static void simple_callback(void *ctx, WispersStatus status, const char *error_detail) {
+    (void)error_detail;
     SimpleTestCtx *test = (SimpleTestCtx *)ctx;
     test->called = 1;
     test->status = status;
@@ -699,21 +705,25 @@ static int test_shutdown_null_handle(void) {
 static void dummy_udp_connection_callback(
     void *ctx,
     WispersStatus status,
+    const char *error_detail,
     WispersUdpConnectionHandle *connection
 ) {
     (void)ctx;
     (void)status;
+    (void)error_detail;
     (void)connection;
 }
 
 static void dummy_data_callback(
     void *ctx,
     WispersStatus status,
+    const char *error_detail,
     const uint8_t *data,
     size_t len
 ) {
     (void)ctx;
     (void)status;
+    (void)error_detail;
     (void)data;
     (void)len;
 }
@@ -794,20 +804,24 @@ static int test_udp_free_null_safe(void) {
 static void dummy_quic_connection_callback(
     void *ctx,
     WispersStatus status,
+    const char *error_detail,
     WispersQuicConnectionHandle *connection
 ) {
     (void)ctx;
     (void)status;
+    (void)error_detail;
     (void)connection;
 }
 
 static void dummy_quic_stream_callback(
     void *ctx,
     WispersStatus status,
+    const char *error_detail,
     WispersQuicStreamHandle *stream
 ) {
     (void)ctx;
     (void)status;
+    (void)error_detail;
     (void)stream;
 }
 

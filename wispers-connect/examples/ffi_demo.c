@@ -160,9 +160,11 @@ typedef struct {
 static void init_callback(
     void *ctx,
     WispersStatus status,
+    const char *error_detail,
     WispersNodeHandle *handle,
     WispersNodeState state
 ) {
+    (void)error_detail;
     InitCtx *c = (InitCtx *)ctx;
     c->status = status;
     c->state = state;
@@ -173,10 +175,12 @@ static void init_callback(
 static void serving_callback(
     void *ctx,
     WispersStatus status,
+    const char *error_detail,
     WispersServingHandle *serving,
     WispersServingSession *session,
     WispersIncomingConnections *incoming
 ) {
+    (void)error_detail;
     ServingCtx *c = (ServingCtx *)ctx;
     c->status = status;
     c->serving = serving;
@@ -188,15 +192,18 @@ static void serving_callback(
 static void activation_code_callback(
     void *ctx,
     WispersStatus status,
+    const char *error_detail,
     char *activation_code
 ) {
+    (void)error_detail;
     ActivationCodeCtx *c = (ActivationCodeCtx *)ctx;
     c->status = status;
     c->activation_code = activation_code;
     sync_signal(&c->sync);
 }
 
-static void basic_callback(void *ctx, WispersStatus status) {
+static void basic_callback(void *ctx, WispersStatus status, const char *error_detail) {
+    (void)error_detail;
     BasicCtx *c = (BasicCtx *)ctx;
     c->status = status;
     sync_signal(&c->sync);
@@ -205,8 +212,10 @@ static void basic_callback(void *ctx, WispersStatus status) {
 static void quic_conn_callback(
     void *ctx,
     WispersStatus status,
+    const char *error_detail,
     WispersQuicConnectionHandle *connection
 ) {
+    (void)error_detail;
     QuicConnCtx *c = (QuicConnCtx *)ctx;
     c->status = status;
     c->connection = connection;
@@ -216,8 +225,10 @@ static void quic_conn_callback(
 static void quic_stream_callback(
     void *ctx,
     WispersStatus status,
+    const char *error_detail,
     WispersQuicStreamHandle *stream
 ) {
+    (void)error_detail;
     QuicStreamCtx *c = (QuicStreamCtx *)ctx;
     c->status = status;
     c->stream = stream;
@@ -227,9 +238,11 @@ static void quic_stream_callback(
 static void data_callback(
     void *ctx,
     WispersStatus status,
+    const char *error_detail,
     const uint8_t *data,
     size_t len
 ) {
+    (void)error_detail;
     DataCtx *c = (DataCtx *)ctx;
     c->status = status;
     // Copy data - the buffer is only valid during the callback
@@ -427,7 +440,7 @@ static const char *status_str(WispersStatus status) {
         case WISPERS_STATUS_NOT_FOUND: return "NOT_FOUND";
         case WISPERS_STATUS_BUFFER_TOO_SMALL: return "BUFFER_TOO_SMALL";
         case WISPERS_STATUS_MISSING_CALLBACK: return "MISSING_CALLBACK";
-        case WISPERS_STATUS_INVALID_PAIRING_CODE: return "INVALID_PAIRING_CODE";
+        case WISPERS_STATUS_INVALID_ACTIVATION_CODE: return "INVALID_ACTIVATION_CODE";
         case WISPERS_STATUS_ACTIVATION_FAILED: return "ACTIVATION_FAILED";
         case WISPERS_STATUS_HUB_ERROR: return "HUB_ERROR";
         case WISPERS_STATUS_CONNECTION_FAILED: return "CONNECTION_FAILED";
