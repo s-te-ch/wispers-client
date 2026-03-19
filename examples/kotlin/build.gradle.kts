@@ -1,9 +1,9 @@
 // Declare AGP and Kotlin so the :wispers-connect library module can apply
 // them without hardcoding versions.
 plugins {
-    id("com.android.application") version "8.2.0" apply false
-    id("com.android.library") version "8.2.0" apply false
-    kotlin("android") version "1.9.21" apply false
+    id("com.android.application") version "8.10.0" apply false
+    id("com.android.library") version "8.10.0" apply false
+    kotlin("android") version "2.0.21" apply false
 }
 
 // Root project - just the Rust native library build tasks.
