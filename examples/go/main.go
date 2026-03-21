@@ -14,6 +14,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -505,43 +506,26 @@ type cliArgs struct {
 }
 
 func parseArgs() (*cliArgs, error) {
-	args := os.Args[1:]
 	cli := &cliArgs{}
 
-	i := 0
-	for i < len(args) && strings.HasPrefix(args[i], "--") {
-		switch {
-		case args[i] == "--hub" && i+1 < len(args):
-			cli.hub = args[i+1]
-			i += 2
-		case strings.HasPrefix(args[i], "--hub="):
-			cli.hub = args[i][6:]
-			i++
-		case args[i] == "--storage" && i+1 < len(args):
-			cli.storage = args[i+1]
-			i += 2
-		case strings.HasPrefix(args[i], "--storage="):
-			cli.storage = args[i][10:]
-			i++
-		default:
-			return nil, fmt.Errorf("unknown flag: %s", args[i])
-		}
-	}
+	// Global flags (parsed before the subcommand).
+	flag.StringVar(&cli.hub, "hub", "", "Override hub address")
+	flag.StringVar(&cli.storage, "storage", "", "Storage directory")
+	flag.Usage = printUsage
+	flag.Parse()
 
-	if i >= len(args) {
+	rest := flag.Args()
+	if len(rest) == 0 {
 		return nil, fmt.Errorf("no command specified")
 	}
-	cli.command = args[i]
-	i++
+	cli.command = rest[0]
 
-	for i < len(args) {
-		if args[i] == "--quic" {
-			cli.quic = true
-		} else {
-			cli.args = append(cli.args, args[i])
-		}
-		i++
-	}
+	// Subcommand flags (only --quic for ping).
+	sub := flag.NewFlagSet(cli.command, flag.ExitOnError)
+	sub.BoolVar(&cli.quic, "quic", false, "Use QUIC instead of UDP")
+	sub.Parse(rest[1:])
+	cli.args = sub.Args()
+
 	return cli, nil
 }
 
