@@ -385,6 +385,7 @@ static WispersStatus load_registration(void *ctx, uint8_t *buffer, size_t buffer
         return WISPERS_STATUS_STORE_ERROR;
     }
 
+    *out_len = (size_t)size;
     if ((size_t)size > buffer_len) {
         fclose(f);
         return WISPERS_STATUS_BUFFER_TOO_SMALL;
