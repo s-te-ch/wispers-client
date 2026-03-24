@@ -56,24 +56,20 @@ impl SigningKeyPair {
     }
 }
 
-/// X25519 key exchange keypair derived from the root key.
+/// X25519 key exchange keypair.
 ///
 /// This stores the seed rather than the secret directly, since
 /// `X25519StaticSecret` doesn't implement Clone. The secret is
 /// derived on-demand for cryptographic operations.
-#[derive(Clone)]
 pub struct X25519KeyPair {
     seed: [u8; 32],
 }
 
 impl X25519KeyPair {
-    /// Derive an X25519 keypair from the root key using HKDF.
-    pub fn derive_from_root_key(root_key: &[u8; 32]) -> Self {
-        let hk = Hkdf::<Sha256>::new(Some(b"wispers-connect-v1"), root_key);
+    /// Generate an ephemeral X25519 keypair from random bytes.
+    pub fn generate_ephemeral() -> Self {
         let mut seed = [0u8; 32];
-        hk.expand(b"x25519-key", &mut seed)
-            .expect("32 bytes is valid for HKDF-SHA256");
-
+        rand::thread_rng().fill_bytes(&mut seed);
         Self { seed }
     }
 
@@ -330,25 +326,16 @@ mod tests {
     }
 
     #[test]
-    fn test_x25519_derivation_deterministic() {
-        let root_key = [42u8; 32];
-        let kp1 = X25519KeyPair::derive_from_root_key(&root_key);
-        let kp2 = X25519KeyPair::derive_from_root_key(&root_key);
-        assert_eq!(kp1.public_key(), kp2.public_key());
-    }
-
-    #[test]
-    fn test_x25519_different_roots_different_keys() {
-        let kp1 = X25519KeyPair::derive_from_root_key(&[1u8; 32]);
-        let kp2 = X25519KeyPair::derive_from_root_key(&[2u8; 32]);
+    fn test_x25519_ephemeral_keys_differ() {
+        let kp1 = X25519KeyPair::generate_ephemeral();
+        let kp2 = X25519KeyPair::generate_ephemeral();
         assert_ne!(kp1.public_key(), kp2.public_key());
     }
 
     #[test]
     fn test_x25519_dh_shared_secret() {
-        // Two parties derive keypairs from different root keys
-        let alice = X25519KeyPair::derive_from_root_key(&[1u8; 32]);
-        let bob = X25519KeyPair::derive_from_root_key(&[2u8; 32]);
+        let alice = X25519KeyPair::generate_ephemeral();
+        let bob = X25519KeyPair::generate_ephemeral();
 
         // Each performs DH with the other's public key
         let alice_shared = alice.diffie_hellman(&bob.public_key());

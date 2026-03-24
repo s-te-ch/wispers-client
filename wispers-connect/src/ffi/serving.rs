@@ -459,7 +459,6 @@ fn extract_serving_params(node: &Node) -> Result<ServingParams, WispersStatus> {
     let hub_addr = node.hub_addr();
 
     let p2p_config = crate::serving::P2pConfig {
-        x25519_key: node.encryption_key().clone(),
         hub_addr: hub_addr.clone(),
         registration: registration.clone(),
     };

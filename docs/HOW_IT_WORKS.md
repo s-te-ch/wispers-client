@@ -224,12 +224,12 @@ With this design, we achieve the following security properties:
 * End-to-end encrypted UDP and QUIC connections between nodes that cannot be
   MITM-ed by the Hub, or even by the cloud provider whose infrastructure the Hub
   runs on
+* Forward secrecy: Each connection uses ephemeral X25519 keys, so compromising
+  the root key does not expose past sessions
 * Roster-based trust that prevents the Hub from injecting nodes
 
 At the time of writing, these are the limitations we're aware of:
 
-* No forward secrecy: The X25519 keys are derived from the root key. We expect
-  this to change soon
 * If compromised, a node can do anything a normal node can do, including
   endorsing other, malicious nodes
 

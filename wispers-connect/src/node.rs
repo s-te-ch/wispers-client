@@ -10,7 +10,7 @@
 use std::fmt;
 use std::sync::{Arc, RwLock};
 
-use crate::crypto::{generate_nonce, PairingCode, SigningKeyPair, X25519KeyPair};
+use crate::crypto::{generate_nonce, PairingCode, SigningKeyPair};
 use crate::errors::NodeStateError;
 use crate::hub::proto;
 use crate::roster::{
@@ -205,7 +205,6 @@ pub struct Node {
     config: SharedConfig,
     // Derived from root key at construction time
     signing_key: SigningKeyPair,
-    encryption_key: X25519KeyPair,
     // Present after activation:
     roster: Option<proto::roster::Roster>,
 }
@@ -220,7 +219,6 @@ impl Node {
         let root_key = persisted.root_key.as_bytes();
         Self {
             signing_key: SigningKeyPair::derive_from_root_key(root_key),
-            encryption_key: X25519KeyPair::derive_from_root_key(root_key),
             persisted,
             store,
             config,
@@ -240,7 +238,6 @@ impl Node {
         let root_key = persisted.root_key.as_bytes();
         Ok(Self {
             signing_key: SigningKeyPair::derive_from_root_key(root_key),
-            encryption_key: X25519KeyPair::derive_from_root_key(root_key),
             persisted,
             store,
             config,
@@ -258,7 +255,6 @@ impl Node {
         let root_key = persisted.root_key.as_bytes();
         Self {
             signing_key: SigningKeyPair::derive_from_root_key(root_key),
-            encryption_key: X25519KeyPair::derive_from_root_key(root_key),
             persisted,
             store,
             config,
@@ -371,11 +367,6 @@ impl Node {
     /// Get the signing key.
     pub(crate) fn signing_key(&self) -> &SigningKeyPair {
         &self.signing_key
-    }
-
-    /// Get the encryption key (X25519).
-    pub(crate) fn encryption_key(&self) -> &X25519KeyPair {
-        &self.encryption_key
     }
 
     // -------------------------------------------------------------------------
@@ -552,7 +543,6 @@ impl Node {
         );
 
         let p2p_config = P2pConfig {
-            x25519_key: self.encryption_key.clone(),
             hub_addr: hub_addr.clone(),
             registration: registration.clone(),
         };
@@ -709,6 +699,7 @@ impl Node {
         &self,
         peer_node_number: i32,
     ) -> Result<crate::p2p::UdpConnection, crate::p2p::P2pError> {
+        use crate::crypto::X25519KeyPair;
         use crate::hub::HubClient;
         use crate::ice::IceCaller;
         use crate::p2p::{P2pError, UdpConnection};
@@ -734,16 +725,19 @@ impl Node {
         let ice_caller = IceCaller::new(&stun_turn_config)?;
         let caller_sdp = ice_caller.local_description().to_string();
 
+        // Generate ephemeral X25519 keypair for forward secrecy
+        let encryption_key = X25519KeyPair::generate_ephemeral();
+
         // Build the StartConnectionRequest
         let mut message_to_sign = Vec::new();
         message_to_sign.extend_from_slice(&peer_node_number.to_le_bytes());
-        message_to_sign.extend_from_slice(&self.encryption_key.public_key());
+        message_to_sign.extend_from_slice(&encryption_key.public_key());
         message_to_sign.extend_from_slice(caller_sdp.as_bytes());
         let signature = self.signing_key.sign(&message_to_sign);
 
         let request = proto::StartConnectionRequest {
             answerer_node_number: peer_node_number,
-            caller_x25519_public_key: self.encryption_key.public_key().to_vec(),
+            caller_x25519_public_key: encryption_key.public_key().to_vec(),
             caller_sdp,
             signature,
             stun_turn_config: Some(stun_turn_config),
@@ -786,7 +780,7 @@ impl Node {
             .map_err(|_| P2pError::SignatureVerificationFailed)?;
 
         // Derive shared secret
-        let shared_secret = self.encryption_key.diffie_hellman(&peer_x25519_public);
+        let shared_secret = encryption_key.diffie_hellman(&peer_x25519_public);
 
         // Complete ICE connection
         ice_caller.connect(&response.answerer_sdp).await?;
@@ -806,6 +800,7 @@ impl Node {
         &self,
         peer_node_number: i32,
     ) -> Result<crate::p2p::QuicConnection, crate::p2p::P2pError> {
+        use crate::crypto::X25519KeyPair;
         use crate::hub::HubClient;
         use crate::ice::IceCaller;
         use crate::p2p::{P2pError, QuicConnection};
@@ -831,16 +826,19 @@ impl Node {
         let ice_caller = IceCaller::new(&stun_turn_config)?;
         let caller_sdp = ice_caller.local_description().to_string();
 
+        // Generate ephemeral X25519 keypair for forward secrecy
+        let encryption_key = X25519KeyPair::generate_ephemeral();
+
         // Build the StartConnectionRequest
         let mut message_to_sign = Vec::new();
         message_to_sign.extend_from_slice(&peer_node_number.to_le_bytes());
-        message_to_sign.extend_from_slice(&self.encryption_key.public_key());
+        message_to_sign.extend_from_slice(&encryption_key.public_key());
         message_to_sign.extend_from_slice(caller_sdp.as_bytes());
         let signature = self.signing_key.sign(&message_to_sign);
 
         let request = proto::StartConnectionRequest {
             answerer_node_number: peer_node_number,
-            caller_x25519_public_key: self.encryption_key.public_key().to_vec(),
+            caller_x25519_public_key: encryption_key.public_key().to_vec(),
             caller_sdp,
             signature,
             stun_turn_config: Some(stun_turn_config),
@@ -883,7 +881,7 @@ impl Node {
             .map_err(|_| P2pError::SignatureVerificationFailed)?;
 
         // Derive shared secret
-        let shared_secret = self.encryption_key.diffie_hellman(&peer_x25519_public);
+        let shared_secret = encryption_key.diffie_hellman(&peer_x25519_public);
 
         // Complete ICE connection
         ice_caller.connect(&response.answerer_sdp).await?;
@@ -999,7 +997,6 @@ impl Node {
 
         Self {
             signing_key: SigningKeyPair::derive_from_root_key(&root_key),
-            encryption_key: X25519KeyPair::derive_from_root_key(&root_key),
             persisted,
             store: Arc::new(InMemoryNodeStateStore::new()),
             config: Arc::new(std::sync::RwLock::new(RuntimeConfig::new_with_addr(

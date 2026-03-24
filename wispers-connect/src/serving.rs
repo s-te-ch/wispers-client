@@ -6,7 +6,7 @@
 
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use crate::crypto::{generate_nonce, PairingCode, PairingSecret, SigningKeyPair, X25519KeyPair};
+use crate::crypto::{generate_nonce, PairingCode, PairingSecret, SigningKeyPair};
 use crate::hub::proto;
 use crate::hub::ServingConnection;
 use crate::ice::IceAnswerer;
@@ -44,8 +44,6 @@ impl ServingError {
 
 /// Configuration for P2P connection handling.
 pub struct P2pConfig {
-    /// X25519 key pair for key exchange.
-    pub x25519_key: X25519KeyPair,
     /// Hub address for fetching fresh roster on each connection request.
     pub hub_addr: String,
     /// Node registration for authenticating with the hub.
@@ -650,15 +648,18 @@ impl ServingSession {
 
         let answerer_sdp = ice_answerer.local_description().to_string();
 
+        // Generate ephemeral X25519 keypair for forward secrecy
+        let encryption_key = crate::crypto::X25519KeyPair::generate_ephemeral();
+
         // Sign our response: connection_id || answerer_x25519_public_key || answerer_sdp
         let mut message_to_sign = Vec::new();
         message_to_sign.extend_from_slice(&connection_id.to_le_bytes());
-        message_to_sign.extend_from_slice(&self.p2p_config.x25519_key.public_key());
+        message_to_sign.extend_from_slice(&encryption_key.public_key());
         message_to_sign.extend_from_slice(answerer_sdp.as_bytes());
         let signature = self.signing_key.sign(&message_to_sign);
 
         // Compute shared secret
-        let shared_secret = self.p2p_config.x25519_key.diffie_hellman(&caller_x25519_public);
+        let shared_secret = encryption_key.diffie_hellman(&caller_x25519_public);
 
         // Send response
         let response = proto::ServingResponse {
@@ -667,7 +668,7 @@ impl ServingSession {
             kind: Some(proto::serving_response::Kind::StartConnectionResponse(
                 proto::StartConnectionResponse {
                     connection_id,
-                    answerer_x25519_public_key: self.p2p_config.x25519_key.public_key().to_vec(),
+                    answerer_x25519_public_key: encryption_key.public_key().to_vec(),
                     answerer_sdp,
                     signature,
                 },
