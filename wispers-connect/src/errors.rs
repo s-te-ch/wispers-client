@@ -58,17 +58,25 @@ impl fmt::Display for NodeStateError {
             NodeStateError::Hub(err) => write!(f, "hub error: {err}"),
             NodeStateError::AlreadyRegistered => write!(f, "node is already registered"),
             NodeStateError::NotRegistered => write!(f, "node has not completed registration"),
-            NodeStateError::InvalidActivationCode(err) => write!(f, "invalid activation code: {err}"),
+            NodeStateError::InvalidActivationCode(err) => {
+                write!(f, "invalid activation code: {err}")
+            }
             NodeStateError::MacVerificationFailed => write!(f, "MAC verification failed"),
             NodeStateError::MissingEndorserResponse => write!(f, "missing endorser response"),
             NodeStateError::RosterVerificationFailed(err) => {
                 write!(f, "roster verification failed: {err}")
             }
             NodeStateError::LastActiveNode => {
-                write!(f, "cannot logout: this is the last active node in the roster — use group reset instead")
+                write!(
+                    f,
+                    "cannot logout: this is the last active node in the roster — use group reset instead"
+                )
             }
             NodeStateError::InvalidState { current, required } => {
-                write!(f, "invalid state: node is {current}, but {required} is required")
+                write!(
+                    f,
+                    "invalid state: node is {current}, but {required} is required"
+                )
             }
         }
     }

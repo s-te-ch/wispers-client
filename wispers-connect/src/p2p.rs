@@ -49,7 +49,10 @@ impl ConnectionState {
 
     /// Returns true if the connection is disconnected or failed.
     pub fn is_disconnected(self) -> bool {
-        matches!(self, ConnectionState::Disconnected | ConnectionState::Failed)
+        matches!(
+            self,
+            ConnectionState::Disconnected | ConnectionState::Failed
+        )
     }
 }
 
@@ -85,14 +88,8 @@ pub enum P2pError {
 
 /// Internal enum to hold either caller or answerer UDP connection.
 enum UdpConnectionInner {
-    Caller {
-        ice: IceCaller,
-        cipher: P2pCipher,
-    },
-    Answerer {
-        ice: IceAnswerer,
-        cipher: P2pCipher,
-    },
+    Caller { ice: IceCaller, cipher: P2pCipher },
+    Answerer { ice: IceAnswerer, cipher: P2pCipher },
 }
 
 /// A UDP-based P2P connection to another node.
@@ -199,7 +196,9 @@ impl UdpConnection {
     pub fn state(&self) -> ConnectionState {
         match &self.inner {
             UdpConnectionInner::Caller { ice, .. } => ConnectionState::from_ice_state(ice.state()),
-            UdpConnectionInner::Answerer { ice, .. } => ConnectionState::from_ice_state(ice.state()),
+            UdpConnectionInner::Answerer { ice, .. } => {
+                ConnectionState::from_ice_state(ice.state())
+            }
         }
     }
 

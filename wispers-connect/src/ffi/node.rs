@@ -5,15 +5,15 @@
 
 use super::runtime;
 use super::types::{
-    c_str_to_string, CallbackContext, WispersCallback, WispersGroupInfo,
-    WispersGroupInfoCallback, WispersInitCallback, WispersNodeHandle, WispersNodeState,
-    WispersNodeStorageHandle, WispersRegistrationInfo,
+    CallbackContext, WispersCallback, WispersGroupInfo, WispersGroupInfoCallback,
+    WispersInitCallback, WispersNodeHandle, WispersNodeState, WispersNodeStorageHandle,
+    WispersRegistrationInfo, c_str_to_string,
 };
 use crate::errors::WispersStatus;
 use crate::node::{NodeState, NodeStorage};
 use crate::storage::foreign::WispersNodeStorageCallbacks;
 use crate::storage::{ForeignNodeStateStore, InMemoryNodeStateStore};
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 use std::os::raw::c_char;
 
 // =============================================================================
@@ -147,7 +147,13 @@ pub extern "C" fn wispers_storage_restore_or_init_async(
                 let state = node_state_to_ffi(node.state());
                 let handle = Box::into_raw(Box::new(WispersNodeHandle(node)));
                 unsafe {
-                    callback(ctx.ptr(), WispersStatus::Success, std::ptr::null(), handle, state);
+                    callback(
+                        ctx.ptr(),
+                        WispersStatus::Success,
+                        std::ptr::null(),
+                        handle,
+                        state,
+                    );
                 }
             }
             Err(e) => {

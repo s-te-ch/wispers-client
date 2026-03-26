@@ -7,6 +7,9 @@
 //! - `p2p`: P2P connection operations
 //! - `runtime`: Tokio runtime management
 
+// FFI functions necessarily dereference raw pointers from C callers.
+#![allow(clippy::not_unsafe_ptr_arg_deref, clippy::mut_from_ref)]
+
 mod node;
 mod p2p;
 pub(crate) mod runtime;
@@ -15,11 +18,10 @@ mod types;
 
 // Re-export types
 pub use types::{
-    wispers_group_info_free, wispers_node_list_free, wispers_registration_info_free,
-    wispers_string_free, CallbackContext, WispersCallback,
-    WispersGroupInfo, WispersGroupInfoCallback, WispersGroupState, WispersInitCallback,
-    WispersNode, WispersNodeHandle, WispersNodeList, WispersNodeState,
-    WispersNodeStorageHandle, WispersRegistrationInfo,
+    CallbackContext, WispersCallback, WispersGroupInfo, WispersGroupInfoCallback,
+    WispersGroupState, WispersInitCallback, WispersNode, WispersNodeHandle, WispersNodeList,
+    WispersNodeState, WispersNodeStorageHandle, WispersRegistrationInfo, wispers_group_info_free,
+    wispers_node_list_free, wispers_registration_info_free, wispers_string_free,
 };
 
 // Re-export node functions
@@ -33,25 +35,25 @@ pub use node::{
 
 // Re-export serving functions
 pub use serving::{
-    wispers_incoming_accept_quic_async, wispers_incoming_accept_udp_async,
-    wispers_incoming_connections_free, wispers_node_start_serving_async,
-    wispers_serving_handle_free, wispers_serving_handle_generate_activation_code_async,
-    wispers_serving_handle_shutdown_async, wispers_serving_session_free,
-    wispers_serving_session_run_async, WispersActivationCodeCallback, WispersIncomingConnections,
-    WispersServingHandle, WispersServingSession, WispersStartServingCallback,
+    WispersActivationCodeCallback, WispersIncomingConnections, WispersServingHandle,
+    WispersServingSession, WispersStartServingCallback, wispers_incoming_accept_quic_async,
+    wispers_incoming_accept_udp_async, wispers_incoming_connections_free,
+    wispers_node_start_serving_async, wispers_serving_handle_free,
+    wispers_serving_handle_generate_activation_code_async, wispers_serving_handle_shutdown_async,
+    wispers_serving_session_free, wispers_serving_session_run_async,
 };
 
 // Re-export P2P functions
 pub use p2p::{
-    wispers_node_connect_quic_async, wispers_node_connect_udp_async,
+    WispersDataCallback, WispersQuicConnectionCallback, WispersQuicConnectionHandle,
+    WispersQuicStreamCallback, WispersQuicStreamHandle, WispersUdpConnectionCallback,
+    WispersUdpConnectionHandle, wispers_node_connect_quic_async, wispers_node_connect_udp_async,
     wispers_quic_connection_accept_stream_async, wispers_quic_connection_close_async,
     wispers_quic_connection_free, wispers_quic_connection_open_stream_async,
     wispers_quic_stream_finish_async, wispers_quic_stream_free, wispers_quic_stream_read_async,
     wispers_quic_stream_shutdown_async, wispers_quic_stream_write_async,
     wispers_udp_connection_close, wispers_udp_connection_free, wispers_udp_connection_recv_async,
-    wispers_udp_connection_send, WispersDataCallback, WispersQuicConnectionCallback,
-    WispersQuicConnectionHandle, WispersQuicStreamCallback, WispersQuicStreamHandle,
-    WispersUdpConnectionCallback, WispersUdpConnectionHandle,
+    wispers_udp_connection_send,
 };
 
 pub use crate::storage::foreign::WispersNodeStorageCallbacks;

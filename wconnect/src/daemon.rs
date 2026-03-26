@@ -213,12 +213,14 @@ pub async fn handle_client_with_optional_handle(
                             // Hub not connected yet
                             let request: Result<Request, _> = serde_json::from_str(&line);
                             match request {
-                                Ok(Request::Status) => Response::success(ResponseData::Status(StatusData {
-                                    connected: false,
-                                    node_number: 0, // We don't have this info without the handle
-                                    cg_id: String::new(),
-                                    endorsing: None,
-                                })),
+                                Ok(Request::Status) => {
+                                    Response::success(ResponseData::Status(StatusData {
+                                        connected: false,
+                                        node_number: 0, // We don't have this info without the handle
+                                        cg_id: String::new(),
+                                        endorsing: None,
+                                    }))
+                                }
                                 Ok(_) => Response::error("hub not connected yet"),
                                 Err(e) => Response::error(format!("invalid request: {}", e)),
                             }
@@ -243,7 +245,10 @@ pub async fn handle_client_with_optional_handle(
                     break;
                 }
 
-                if matches!(serde_json::from_str::<Request>(&line), Ok(Request::Shutdown)) {
+                if matches!(
+                    serde_json::from_str::<Request>(&line),
+                    Ok(Request::Shutdown)
+                ) {
                     break;
                 }
             }
@@ -307,12 +312,9 @@ impl DaemonClient {
     /// Connect to the daemon for a specific node.
     pub async fn connect(connectivity_group_id: &str, node_number: i32) -> Result<Self> {
         let path = socket_path(connectivity_group_id, node_number);
-        let stream = UnixStream::connect(&path)
-            .await
-            .with_context(|| format!(
-                "failed to connect to daemon at {:?} (is it running?)",
-                path
-            ))?;
+        let stream = UnixStream::connect(&path).await.with_context(|| {
+            format!("failed to connect to daemon at {:?} (is it running?)", path)
+        })?;
         let (reader, writer) = stream.into_split();
         Ok(Self {
             reader: BufReader::new(reader),

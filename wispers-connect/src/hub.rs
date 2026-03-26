@@ -99,7 +99,10 @@ impl HubClient {
     /// Complete node registration using a registration token.
     ///
     /// Returns the node's credentials for future authenticated requests.
-    pub async fn complete_registration(&mut self, token: &str) -> Result<NodeRegistration, HubError> {
+    pub async fn complete_registration(
+        &mut self,
+        token: &str,
+    ) -> Result<NodeRegistration, HubError> {
         let request = tonic::Request::new(proto::NodeRegistrationRequest {
             token: token.to_string(),
         });
@@ -114,7 +117,10 @@ impl HubClient {
     }
 
     /// List all nodes in the connectivity group.
-    pub async fn list_nodes(&mut self, registration: &NodeRegistration) -> Result<Vec<Node>, HubError> {
+    pub async fn list_nodes(
+        &mut self,
+        registration: &NodeRegistration,
+    ) -> Result<Vec<Node>, HubError> {
         let mut request = tonic::Request::new(proto::ListNodesRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
@@ -174,11 +180,7 @@ impl HubClient {
         verifier_public_key_spki: &[u8],
     ) -> Result<proto::roster::Roster, HubError> {
         let roster = self.get_unverified_roster(registration).await?;
-        crate::roster::verify_roster(
-            &roster,
-            registration.node_number,
-            verifier_public_key_spki,
-        )?;
+        crate::roster::verify_roster(&roster, registration.node_number, verifier_public_key_spki)?;
         Ok(roster)
     }
 
@@ -195,10 +197,11 @@ impl HubClient {
         add_auth_metadata(request.metadata_mut(), registration)?;
 
         let response = self.client.update_roster(request).await?;
-        response
-            .into_inner()
-            .cosigned_roster
-            .ok_or_else(|| HubError::Rpc(tonic::Status::internal("missing cosigned_roster in response")))
+        response.into_inner().cosigned_roster.ok_or_else(|| {
+            HubError::Rpc(tonic::Status::internal(
+                "missing cosigned_roster in response",
+            ))
+        })
     }
 
     /// Start serving: open a bidirectional stream for handling incoming requests.
@@ -255,7 +258,10 @@ impl HubClient {
     /// Deregister this node from its connectivity group.
     ///
     /// This soft-deletes the node from the hub's database.
-    pub async fn deregister_node(&mut self, registration: &NodeRegistration) -> Result<(), HubError> {
+    pub async fn deregister_node(
+        &mut self,
+        registration: &NodeRegistration,
+    ) -> Result<(), HubError> {
         let mut request = tonic::Request::new(proto::DeregisterNodeRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 

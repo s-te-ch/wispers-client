@@ -56,7 +56,6 @@ impl ProxyError {
             ProxyError::GatewayTimeout(_) => 504,
         }
     }
-
 }
 
 /// A pooled QUIC connection with last-used timestamp.
@@ -205,8 +204,8 @@ pub async fn open_stream_with_command(
     let response = String::from_utf8_lossy(&response_buf[..n]);
     let response = response.trim();
 
-    if response.starts_with("ERROR ") {
-        return Err(format!("remote error: {}", &response[6..]));
+    if let Some(msg) = response.strip_prefix("ERROR ") {
+        return Err(format!("remote error: {}", msg));
     }
 
     if response != "OK" {
@@ -263,7 +262,9 @@ mod tests {
         assert_eq!(ProxyError::BadRequest("".to_string()).status_code(), 400);
         assert_eq!(ProxyError::Forbidden("".to_string()).status_code(), 403);
         assert_eq!(ProxyError::BadGateway("".to_string()).status_code(), 502);
-        assert_eq!(ProxyError::GatewayTimeout("".to_string()).status_code(), 504);
+        assert_eq!(
+            ProxyError::GatewayTimeout("".to_string()).status_code(),
+            504
+        );
     }
-
 }

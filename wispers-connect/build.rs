@@ -33,7 +33,8 @@ fn build_libjuice() -> BuildResult<()> {
         return Err(format!(
             "libjuice not found at {}. Run: git submodule update --init --recursive",
             libjuice_dir.display()
-        ).into());
+        )
+        .into());
     }
 
     println!("cargo:rerun-if-changed={}", header.display());

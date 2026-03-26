@@ -10,14 +10,16 @@
 use std::fmt;
 use std::sync::{Arc, RwLock};
 
-use crate::crypto::{generate_nonce, PairingCode, SigningKeyPair};
+use crate::crypto::{PairingCode, SigningKeyPair, generate_nonce};
 use crate::errors::NodeStateError;
 use crate::hub::proto;
 use crate::roster::{
     build_activation_payload, create_activation_roster, create_bootstrap_roster, verify_roster,
 };
 use crate::storage::{NodeStateStore, SharedStore};
-use crate::types::{ConnectivityGroupId, GroupInfo, GroupState, NodeInfo, NodeRegistration, PersistedNodeState};
+use crate::types::{
+    ConnectivityGroupId, GroupInfo, GroupState, NodeInfo, NodeRegistration, PersistedNodeState,
+};
 use prost::Message;
 
 /// Default hub address for production use.
@@ -456,8 +458,8 @@ impl Node {
 
         // Detect dead roster: version > 0 but no active roster member is still
         // registered with the hub.
-        let is_dead_roster = roster.version > 0
-            && !activated_set.iter().any(|n| hub_numbers.contains(n));
+        let is_dead_roster =
+            roster.version > 0 && !activated_set.iter().any(|n| hub_numbers.contains(n));
 
         let my_node_number = registration.node_number;
         let self_activated = activated_set.contains(&my_node_number) && !is_dead_roster;
@@ -537,7 +539,11 @@ impl Node {
             "Starting serving session for node {} in group {}{}",
             registration.node_number,
             registration.connectivity_group_id,
-            if is_activated { "" } else { " (not yet activated)" }
+            if is_activated {
+                ""
+            } else {
+                " (not yet activated)"
+            }
         );
 
         let p2p_config = P2pConfig {
@@ -545,9 +551,14 @@ impl Node {
             registration: registration.clone(),
         };
 
-        start_serving_impl(&hub_addr, self.signing_key.clone(), registration, p2p_config)
-            .await
-            .map_err(NodeStateError::hub)
+        start_serving_impl(
+            &hub_addr,
+            self.signing_key.clone(),
+            registration,
+            p2p_config,
+        )
+        .await
+        .map_err(NodeStateError::hub)
     }
 
     /// Activate this node using an activation code from an endorser node.
@@ -700,12 +711,19 @@ impl Node {
         {
             let roster = self.roster.read().unwrap();
             let roster = roster.as_ref().expect("activated");
-            if let Some(node) = roster.nodes.iter().find(|n| n.node_number == peer_node_number && !n.revoked) {
+            if let Some(node) = roster
+                .nodes
+                .iter()
+                .find(|n| n.node_number == peer_node_number && !n.revoked)
+            {
                 return Ok(node.clone());
             }
         }
 
-        log::info!("Peer node {} not in cached roster, refetching from hub", peer_node_number);
+        log::info!(
+            "Peer node {} not in cached roster, refetching from hub",
+            peer_node_number
+        );
         let registration = self.persisted.registration.as_ref().expect("activated");
         let fresh_roster = client
             .get_and_verify_roster(registration, &self.signing_key.public_key_spki())
@@ -777,7 +795,9 @@ impl Node {
         let response = client.start_connection(registration, request).await?;
 
         // Verify answerer's signature against roster (refetch if peer is unknown)
-        let peer_node = self.find_peer_in_roster(&mut client, peer_node_number).await?;
+        let peer_node = self
+            .find_peer_in_roster(&mut client, peer_node_number)
+            .await?;
 
         let verifying_key = VerifyingKey::from_public_key_der(&peer_node.public_key_spki)
             .map_err(|_| P2pError::SignatureVerificationFailed)?;
@@ -873,7 +893,9 @@ impl Node {
         let response = client.start_connection(registration, request).await?;
 
         // Verify answerer's signature against roster (refetch if peer is unknown)
-        let peer_node = self.find_peer_in_roster(&mut client, peer_node_number).await?;
+        let peer_node = self
+            .find_peer_in_roster(&mut client, peer_node_number)
+            .await?;
 
         let verifying_key = VerifyingKey::from_public_key_der(&peer_node.public_key_spki)
             .map_err(|_| P2pError::SignatureVerificationFailed)?;

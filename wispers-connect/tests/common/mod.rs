@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Minimal fake hub for integration testing.
 //!
 //! Implements only the RPCs needed for P2P connection establishment:
@@ -10,18 +11,18 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_stream::{Stream, StreamExt};
 use tonic::{Request, Response, Status, Streaming};
 
 // Use the proto types from the library
 use wispers_connect::hub::proto::{
+    DeregisterNodeRequest, DeregisterNodeResponse, ListNodesRequest, NodeList, NodeRegistration,
+    NodeRegistrationRequest, PairNodesMessage, RosterRequest, ServingRequest, ServingResponse,
+    StartConnectionRequest, StartConnectionResponse, StunTurnConfig, StunTurnConfigRequest,
+    UpdateRosterRequest, UpdateRosterResponse, Welcome,
     hub_server::{Hub, HubServer},
-    roster, serving_request, serving_response, DeregisterNodeRequest, DeregisterNodeResponse,
-    ListNodesRequest, NodeList, NodeRegistration, NodeRegistrationRequest, PairNodesMessage,
-    RosterRequest, ServingRequest, ServingResponse, StartConnectionRequest,
-    StartConnectionResponse, StunTurnConfig, StunTurnConfigRequest, UpdateRosterRequest,
-    UpdateRosterResponse, Welcome,
+    roster, serving_request, serving_response,
 };
 
 /// A pending connection request waiting for the answerer's response.
@@ -287,7 +288,7 @@ impl Hub for FakeHub {
         let response = response_rx
             .await
             .map_err(|_| Status::unavailable("answerer disconnected"))?
-            .map_err(|e| Status::aborted(e))?;
+            .map_err(Status::aborted)?;
 
         Ok(Response::new(response))
     }

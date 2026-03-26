@@ -18,8 +18,8 @@ use hkdf::Hkdf;
 use sha2::Sha256;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{Mutex, Notify};
 
 use crate::ice::{IceAnswerer, IceCaller, IceError};
@@ -93,7 +93,10 @@ pub fn derive_psk(shared_secret: &[u8; 32]) -> [u8; PSK_LEN] {
 /// # Arguments
 /// * `psk` - The pre-shared key derived from X25519 DH exchange
 /// * `role` - Whether this is a client (caller) or server (answerer)
-pub fn create_config(psk: [u8; PSK_LEN], role: QuicRole) -> Result<quiche::Config, QuicConfigError> {
+pub fn create_config(
+    psk: [u8; PSK_LEN],
+    role: QuicRole,
+) -> Result<quiche::Config, QuicConfigError> {
     // Create BoringSSL context with PSK callbacks
     let mut ssl_ctx = SslContextBuilder::new(SslMethod::tls())
         .map_err(|e| QuicConfigError::Tls(e.to_string()))?;
@@ -140,18 +143,22 @@ pub fn create_config(psk: [u8; PSK_LEN], role: QuicRole) -> Result<quiche::Confi
 
             // BoringSSL requires server to have a certificate even for PSK mode.
             // Generate a minimal self-signed certificate in memory.
-            let group =
-                EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).map_err(|e| QuicConfigError::Tls(e.to_string()))?;
-            let ec_key = EcKey::generate(&group).map_err(|e| QuicConfigError::Tls(e.to_string()))?;
-            let pkey = PKey::from_ec_key(ec_key).map_err(|e| QuicConfigError::Tls(e.to_string()))?;
+            let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1)
+                .map_err(|e| QuicConfigError::Tls(e.to_string()))?;
+            let ec_key =
+                EcKey::generate(&group).map_err(|e| QuicConfigError::Tls(e.to_string()))?;
+            let pkey =
+                PKey::from_ec_key(ec_key).map_err(|e| QuicConfigError::Tls(e.to_string()))?;
 
-            let mut name_builder = X509NameBuilder::new().map_err(|e| QuicConfigError::Tls(e.to_string()))?;
+            let mut name_builder =
+                X509NameBuilder::new().map_err(|e| QuicConfigError::Tls(e.to_string()))?;
             name_builder
                 .append_entry_by_text("CN", "wispers-connect")
                 .map_err(|e| QuicConfigError::Tls(e.to_string()))?;
             let name = name_builder.build();
 
-            let mut cert_builder = X509Builder::new().map_err(|e| QuicConfigError::Tls(e.to_string()))?;
+            let mut cert_builder =
+                X509Builder::new().map_err(|e| QuicConfigError::Tls(e.to_string()))?;
             cert_builder
                 .set_version(2)
                 .map_err(|e| QuicConfigError::Tls(e.to_string()))?;
@@ -779,7 +786,10 @@ impl<T: IceTransport + 'static> Stream<T> {
                     Err(e) => {
                         log::error!(
                             "[wispers QUIC] stream {} recv error: {:?} (conn closed={}, draining={})",
-                            self.stream_id, e, conn.is_closed(), conn.is_draining()
+                            self.stream_id,
+                            e,
+                            conn.is_closed(),
+                            conn.is_draining()
                         );
                         return Err(QuicError::Quic(e));
                     }
@@ -957,15 +967,13 @@ mod tests {
                 .map_err(|_| IceError::ChannelClosed)
         }
 
-        fn recv(&self) -> impl std::future::Future<Output = Result<Vec<u8>, IceError>> + Send {
-            async {
-                self.rx
-                    .lock()
-                    .await
-                    .recv()
-                    .await
-                    .ok_or(IceError::ChannelClosed)
-            }
+        async fn recv(&self) -> Result<Vec<u8>, IceError> {
+            self.rx
+                .lock()
+                .await
+                .recv()
+                .await
+                .ok_or(IceError::ChannelClosed)
         }
     }
 
@@ -988,10 +996,9 @@ mod tests {
         let server_scid = quiche::ConnectionId::from_vec(vec![5, 6, 7, 8]);
 
         // Server must be spawned first (it blocks on the Initial packet).
-        let server_fut =
-            tokio::spawn(
-                async move { Connection::new_server(server_transport, psk, server_scid).await },
-            );
+        let server_fut = tokio::spawn(async move {
+            Connection::new_server(server_transport, psk, server_scid).await
+        });
 
         let client = Connection::new_client(client_transport, psk, client_scid)
             .await
@@ -1136,7 +1143,7 @@ mod tests {
                     let n = stream
                         .read(&mut buf)
                         .await
-                        .expect(&format!("stream {} read failed", i));
+                        .unwrap_or_else(|_| panic!("stream {} read failed", i));
                     if n == 0 {
                         break;
                     }

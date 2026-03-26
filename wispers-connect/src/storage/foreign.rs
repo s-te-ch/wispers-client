@@ -16,9 +16,8 @@ pub struct WispersNodeStorageCallbacks {
     pub ctx: *mut c_void,
     pub load_root_key:
         Option<unsafe extern "C" fn(ctx: *mut c_void, out: *mut u8, len: usize) -> WispersStatus>,
-    pub save_root_key: Option<
-        unsafe extern "C" fn(ctx: *mut c_void, key: *const u8, len: usize) -> WispersStatus,
-    >,
+    pub save_root_key:
+        Option<unsafe extern "C" fn(ctx: *mut c_void, key: *const u8, len: usize) -> WispersStatus>,
     pub delete_root_key: Option<unsafe extern "C" fn(ctx: *mut c_void) -> WispersStatus>,
     pub load_registration: Option<
         unsafe extern "C" fn(
@@ -28,9 +27,8 @@ pub struct WispersNodeStorageCallbacks {
             out_len: *mut usize,
         ) -> WispersStatus,
     >,
-    pub save_registration: Option<
-        unsafe extern "C" fn(ctx: *mut c_void, buf: *const u8, len: usize) -> WispersStatus,
-    >,
+    pub save_registration:
+        Option<unsafe extern "C" fn(ctx: *mut c_void, buf: *const u8, len: usize) -> WispersStatus>,
     pub delete_registration: Option<unsafe extern "C" fn(ctx: *mut c_void) -> WispersStatus>,
 }
 
@@ -65,13 +63,10 @@ impl ForeignNodeStateStore {
         Ok(Self { callbacks })
     }
 
-    fn call_load_root_key(
-        &self,
-    ) -> Result<Option<[u8; crate::types::ROOT_KEY_LEN]>, StorageError> {
+    fn call_load_root_key(&self) -> Result<Option<[u8; crate::types::ROOT_KEY_LEN]>, StorageError> {
         let mut buffer = [0u8; crate::types::ROOT_KEY_LEN];
         let callback = self.callbacks.load_root_key.unwrap();
-        let status =
-            unsafe { callback(self.callbacks.ctx, buffer.as_mut_ptr(), buffer.len()) };
+        let status = unsafe { callback(self.callbacks.ctx, buffer.as_mut_ptr(), buffer.len()) };
         match status {
             WispersStatus::Success => Ok(Some(buffer)),
             WispersStatus::NotFound => Ok(None),
@@ -123,7 +118,9 @@ impl ForeignNodeStateStore {
                         Err(_) => {
                             // Old format (bincode) — discard and let the caller
                             // treat it as missing so restoreOrInit re-registers.
-                            log::warn!("Registration decode failed (format migration), treating as empty");
+                            log::warn!(
+                                "Registration decode failed (format migration), treating as empty"
+                            );
                             let _ = self.call_delete_registration();
                             return Ok(None);
                         }
@@ -175,7 +172,10 @@ impl NodeStateStore for ForeignNodeStateStore {
         };
 
         let registration = self.call_load_registration()?;
-        Ok(Some(PersistedNodeState::from_stored(root_key, registration)))
+        Ok(Some(PersistedNodeState::from_stored(
+            root_key,
+            registration,
+        )))
     }
 
     fn save(&self, state: &PersistedNodeState) -> Result<(), StorageError> {

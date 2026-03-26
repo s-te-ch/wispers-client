@@ -2,7 +2,7 @@
 //! and pairing codes/secrets used during the activation protocol.
 
 use ed25519_dalek::pkcs8::{DecodePublicKey, EncodePublicKey};
-use ed25519_dalek::{Signature, SigningKey, Signer, VerifyingKey, Verifier};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use num_bigint::BigUint;
@@ -140,9 +140,8 @@ impl PairingSecret {
     /// Derive the MAC key for pairing message authentication.
     fn derive_mac_key(&self) -> [u8; 32] {
         // Match Go implementation: HMAC(secret, salt || info)
-        let mut mac = HmacSha256::new_from_slice(&self.bytes)
-            .expect("HMAC can take any key size");
-        mac.update(b"wispers-pairing-v1");     // salt
+        let mut mac = HmacSha256::new_from_slice(&self.bytes).expect("HMAC can take any key size");
+        mac.update(b"wispers-pairing-v1"); // salt
         mac.update(b"wispers-pairing-v1|mac"); // info
         let result = mac.finalize();
         result.into_bytes().into()
@@ -151,8 +150,7 @@ impl PairingSecret {
     /// Compute HMAC for a pairing message payload.
     pub fn compute_mac(&self, payload: &[u8]) -> Vec<u8> {
         let key = self.derive_mac_key();
-        let mut mac = HmacSha256::new_from_slice(&key)
-            .expect("HMAC can take any key size");
+        let mut mac = HmacSha256::new_from_slice(&key).expect("HMAC can take any key size");
         mac.update(payload);
         let result = mac.finalize();
         // Truncate to 16 bytes (128 bits) to match Go implementation
@@ -195,8 +193,7 @@ fn decode_base36(s: &str) -> Result<[u8; PAIRING_SECRET_LEN], PairingSecretError
     if s.len() != 10 {
         return Err(PairingSecretError::InvalidLength);
     }
-    let n = BigUint::parse_bytes(s.as_bytes(), 36)
-        .ok_or(PairingSecretError::InvalidCharacter)?;
+    let n = BigUint::parse_bytes(s.as_bytes(), 36).ok_or(PairingSecretError::InvalidCharacter)?;
     let mut bytes = n.to_bytes_be();
     // Pad to 7 bytes
     while bytes.len() < PAIRING_SECRET_LEN {
@@ -218,7 +215,10 @@ pub struct PairingCode {
 impl PairingCode {
     /// Create a new pairing code.
     pub fn new(node_number: i32, secret: PairingSecret) -> Self {
-        Self { node_number, secret }
+        Self {
+            node_number,
+            secret,
+        }
     }
 
     /// Format as "node_number-base36secret" for display.
@@ -235,9 +235,12 @@ impl PairingCode {
         let node_number: i32 = parts[0]
             .parse()
             .map_err(|_| PairingCodeError::InvalidNodeNumber)?;
-        let secret = PairingSecret::from_base36(parts[1])
-            .map_err(|e| PairingCodeError::InvalidSecret(e))?;
-        Ok(Self { node_number, secret })
+        let secret =
+            PairingSecret::from_base36(parts[1]).map_err(PairingCodeError::InvalidSecret)?;
+        Ok(Self {
+            node_number,
+            secret,
+        })
     }
 }
 

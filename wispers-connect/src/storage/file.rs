@@ -81,7 +81,10 @@ impl NodeStateStore for FileNodeStateStore {
             None
         };
 
-        Ok(Some(PersistedNodeState::from_stored(key_array, registration)))
+        Ok(Some(PersistedNodeState::from_stored(
+            key_array,
+            registration,
+        )))
     }
 
     fn save(&self, state: &PersistedNodeState) -> Result<(), StorageError> {

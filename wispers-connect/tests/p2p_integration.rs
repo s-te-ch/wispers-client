@@ -5,9 +5,9 @@
 mod common;
 
 use prost::Message;
-use wispers_connect::crypto::SigningKeyPair;
-use wispers_connect::hub::proto::roster::{self, addendum, Roster};
 use wispers_connect::Node;
+use wispers_connect::crypto::SigningKeyPair;
+use wispers_connect::hub::proto::roster::{self, Roster, addendum};
 use wispers_connect::types::{AuthToken, ConnectivityGroupId, NodeRegistration};
 
 use common::FakeHub;
@@ -78,15 +78,19 @@ async fn test_p2p_connection_via_hub() {
 
     // Create registrations
     let group_id = ConnectivityGroupId::from("test-group");
-    let registration_1 = NodeRegistration::new(group_id.clone(), 1, AuthToken::new("token1"), String::new());
-    let registration_2 = NodeRegistration::new(group_id, 2, AuthToken::new("token2"), String::new());
+    let registration_1 =
+        NodeRegistration::new(group_id.clone(), 1, AuthToken::new("token1"), String::new());
+    let registration_2 =
+        NodeRegistration::new(group_id, 2, AuthToken::new("token2"), String::new());
 
     // Create activated nodes
-    let node1 = Node::new_activated_for_test(root_key_1, roster.clone(), registration_1, hub_url.clone());
+    let node1 =
+        Node::new_activated_for_test(root_key_1, roster.clone(), registration_1, hub_url.clone());
     let node2 = Node::new_activated_for_test(root_key_2, roster, registration_2, hub_url);
 
     // Node 2 starts serving
-    let (handle, session, mut incoming_rx) = node2.start_serving().await.expect("node2 starts serving");
+    let (handle, session, mut incoming_rx) =
+        node2.start_serving().await.expect("node2 starts serving");
 
     // Run the serving session in background
     let session_handle = tokio::spawn(async move {
@@ -100,15 +104,23 @@ async fn test_p2p_connection_via_hub() {
     let caller_conn = node1.connect_udp(2).await.expect("node1 connects to node2");
 
     // Node 2 receives the incoming connection (on UDP channel, already connected)
-    let answerer_conn = incoming_rx.udp.recv().await.expect("node2 receives connection")
+    let answerer_conn = incoming_rx
+        .udp
+        .recv()
+        .await
+        .expect("node2 receives connection")
         .expect("connection handshake succeeds");
 
     // Exchange messages
-    caller_conn.send(b"hello from node 1").expect("caller sends");
+    caller_conn
+        .send(b"hello from node 1")
+        .expect("caller sends");
     let received = answerer_conn.recv().await.expect("answerer receives");
     assert_eq!(received, b"hello from node 1");
 
-    answerer_conn.send(b"hello from node 2").expect("answerer sends");
+    answerer_conn
+        .send(b"hello from node 2")
+        .expect("answerer sends");
     let received = caller_conn.recv().await.expect("caller receives");
     assert_eq!(received, b"hello from node 2");
 
@@ -147,12 +159,18 @@ async fn test_p2p_multiple_messages() {
     );
 
     let (_handle, session, mut incoming_rx) = node2.start_serving().await.expect("serving starts");
-    let session_handle = tokio::spawn(async move { let _ = session.run().await; });
+    let session_handle = tokio::spawn(async move {
+        let _ = session.run().await;
+    });
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     let caller = node1.connect_udp(2).await.expect("connects");
-    let answerer = incoming_rx.udp.recv().await.expect("receives connection")
+    let answerer = incoming_rx
+        .udp
+        .recv()
+        .await
+        .expect("receives connection")
         .expect("connection handshake succeeds");
 
     // Send 10 messages each way

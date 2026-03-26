@@ -8,7 +8,7 @@ use crate::errors::{NodeStateError, WispersStatus};
 use crate::node::{Node, NodeStorage};
 use crate::storage::StorageError;
 use crate::types::{GroupInfo, GroupState, NodeRegistration};
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_void};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
 
@@ -66,8 +66,9 @@ pub enum WispersNodeState {
 /// Basic completion callback (no result value).
 ///
 /// Called when an async operation completes, with status indicating success/failure.
-pub type WispersCallback =
-    Option<unsafe extern "C" fn(ctx: *mut c_void, status: WispersStatus, error_detail: *const c_char)>;
+pub type WispersCallback = Option<
+    unsafe extern "C" fn(ctx: *mut c_void, status: WispersStatus, error_detail: *const c_char),
+>;
 
 /// Callback that receives a node handle and state indicator.
 ///

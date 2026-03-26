@@ -9,8 +9,8 @@ use std::ffi::{CStr, CString};
 use std::fmt;
 use std::os::raw::{c_char, c_void};
 use std::ptr;
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 mod ffi {
     #![allow(non_camel_case_types)]
@@ -191,20 +191,20 @@ impl OwnedConfig {
             turn_strings.push(host_c);
             raw_server.port = server.port;
 
-            if let Some(username) = server.username {
-                if !username.is_empty() {
-                    let username_c = CString::new(username).map_err(|_| JuiceError::InteriorNul)?;
-                    raw_server.username = username_c.as_ptr();
-                    turn_strings.push(username_c);
-                }
+            if let Some(username) = server.username
+                && !username.is_empty()
+            {
+                let username_c = CString::new(username).map_err(|_| JuiceError::InteriorNul)?;
+                raw_server.username = username_c.as_ptr();
+                turn_strings.push(username_c);
             }
 
-            if let Some(password) = server.password {
-                if !password.is_empty() {
-                    let password_c = CString::new(password).map_err(|_| JuiceError::InteriorNul)?;
-                    raw_server.password = password_c.as_ptr();
-                    turn_strings.push(password_c);
-                }
+            if let Some(password) = server.password
+                && !password.is_empty()
+            {
+                let password_c = CString::new(password).map_err(|_| JuiceError::InteriorNul)?;
+                raw_server.password = password_c.as_ptr();
+                turn_strings.push(password_c);
             }
 
             raw_servers.push(raw_server);

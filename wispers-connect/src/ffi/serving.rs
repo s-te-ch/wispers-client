@@ -1,15 +1,15 @@
 //! FFI bindings for serving sessions.
 
-use super::types::{CallbackContext, WispersCallback, WispersNodeHandle};
 use super::p2p::{
     WispersQuicConnectionCallback, WispersQuicConnectionHandle, WispersUdpConnectionCallback,
     WispersUdpConnectionHandle,
 };
 use super::runtime;
+use super::types::{CallbackContext, WispersCallback, WispersNodeHandle};
 use crate::errors::WispersStatus;
 use crate::node::{Node, NodeState};
 use crate::serving::{IncomingConnections, ServingHandle, ServingSession};
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 use std::os::raw::c_char;
 use std::ptr;
 
@@ -139,13 +139,23 @@ pub extern "C" fn wispers_incoming_accept_udp_async(
             Some(Err(e)) => {
                 let detail = CString::new(e.to_string()).unwrap_or_default();
                 unsafe {
-                    callback(ctx.ptr(), WispersStatus::ConnectionFailed, detail.as_ptr(), ptr::null_mut());
+                    callback(
+                        ctx.ptr(),
+                        WispersStatus::ConnectionFailed,
+                        detail.as_ptr(),
+                        ptr::null_mut(),
+                    );
                 }
             }
             None => {
                 let detail = CString::new("channel closed (session ended)").unwrap_or_default();
                 unsafe {
-                    callback(ctx.ptr(), WispersStatus::ConnectionFailed, detail.as_ptr(), ptr::null_mut());
+                    callback(
+                        ctx.ptr(),
+                        WispersStatus::ConnectionFailed,
+                        detail.as_ptr(),
+                        ptr::null_mut(),
+                    );
                 }
             }
         }
@@ -192,13 +202,23 @@ pub extern "C" fn wispers_incoming_accept_quic_async(
             Some(Err(e)) => {
                 let detail = CString::new(e.to_string()).unwrap_or_default();
                 unsafe {
-                    callback(ctx.ptr(), WispersStatus::ConnectionFailed, detail.as_ptr(), ptr::null_mut());
+                    callback(
+                        ctx.ptr(),
+                        WispersStatus::ConnectionFailed,
+                        detail.as_ptr(),
+                        ptr::null_mut(),
+                    );
                 }
             }
             None => {
                 let detail = CString::new("channel closed (session ended)").unwrap_or_default();
                 unsafe {
-                    callback(ctx.ptr(), WispersStatus::ConnectionFailed, detail.as_ptr(), ptr::null_mut());
+                    callback(
+                        ctx.ptr(),
+                        WispersStatus::ConnectionFailed,
+                        detail.as_ptr(),
+                        ptr::null_mut(),
+                    );
                 }
             }
         }
@@ -312,15 +332,23 @@ pub extern "C" fn wispers_serving_handle_generate_activation_code_async(
             Ok(pairing_code) => {
                 let code_str = pairing_code.format();
                 match CString::new(code_str) {
-                    Ok(cstr) => {
-                        unsafe {
-                            callback(ctx.ptr(), WispersStatus::Success, ptr::null(), cstr.into_raw());
-                        }
-                    }
+                    Ok(cstr) => unsafe {
+                        callback(
+                            ctx.ptr(),
+                            WispersStatus::Success,
+                            ptr::null(),
+                            cstr.into_raw(),
+                        );
+                    },
                     Err(e) => {
                         let detail = CString::new(e.to_string()).unwrap_or_default();
                         unsafe {
-                            callback(ctx.ptr(), WispersStatus::InvalidUtf8, detail.as_ptr(), ptr::null_mut());
+                            callback(
+                                ctx.ptr(),
+                                WispersStatus::InvalidUtf8,
+                                detail.as_ptr(),
+                                ptr::null_mut(),
+                            );
                         }
                     }
                 }
@@ -455,7 +483,10 @@ fn extract_serving_params(node: &Node) -> Result<ServingParams, WispersStatus> {
         return Err(WispersStatus::InvalidState);
     }
 
-    let registration = node.registration().ok_or(WispersStatus::InvalidState)?.clone();
+    let registration = node
+        .registration()
+        .ok_or(WispersStatus::InvalidState)?
+        .clone();
     let hub_addr = node.hub_addr();
 
     let p2p_config = crate::serving::P2pConfig {

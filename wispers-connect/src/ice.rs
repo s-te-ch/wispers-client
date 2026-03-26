@@ -5,11 +5,13 @@
 
 use std::sync::mpsc;
 
-use tokio::sync::{mpsc as tokio_mpsc, Mutex as TokioMutex};
 use thiserror::Error;
+use tokio::sync::{Mutex as TokioMutex, mpsc as tokio_mpsc};
 
-use crate::juice::{IceServersConfig, JuiceAgent, JuiceError, State as JuiceState, TurnServerConfig};
 use crate::hub::proto::StunTurnConfig;
+use crate::juice::{
+    IceServersConfig, JuiceAgent, JuiceError, State as JuiceState, TurnServerConfig,
+};
 
 /// Error type for ICE operations.
 #[derive(Debug, Error)]
@@ -63,9 +65,7 @@ fn build_ice_servers_config(config: &StunTurnConfig) -> Result<IceServersConfig>
 fn parse_host_port(addr: &str, default_port: u16) -> Result<(String, u16)> {
     if let Some(idx) = addr.rfind(':') {
         let host = addr[..idx].to_string();
-        let port: u16 = addr[idx + 1..]
-            .parse()
-            .map_err(|_| IceError::InvalidPort)?;
+        let port: u16 = addr[idx + 1..].parse().map_err(|_| IceError::InvalidPort)?;
         Ok((host, port))
     } else {
         Ok((addr.to_string(), default_port))

@@ -3,8 +3,8 @@
 //! Provides AES-256-GCM encryption with sequence number tracking for replay protection.
 //! Derived from the desktop app's encryption.rs but adapted for bidirectional P2P connections.
 
-use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::Aes256Gcm;
+use aes_gcm::aead::{Aead, KeyInit, Payload};
 use hkdf::Hkdf;
 use sha2::Sha256;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -126,14 +126,23 @@ pub struct P2pCipher {
 
 impl P2pCipher {
     /// Create cipher for the caller side of a connection.
-    pub fn new_caller(shared_secret: &[u8; 32], connection_id: i64) -> Result<Self, EncryptionError> {
+    pub fn new_caller(
+        shared_secret: &[u8; 32],
+        connection_id: i64,
+    ) -> Result<Self, EncryptionError> {
         let connection_id_bytes = connection_id.to_le_bytes();
 
         // Caller encrypts with c2a key, decrypts with a2c key
-        let (send_key, send_nonce_prefix) =
-            derive_direction_keys(shared_secret, &connection_id_bytes, PRK_INFO_CALLER_TO_ANSWERER)?;
-        let (recv_key, recv_nonce_prefix) =
-            derive_direction_keys(shared_secret, &connection_id_bytes, PRK_INFO_ANSWERER_TO_CALLER)?;
+        let (send_key, send_nonce_prefix) = derive_direction_keys(
+            shared_secret,
+            &connection_id_bytes,
+            PRK_INFO_CALLER_TO_ANSWERER,
+        )?;
+        let (recv_key, recv_nonce_prefix) = derive_direction_keys(
+            shared_secret,
+            &connection_id_bytes,
+            PRK_INFO_ANSWERER_TO_CALLER,
+        )?;
 
         Ok(Self {
             encrypter: Encrypter::new(send_key, send_nonce_prefix),
@@ -142,14 +151,23 @@ impl P2pCipher {
     }
 
     /// Create cipher for the answerer side of a connection.
-    pub fn new_answerer(shared_secret: &[u8; 32], connection_id: i64) -> Result<Self, EncryptionError> {
+    pub fn new_answerer(
+        shared_secret: &[u8; 32],
+        connection_id: i64,
+    ) -> Result<Self, EncryptionError> {
         let connection_id_bytes = connection_id.to_le_bytes();
 
         // Answerer encrypts with a2c key, decrypts with c2a key
-        let (send_key, send_nonce_prefix) =
-            derive_direction_keys(shared_secret, &connection_id_bytes, PRK_INFO_ANSWERER_TO_CALLER)?;
-        let (recv_key, recv_nonce_prefix) =
-            derive_direction_keys(shared_secret, &connection_id_bytes, PRK_INFO_CALLER_TO_ANSWERER)?;
+        let (send_key, send_nonce_prefix) = derive_direction_keys(
+            shared_secret,
+            &connection_id_bytes,
+            PRK_INFO_ANSWERER_TO_CALLER,
+        )?;
+        let (recv_key, recv_nonce_prefix) = derive_direction_keys(
+            shared_secret,
+            &connection_id_bytes,
+            PRK_INFO_CALLER_TO_ANSWERER,
+        )?;
 
         Ok(Self {
             encrypter: Encrypter::new(send_key, send_nonce_prefix),

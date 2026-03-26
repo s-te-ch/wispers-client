@@ -117,7 +117,11 @@ fn main() -> Result<()> {
 
     // Parse serve options before daemonizing since we need them after.
     let (allowed_ports, allow_egress) = match &cli.command {
-        Command::Serve { allow_port_forwarding, allow_egress, .. } => {
+        Command::Serve {
+            allow_port_forwarding,
+            allow_egress,
+            ..
+        } => {
             let ports = match allow_port_forwarding {
                 Some(ports) => Some(serving::AllowedPorts::parse(ports)?),
                 None => None,
@@ -145,7 +149,13 @@ fn main() -> Result<()> {
         .enable_all()
         .build()
         .context("failed to create tokio runtime")?
-        .block_on(async_main(cli.command, hub_override, profile, allowed_ports, allow_egress))
+        .block_on(async_main(
+            cli.command,
+            hub_override,
+            profile,
+            allowed_ports,
+            allow_egress,
+        ))
 }
 
 //-- Daemon Control Functions --------------------------------------------------
@@ -257,16 +267,24 @@ async fn async_main(
     let profile = profile.as_str();
     match command {
         Command::Register { token } => register(hub_override, profile, &token).await,
-        Command::Activate { activation_code } => activate(hub_override, profile, &activation_code).await,
+        Command::Activate { activation_code } => {
+            activate(hub_override, profile, &activation_code).await
+        }
         Command::GetActivationCode => get_activation_code(hub_override, profile).await,
         Command::Logout => logout(hub_override, profile).await,
         Command::Nodes => nodes(hub_override, profile).await,
         Command::Status => status(hub_override, profile).await,
-        Command::Serve { .. } => serving::serve(hub_override, profile, allowed_ports, allow_egress).await,
-        Command::Ping { node_number, quic } => p2p::ping(hub_override, profile, node_number, quic).await,
-        Command::Forward { local_port, node, remote_port } => {
-            p2p::forward(hub_override, profile, local_port, node, remote_port).await
+        Command::Serve { .. } => {
+            serving::serve(hub_override, profile, allowed_ports, allow_egress).await
         }
+        Command::Ping { node_number, quic } => {
+            p2p::ping(hub_override, profile, node_number, quic).await
+        }
+        Command::Forward {
+            local_port,
+            node,
+            remote_port,
+        } => p2p::forward(hub_override, profile, local_port, node, remote_port).await,
         Command::ProxyHttp { bind, egress_node } => {
             proxy_http::run(hub_override, profile, &bind, egress_node).await
         }
@@ -296,12 +314,13 @@ async fn register(hub_override: Option<&str>, profile: &str, token: &str) -> Res
 
     println!("Registering with token {}...", token);
 
-    node.register(token)
-        .await
-        .context("registration failed")?;
+    node.register(token).await.context("registration failed")?;
 
     println!("Registration successful!");
-    println!("  Connectivity group: {}", node.connectivity_group_id().unwrap());
+    println!(
+        "  Connectivity group: {}",
+        node.connectivity_group_id().unwrap()
+    );
     println!("  Node number: {}", node.node_number().unwrap());
     Ok(())
 }
@@ -325,15 +344,14 @@ async fn activate(hub_override: Option<&str>, profile: &str, activation_code: &s
     }
 
     // Check for self-endorsement (code format is "node_number-secret")
-    if let Some(peer_str) = activation_code.split('-').next() {
-        if let Ok(peer_node) = peer_str.parse::<i32>() {
-            if peer_node == node.node_number().unwrap() {
-                anyhow::bail!(
-                    "Cannot activate using your own activation code (self-endorsement). \
-                     You need an activation code from a different node."
-                );
-            }
-        }
+    if let Some(peer_str) = activation_code.split('-').next()
+        && let Ok(peer_node) = peer_str.parse::<i32>()
+        && peer_node == node.node_number().unwrap()
+    {
+        anyhow::bail!(
+            "Cannot activate using your own activation code (self-endorsement). \
+             You need an activation code from a different node."
+        );
     }
 
     println!("Activating with activation code {}...", activation_code);
@@ -342,7 +360,10 @@ async fn activate(hub_override: Option<&str>, profile: &str, activation_code: &s
         .context("activation failed")?;
 
     println!("Activation successful!");
-    println!("  Connectivity group: {}", node.connectivity_group_id().unwrap());
+    println!(
+        "  Connectivity group: {}",
+        node.connectivity_group_id().unwrap()
+    );
     println!("  Node number: {}", node.node_number().unwrap());
     Ok(())
 }
@@ -370,7 +391,10 @@ async fn get_activation_code(hub_override: Option<&str>, profile: &str) -> Resul
         .context("failed to communicate with daemon")?;
 
     match response {
-        daemon::Response::Success { data: daemon::ResponseData::ActivationCode(p), .. } => {
+        daemon::Response::Success {
+            data: daemon::ResponseData::ActivationCode(p),
+            ..
+        } => {
             println!("{}", p.activation_code);
         }
         daemon::Response::Error { error, .. } => {
@@ -392,7 +416,9 @@ async fn logout(hub_override: Option<&str>, profile: &str) -> Result<()> {
         }
         Err(e) if e.is_unauthenticated() || e.is_not_found() => {
             // Node was removed remotely — just delete local state.
-            storage.delete_state().context("failed to delete local state")?;
+            storage
+                .delete_state()
+                .context("failed to delete local state")?;
         }
         Err(e) => return Err(e).context("failed to load node state"),
     }
@@ -411,14 +437,20 @@ async fn nodes(hub_override: Option<&str>, profile: &str) -> Result<()> {
     }
 
     let cg_id = node.connectivity_group_id().unwrap();
-    let info = node.group_info().await.context("failed to get group info")?;
+    let info = node
+        .group_info()
+        .await
+        .context("failed to get group info")?;
 
     if info.nodes.is_empty() {
         println!("No nodes in connectivity group.");
         return Ok(());
     }
 
-    println!("Nodes in connectivity group {} (state: {:?}):", cg_id, info.state);
+    println!(
+        "Nodes in connectivity group {} (state: {:?}):",
+        cg_id, info.state
+    );
     for node_info in info.nodes {
         let name = if node_info.name.is_empty() {
             "(unnamed)".to_string()
@@ -446,7 +478,10 @@ async fn nodes(hub_override: Option<&str>, profile: &str) -> Result<()> {
         } else {
             format!(" ({})", tags.join(", "))
         };
-        println!("  {}: {}{} - {}", node_info.node_number, name, tags_str, status);
+        println!(
+            "  {}: {}{} - {}",
+            node_info.node_number, name, tags_str, status
+        );
     }
     Ok(())
 }
@@ -513,7 +548,11 @@ async fn print_daemon_status(cg_id: &str, node_number: i32) {
         return;
     };
     let resp = client.request(&daemon::Request::Status).await;
-    let Ok(daemon::Response::Success { data: daemon::ResponseData::Status(s), .. }) = resp else {
+    let Ok(daemon::Response::Success {
+        data: daemon::ResponseData::Status(s),
+        ..
+    }) = resp
+    else {
         println!("  Daemon: running (status unavailable)");
         return;
     };

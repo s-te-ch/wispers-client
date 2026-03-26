@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -209,10 +209,7 @@ fn show_group(client: &Client, base_url: &str, api_key: &str, group_id: &str) ->
         println!("  Nodes:");
         for node in &data.nodes {
             let name = node.name.as_deref().unwrap_or("(unnamed)");
-            let last_seen = node
-                .last_seen_at
-                .as_deref()
-                .unwrap_or("never");
+            let last_seen = node.last_seen_at.as_deref().unwrap_or("never");
             println!(
                 "    {} - {} (created: {}, last seen: {})",
                 node.node_number, name, node.created_at, last_seen

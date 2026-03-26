@@ -11,8 +11,8 @@ use tokio::net::{TcpListener, TcpStream};
 use wispers_connect::{Node, NodeState, QuicConnection};
 
 use crate::proxy_common::{
-    open_stream_with_command, parse_wispers_host, ConnectionPool, ProxyError, CLEANUP_INTERVAL,
-    REQUEST_TIMEOUT,
+    CLEANUP_INTERVAL, ConnectionPool, ProxyError, REQUEST_TIMEOUT, open_stream_with_command,
+    parse_wispers_host,
 };
 
 /// Run the HTTP proxy server.
@@ -39,10 +39,16 @@ pub async fn run(
     println!("HTTP proxy listening on {}", bind_addr);
     if let Some(egress) = egress_node {
         println!("  Internet egress: enabled via node {}", egress);
-        println!("Example: curl --proxy http://{} https://example.com/", bind_addr);
+        println!(
+            "Example: curl --proxy http://{} https://example.com/",
+            bind_addr
+        );
     } else {
         println!("  Internet egress: disabled (wispers.link only)");
-        println!("Example: curl --proxy http://{} http://3.wispers.link/", bind_addr);
+        println!(
+            "Example: curl --proxy http://{} http://3.wispers.link/",
+            bind_addr
+        );
     }
 
     let node = Arc::new(node);
@@ -64,7 +70,8 @@ pub async fn run(
                 let node = Arc::clone(&node);
                 let pool = pool.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_client_connection(stream, node, pool, egress_node).await {
+                    if let Err(e) = handle_client_connection(stream, node, pool, egress_node).await
+                    {
                         eprintln!("Connection error: {}", e);
                     }
                 });
@@ -158,7 +165,7 @@ async fn handle_client_connection(
         // Get target node based on destination
         let (target_node, routing_via_egress) = match &request.target.destination {
             Destination::WispersNode { node_number, .. } => (*node_number, false),
-            Destination::Internet { .. } => (egress_node.unwrap(), true)
+            Destination::Internet { .. } => (egress_node.unwrap(), true),
         };
 
         // Log the request
@@ -184,34 +191,32 @@ async fn handle_client_connection(
         }
 
         // Get or create QUIC connection to target node (with timeout)
-        let quic_conn = match tokio::time::timeout(
-            REQUEST_TIMEOUT,
-            pool.get_or_connect(&node, target_node),
-        )
-        .await
-        {
-            Ok(Ok(conn)) => conn,
-            Ok(Err(e)) => {
-                let msg = if routing_via_egress {
-                    format!("failed to connect to egress node: {}", e)
-                } else {
-                    format!("failed to connect to node: {}", e)
-                };
-                let err = ProxyError::BadGateway(msg);
-                send_proxy_error(&mut stream, &err).await?;
-                break;
-            }
-            Err(_) => {
-                let msg = if routing_via_egress {
-                    "connection to egress node timed out"
-                } else {
-                    "connection to node timed out"
-                };
-                let err = ProxyError::GatewayTimeout(msg.to_string());
-                send_proxy_error(&mut stream, &err).await?;
-                break;
-            }
-        };
+        let quic_conn =
+            match tokio::time::timeout(REQUEST_TIMEOUT, pool.get_or_connect(&node, target_node))
+                .await
+            {
+                Ok(Ok(conn)) => conn,
+                Ok(Err(e)) => {
+                    let msg = if routing_via_egress {
+                        format!("failed to connect to egress node: {}", e)
+                    } else {
+                        format!("failed to connect to node: {}", e)
+                    };
+                    let err = ProxyError::BadGateway(msg);
+                    send_proxy_error(&mut stream, &err).await?;
+                    break;
+                }
+                Err(_) => {
+                    let msg = if routing_via_egress {
+                        "connection to egress node timed out"
+                    } else {
+                        "connection to node timed out"
+                    };
+                    let err = ProxyError::GatewayTimeout(msg.to_string());
+                    send_proxy_error(&mut stream, &err).await?;
+                    break;
+                }
+            };
 
         // Handle based on mode
         match &request.target.mode {
@@ -229,7 +234,14 @@ async fn handle_client_connection(
                         // Use CONNECT for internet egress
                         tokio::time::timeout(
                             REQUEST_TIMEOUT,
-                            handle_egress_request(&mut stream, &quic_conn, &request, host, *port, path),
+                            handle_egress_request(
+                                &mut stream,
+                                &quic_conn,
+                                &request,
+                                host,
+                                *port,
+                                path,
+                            ),
                         )
                         .await
                     }
@@ -318,9 +330,10 @@ async fn read_request_bytes(stream: &mut TcpStream) -> Result<ReadResult, ProxyE
             return Err(ProxyError::BadRequest("request too large".to_string()));
         }
 
-        let n = stream.read(&mut buf[total_read..]).await.map_err(|e| {
-            ProxyError::BadRequest(format!("failed to read request: {}", e))
-        })?;
+        let n = stream
+            .read(&mut buf[total_read..])
+            .await
+            .map_err(|e| ProxyError::BadRequest(format!("failed to read request: {}", e)))?;
 
         if n == 0 {
             if total_read == 0 {
@@ -576,10 +589,7 @@ fn build_http_request(request: &ParsedRequest, path: &str) -> String {
 
     // Request line: METHOD /path HTTP/1.1
     let version = if request.version == 0 { "1.0" } else { "1.1" };
-    http.push_str(&format!(
-        "{} {} HTTP/{}\r\n",
-        request.method, path, version
-    ));
+    http.push_str(&format!("{} {} HTTP/{}\r\n", request.method, path, version));
 
     // Headers
     for (name, value) in &request.headers {
@@ -597,11 +607,13 @@ fn parse_request(buf: &[u8], egress_node: Option<i32>) -> Result<ParsedRequest, 
     let mut headers = [httparse::EMPTY_HEADER; 64];
     let mut req = httparse::Request::new(&mut headers);
 
-    let status = req.parse(buf).map_err(|e| {
-        ProxyError::BadRequest(format!("failed to parse HTTP request: {}", e))
-    })?;
+    let status = req
+        .parse(buf)
+        .map_err(|e| ProxyError::BadRequest(format!("failed to parse HTTP request: {}", e)))?;
     if status.is_partial() {
-        return Err(ProxyError::BadRequest("incomplete HTTP request".to_string()));
+        return Err(ProxyError::BadRequest(
+            "incomplete HTTP request".to_string(),
+        ));
     }
 
     let method = req
@@ -659,26 +671,26 @@ fn parse_request(buf: &[u8], egress_node: Option<i32>) -> Result<ParsedRequest, 
     }
 
     // If Host header is missing, add it from the target (only for HTTP requests, not tunnels)
-    if host_header.is_none() {
-        if let ProxyMode::HttpRequest { .. } = &target.mode {
-            let host = match &target.destination {
-                Destination::WispersNode { node_number, port } => {
-                    if *port == 80 {
-                        format!("{}.wispers.link", node_number)
-                    } else {
-                        format!("{}.wispers.link:{}", node_number, port)
-                    }
+    if host_header.is_none()
+        && let ProxyMode::HttpRequest { .. } = &target.mode
+    {
+        let host = match &target.destination {
+            Destination::WispersNode { node_number, port } => {
+                if *port == 80 {
+                    format!("{}.wispers.link", node_number)
+                } else {
+                    format!("{}.wispers.link:{}", node_number, port)
                 }
-                Destination::Internet { host, port } => {
-                    if *port == 80 {
-                        host.clone()
-                    } else {
-                        format!("{}:{}", host, port)
-                    }
+            }
+            Destination::Internet { host, port } => {
+                if *port == 80 {
+                    host.clone()
+                } else {
+                    format!("{}:{}", host, port)
                 }
-            };
-            parsed_headers.push(("Host".to_string(), host));
-        }
+            }
+        };
+        parsed_headers.push(("Host".to_string(), host));
     }
 
     Ok(ParsedRequest {
@@ -709,15 +721,13 @@ fn parse_connect_target(target: &str, egress_node: Option<i32>) -> Result<ProxyT
 
     // Check if it's a wispers.link hostname
     match parse_wispers_host(host) {
-        Ok(wispers_host) => {
-            Ok(ProxyTarget {
-                destination: Destination::WispersNode {
-                    node_number: wispers_host.node_number,
-                    port,
-                },
-                mode: ProxyMode::Tunnel,
-            })
-        }
+        Ok(wispers_host) => Ok(ProxyTarget {
+            destination: Destination::WispersNode {
+                node_number: wispers_host.node_number,
+                port,
+            },
+            mode: ProxyMode::Tunnel,
+        }),
         Err(None) => {
             // Not a wispers.link hostname - require egress
             if egress_node.is_some() {
@@ -763,9 +773,9 @@ fn parse_proxy_target(url: &str, egress_node: Option<i32>) -> Result<ProxyTarget
     let (host, port) = match host_port.rfind(':') {
         Some(pos) => {
             let port_str = &host_port[pos + 1..];
-            let port: u16 = port_str.parse().map_err(|_| {
-                ProxyError::BadRequest(format!("invalid port: {}", port_str))
-            })?;
+            let port: u16 = port_str
+                .parse()
+                .map_err(|_| ProxyError::BadRequest(format!("invalid port: {}", port_str)))?;
             (&host_port[..pos], port)
         }
         None => (host_port, 80),
@@ -773,17 +783,15 @@ fn parse_proxy_target(url: &str, egress_node: Option<i32>) -> Result<ProxyTarget
 
     // Check if it's a wispers.link hostname
     match parse_wispers_host(host) {
-        Ok(wispers_host) => {
-            Ok(ProxyTarget {
-                destination: Destination::WispersNode {
-                    node_number: wispers_host.node_number,
-                    port,
-                },
-                mode: ProxyMode::HttpRequest {
-                    path: path.to_string(),
-                },
-            })
-        }
+        Ok(wispers_host) => Ok(ProxyTarget {
+            destination: Destination::WispersNode {
+                node_number: wispers_host.node_number,
+                port,
+            },
+            mode: ProxyMode::HttpRequest {
+                path: path.to_string(),
+            },
+        }),
         Err(None) => {
             // Not a wispers.link hostname
             if egress_node.is_some() {
@@ -891,7 +899,8 @@ mod tests {
 
     #[test]
     fn test_parse_proxy_target_with_query() {
-        let target = parse_proxy_target("http://1.wispers.link/search?q=test&page=2", None).unwrap();
+        let target =
+            parse_proxy_target("http://1.wispers.link/search?q=test&page=2", None).unwrap();
         match (&target.destination, &target.mode) {
             (Destination::WispersNode { node_number, port }, ProxyMode::HttpRequest { path }) => {
                 assert_eq!(*node_number, 1);

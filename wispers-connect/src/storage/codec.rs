@@ -16,7 +16,10 @@ pub fn serialize_registration(reg: &NodeRegistration) -> Vec<u8> {
     let proto_reg = proto::NodeRegistration {
         connectivity_group_id: reg.connectivity_group_id.to_string(),
         node_number: reg.node_number,
-        auth_token: reg.auth_token().map(|t| t.as_str().to_string()).unwrap_or_default(),
+        auth_token: reg
+            .auth_token()
+            .map(|t| t.as_str().to_string())
+            .unwrap_or_default(),
         attestation_jwt: reg.attestation_jwt.clone(),
     };
     proto_reg.encode_to_vec()

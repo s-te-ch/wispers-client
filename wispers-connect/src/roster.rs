@@ -3,7 +3,7 @@
 //! This module provides cryptographic verification of the roster, ensuring the
 //! chain of trust from version 1 to the current version is valid.
 
-use crate::hub::proto::roster::{self, addendum, Roster};
+use crate::hub::proto::roster::{self, Roster, addendum};
 use ed25519_dalek::pkcs8::DecodePublicKey;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use prost::Message;
@@ -121,15 +121,21 @@ pub fn verify_roster(
         .nodes
         .iter()
         .find(|n| n.node_number == verifier_node_number)
-        .ok_or(RosterVerificationError::VerifierNotInRoster(verifier_node_number))?;
+        .ok_or(RosterVerificationError::VerifierNotInRoster(
+            verifier_node_number,
+        ))?;
 
     if verifier_node.revoked {
-        return Err(RosterVerificationError::VerifierRevoked(verifier_node_number));
+        return Err(RosterVerificationError::VerifierRevoked(
+            verifier_node_number,
+        ));
     }
 
-    let verifier_key = keys
-        .get(&verifier_node_number)
-        .ok_or(RosterVerificationError::VerifierNotInRoster(verifier_node_number))?;
+    let verifier_key =
+        keys.get(&verifier_node_number)
+            .ok_or(RosterVerificationError::VerifierNotInRoster(
+                verifier_node_number,
+            ))?;
 
     let expected_verifier_key = VerifyingKey::from_public_key_der(verifier_public_key_spki)
         .map_err(|e| RosterVerificationError::InvalidPublicKey {
@@ -138,7 +144,9 @@ pub fn verify_roster(
         })?;
 
     if verifier_key != &expected_verifier_key {
-        return Err(RosterVerificationError::VerifierKeyMismatch(verifier_node_number));
+        return Err(RosterVerificationError::VerifierKeyMismatch(
+            verifier_node_number,
+        ));
     }
 
     // 4. Verify the chain of trust backwards from current version to 1
@@ -180,7 +188,9 @@ fn verify_roster_structure(roster: &Roster) -> Result<(), RosterVerificationErro
 }
 
 /// Decode all public keys from the roster.
-fn decode_roster_keys(roster: &Roster) -> Result<HashMap<i32, VerifyingKey>, RosterVerificationError> {
+fn decode_roster_keys(
+    roster: &Roster,
+) -> Result<HashMap<i32, VerifyingKey>, RosterVerificationError> {
     let mut keys = HashMap::with_capacity(roster.nodes.len());
 
     for node in &roster.nodes {
@@ -232,23 +242,36 @@ fn verify_roster_chain(
 
         match kind {
             addendum::Kind::Activation(activation) => {
-                verify_activation(&working_roster, activation, version, keys, &mut node_revoked)?;
+                verify_activation(
+                    &working_roster,
+                    activation,
+                    version,
+                    keys,
+                    &mut node_revoked,
+                )?;
                 // Going backwards: remove the node that was added in this activation
                 if let Some(payload) = &activation.payload {
-                    working_roster.nodes.retain(|n| n.node_number != payload.new_node_number);
+                    working_roster
+                        .nodes
+                        .retain(|n| n.node_number != payload.new_node_number);
                 }
             }
             addendum::Kind::Revocation(revocation) => {
-                verify_revocation(&working_roster, revocation, version, keys, &mut node_revoked)?;
+                verify_revocation(
+                    &working_roster,
+                    revocation,
+                    version,
+                    keys,
+                    &mut node_revoked,
+                )?;
                 // Going backwards: un-revoke the node
-                if let Some(payload) = &revocation.payload {
-                    if let Some(node) = working_roster
+                if let Some(payload) = &revocation.payload
+                    && let Some(node) = working_roster
                         .nodes
                         .iter_mut()
                         .find(|n| n.node_number == payload.revoked_node_number)
-                    {
-                        node.revoked = false;
-                    }
+                {
+                    node.revoked = false;
                 }
             }
         }
@@ -269,10 +292,13 @@ fn verify_activation(
     keys: &HashMap<i32, VerifyingKey>,
     node_revoked: &mut HashMap<i32, bool>,
 ) -> Result<(), RosterVerificationError> {
-    let payload = activation
-        .payload
-        .as_ref()
-        .ok_or(RosterVerificationError::MissingActivationPayload(expected_version))?;
+    let payload =
+        activation
+            .payload
+            .as_ref()
+            .ok_or(RosterVerificationError::MissingActivationPayload(
+                expected_version,
+            ))?;
 
     // Verify version numbers
     if payload.new_version != expected_version {
@@ -283,23 +309,25 @@ fn verify_activation(
     }
 
     // Get keys for signature verification
-    let new_node_key = keys
-        .get(&payload.new_node_number)
-        .ok_or(RosterVerificationError::NewNodeNotInRoster {
-            version: expected_version,
-            new_node: payload.new_node_number,
-        })?;
+    let new_node_key =
+        keys.get(&payload.new_node_number)
+            .ok_or(RosterVerificationError::NewNodeNotInRoster {
+                version: expected_version,
+                new_node: payload.new_node_number,
+            })?;
 
-    let endorser_key = keys
-        .get(&payload.endorser_node_number)
-        .ok_or(RosterVerificationError::EndorserNotInPreviousRoster {
+    let endorser_key = keys.get(&payload.endorser_node_number).ok_or(
+        RosterVerificationError::EndorserNotInPreviousRoster {
             version: expected_version,
             endorser: payload.endorser_node_number,
-        })?;
+        },
+    )?;
 
     // New node cannot be its own endorser
     if payload.new_node_number == payload.endorser_node_number {
-        return Err(RosterVerificationError::NewNodeIsEndorser(payload.new_node_number));
+        return Err(RosterVerificationError::NewNodeIsEndorser(
+            payload.new_node_number,
+        ));
     }
 
     // For version 1 (bootstrap), both nodes are being added together, so the
@@ -327,7 +355,12 @@ fn verify_activation(
 
     // Verify base hash (for versions > 1)
     if expected_version > 1 {
-        verify_base_hash(roster, payload.base_version, &payload.base_version_hash, expected_version)?;
+        verify_base_hash(
+            roster,
+            payload.base_version,
+            &payload.base_version_hash,
+            expected_version,
+        )?;
     }
 
     // Going backwards: remove this node from tracking (it didn't exist before activation)
@@ -344,10 +377,13 @@ fn verify_revocation(
     keys: &HashMap<i32, VerifyingKey>,
     node_revoked: &mut HashMap<i32, bool>,
 ) -> Result<(), RosterVerificationError> {
-    let payload = revocation
-        .payload
-        .as_ref()
-        .ok_or(RosterVerificationError::MissingRevocationPayload(expected_version))?;
+    let payload =
+        revocation
+            .payload
+            .as_ref()
+            .ok_or(RosterVerificationError::MissingRevocationPayload(
+                expected_version,
+            ))?;
 
     // Verify version numbers
     if payload.new_version != expected_version {
@@ -358,12 +394,12 @@ fn verify_revocation(
     }
 
     // Get revoker's key
-    let revoker_key = keys
-        .get(&payload.revoker_node_number)
-        .ok_or(RosterVerificationError::RevokerNotInPreviousRoster {
+    let revoker_key = keys.get(&payload.revoker_node_number).ok_or(
+        RosterVerificationError::RevokerNotInPreviousRoster {
             version: expected_version,
             revoker: payload.revoker_node_number,
-        })?;
+        },
+    )?;
 
     // Verify revoker was active (not revoked) at the time of this revocation.
     // Since we're going backwards, we need to check their status at this point.
@@ -391,7 +427,12 @@ fn verify_revocation(
 
     // Verify base hash (for versions > 1)
     if expected_version > 1 {
-        verify_base_hash(roster, payload.base_version, &payload.base_version_hash, expected_version)?;
+        verify_base_hash(
+            roster,
+            payload.base_version,
+            &payload.base_version_hash,
+            expected_version,
+        )?;
     }
 
     // Going backwards: un-revoke this node (it was active before this revocation)
@@ -401,11 +442,7 @@ fn verify_revocation(
 }
 
 /// Verify a signature.
-fn verify_signature(
-    key: &VerifyingKey,
-    message: &[u8],
-    signature_bytes: &[u8],
-) -> Result<(), ()> {
+fn verify_signature(key: &VerifyingKey, message: &[u8], signature_bytes: &[u8]) -> Result<(), ()> {
     let signature = Signature::from_slice(signature_bytes).map_err(|_| ())?;
     key.verify(message, &signature).map_err(|_| ())
 }
@@ -422,26 +459,27 @@ fn verify_base_hash(
 
     // Walk backwards from current version to base_version+1, undoing changes
     for i in (base_version as usize..roster.addenda.len()).rev() {
-        if let Some(addendum) = roster.addenda.get(i) {
-            if let Some(kind) = &addendum.kind {
-                match kind {
-                    addendum::Kind::Activation(activation) => {
-                        // Remove the node that was activated (it didn't exist at base_version)
-                        if let Some(payload) = &activation.payload {
-                            base_roster.nodes.retain(|n| n.node_number != payload.new_node_number);
-                        }
+        if let Some(addendum) = roster.addenda.get(i)
+            && let Some(kind) = &addendum.kind
+        {
+            match kind {
+                addendum::Kind::Activation(activation) => {
+                    // Remove the node that was activated (it didn't exist at base_version)
+                    if let Some(payload) = &activation.payload {
+                        base_roster
+                            .nodes
+                            .retain(|n| n.node_number != payload.new_node_number);
                     }
-                    addendum::Kind::Revocation(revocation) => {
-                        // Un-revoke the node (it was active at base_version)
-                        if let Some(payload) = &revocation.payload {
-                            if let Some(node) = base_roster
-                                .nodes
-                                .iter_mut()
-                                .find(|n| n.node_number == payload.revoked_node_number)
-                            {
-                                node.revoked = false;
-                            }
-                        }
+                }
+                addendum::Kind::Revocation(revocation) => {
+                    // Un-revoke the node (it was active at base_version)
+                    if let Some(payload) = &revocation.payload
+                        && let Some(node) = base_roster
+                            .nodes
+                            .iter_mut()
+                            .find(|n| n.node_number == payload.revoked_node_number)
+                    {
+                        node.revoked = false;
                     }
                 }
             }
@@ -634,8 +672,8 @@ pub fn create_revocation_roster(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::pkcs8::EncodePublicKey;
     use ed25519_dalek::SigningKey;
+    use ed25519_dalek::pkcs8::EncodePublicKey;
     use rand::rngs::OsRng;
 
     /// Generate a random signing key for testing.
@@ -763,7 +801,11 @@ mod tests {
 
         roster.version = new_version;
         // Mark the node as revoked
-        if let Some(node) = roster.nodes.iter_mut().find(|n| n.node_number == revoked_node_number) {
+        if let Some(node) = roster
+            .nodes
+            .iter_mut()
+            .find(|n| n.node_number == revoked_node_number)
+        {
             node.revoked = true;
         }
         roster.addenda.push(roster::Addendum {
@@ -784,7 +826,10 @@ mod tests {
             addenda: vec![],
         };
         let result = verify_roster(&roster, 1, &[]);
-        assert!(matches!(result, Err(RosterVerificationError::InvalidVersion(0))));
+        assert!(matches!(
+            result,
+            Err(RosterVerificationError::InvalidVersion(0))
+        ));
     }
 
     #[test]
@@ -821,7 +866,10 @@ mod tests {
             addenda: vec![roster::Addendum { kind: None }],
         };
         let result = verify_roster(&roster, 1, &spki(&key));
-        assert!(matches!(result, Err(RosterVerificationError::DuplicateNode(1))));
+        assert!(matches!(
+            result,
+            Err(RosterVerificationError::DuplicateNode(1))
+        ));
     }
 
     // ==================== Verifier validation tests ====================
@@ -905,7 +953,11 @@ mod tests {
         // All nodes should be able to verify
         for (node_num, key) in [(1, &key1), (2, &key2), (3, &key3), (4, &key4)] {
             let result = verify_roster(&roster, node_num, &spki(key));
-            assert!(result.is_ok(), "Node {} should verify successfully", node_num);
+            assert!(
+                result.is_ok(),
+                "Node {} should verify successfully",
+                node_num
+            );
             let keys = result.unwrap();
             assert_eq!(keys.len(), 4);
         }
@@ -920,8 +972,8 @@ mod tests {
         let mut roster = build_bootstrap_roster(&keys[0], 0, &keys[1], 1);
 
         // After bootstrap, nodes 0 and 1 should verify
-        for j in 0..5 {
-            let result = verify_roster(&roster, j as i32, &spki(&keys[j]));
+        for (j, key) in keys.iter().enumerate() {
+            let result = verify_roster(&roster, j as i32, &spki(key));
             if j <= 1 {
                 assert!(
                     result.is_ok(),
@@ -941,11 +993,17 @@ mod tests {
 
         // Now add nodes 2, 3, 4
         for i in 2..5 {
-            add_node(&mut roster, &keys[i], i as i32, &keys[i - 1], (i - 1) as i32);
+            add_node(
+                &mut roster,
+                &keys[i],
+                i as i32,
+                &keys[i - 1],
+                (i - 1) as i32,
+            );
 
             // Verify that nodes in the roster can verify, nodes not yet added cannot
-            for j in 0..5 {
-                let result = verify_roster(&roster, j as i32, &spki(&keys[j]));
+            for (j, key) in keys.iter().enumerate() {
+                let result = verify_roster(&roster, j as i32, &spki(key));
                 if j <= i {
                     assert!(
                         result.is_ok(),
@@ -1037,21 +1095,26 @@ mod tests {
         add_node(&mut roster, &key3, 3, &key1, 1);
 
         // Corrupt the base hash on the activation of node 3
-        if let Some(addendum::Kind::Activation(ref mut act)) = roster.addenda[1].kind {
-            if let Some(ref mut payload) = act.payload {
-                payload.base_version_hash = b"fake_hash".to_vec();
-            }
+        if let Some(addendum::Kind::Activation(ref mut act)) = roster.addenda[1].kind
+            && let Some(ref mut payload) = act.payload
+        {
+            payload.base_version_hash = b"fake_hash".to_vec();
         }
 
         let result = verify_roster(&roster, 1, &spki(&key1));
-        assert!(result.is_err(), "Should fail with corrupted base hash, got: {:?}", result);
+        assert!(
+            result.is_err(),
+            "Should fail with corrupted base hash, got: {:?}",
+            result
+        );
         // The error could be BaseHashMismatch or InvalidSignature (since we changed the payload)
         let err = result.unwrap_err();
         assert!(
             matches!(err, RosterVerificationError::BaseHashMismatch(2))
-            || matches!(err, RosterVerificationError::InvalidNewNodeSignature(2))
-            || matches!(err, RosterVerificationError::InvalidEndorserSignature(2)),
-            "Expected BaseHashMismatch or signature error, got: {:?}", err
+                || matches!(err, RosterVerificationError::InvalidNewNodeSignature(2))
+                || matches!(err, RosterVerificationError::InvalidEndorserSignature(2)),
+            "Expected BaseHashMismatch or signature error, got: {:?}",
+            err
         );
     }
 
@@ -1301,7 +1364,7 @@ mod tests {
         add_node(&mut roster, &keys[2], 2, &keys[1], 1); // v2: add node 2
         add_node(&mut roster, &keys[3], 3, &keys[0], 0); // v3: add node 3
         add_node(&mut roster, &keys[4], 4, &keys[2], 2); // v4: add node 4
-        revoke_node(&mut roster, 1, &keys[2], 2);        // v5: revoke node 1
+        revoke_node(&mut roster, 1, &keys[2], 2); // v5: revoke node 1
         add_node(&mut roster, &keys[5], 5, &keys[3], 3); // v6: add node 5
 
         // Verify from each active node's perspective
@@ -1316,7 +1379,10 @@ mod tests {
 
         // Revoked node 1 should fail to verify
         let result = verify_roster(&roster, 1, &spki(&keys[1]));
-        assert!(matches!(result, Err(RosterVerificationError::VerifierRevoked(1))));
+        assert!(matches!(
+            result,
+            Err(RosterVerificationError::VerifierRevoked(1))
+        ));
     }
 
     // ==================== Public builder tests ====================
@@ -1347,18 +1413,24 @@ mod tests {
         );
 
         // Fill in endorser signature (normally done by hub)
-        if let Some(addendum::Kind::Activation(activation)) =
-            roster.addenda[0].kind.as_mut()
-        {
+        if let Some(addendum::Kind::Activation(activation)) = roster.addenda[0].kind.as_mut() {
             activation.endorser_signature = sign(&key_a, &payload_bytes);
         }
 
         // Should verify from either node's perspective
         let result = verify_roster(&roster, 1, &spki(&key_a));
-        assert!(result.is_ok(), "Bootstrap roster should verify from node 1: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Bootstrap roster should verify from node 1: {:?}",
+            result
+        );
 
         let result = verify_roster(&roster, 2, &spki(&key_b));
-        assert!(result.is_ok(), "Bootstrap roster should verify from node 2: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Bootstrap roster should verify from node 2: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -1373,8 +1445,8 @@ mod tests {
         // Build activation payload for adding node 3
         let payload = super::build_activation_payload(
             &base_roster,
-            1,  // endorser
-            3,  // new node
+            1, // endorser
+            3, // new node
             b"new_node_nonce".to_vec(),
             b"endorser_nonce".to_vec(),
         );
@@ -1400,10 +1472,18 @@ mod tests {
 
         // Should verify from any node's perspective
         let result = verify_roster(&roster, 1, &spki(&key_a));
-        assert!(result.is_ok(), "Activation roster should verify from node 1: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Activation roster should verify from node 1: {:?}",
+            result
+        );
 
         let result = verify_roster(&roster, 3, &spki(&key_c));
-        assert!(result.is_ok(), "Activation roster should verify from node 3: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Activation roster should verify from node 3: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -1430,20 +1510,31 @@ mod tests {
         // Create revocation roster
         let roster = super::create_revocation_roster(
             &base_roster,
-            2,  // revoked
-            1,  // revoker
+            2, // revoked
+            1, // revoker
             sign(&key_a, &payload_bytes),
         );
 
         // Should verify from active nodes' perspective
         let result = verify_roster(&roster, 1, &spki(&key_a));
-        assert!(result.is_ok(), "Revocation roster should verify from node 1: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Revocation roster should verify from node 1: {:?}",
+            result
+        );
 
         let result = verify_roster(&roster, 3, &spki(&key_c));
-        assert!(result.is_ok(), "Revocation roster should verify from node 3: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Revocation roster should verify from node 3: {:?}",
+            result
+        );
 
         // Revoked node 2 should fail
         let result = verify_roster(&roster, 2, &spki(&key_b));
-        assert!(matches!(result, Err(RosterVerificationError::VerifierRevoked(2))));
+        assert!(matches!(
+            result,
+            Err(RosterVerificationError::VerifierRevoked(2))
+        ));
     }
 }

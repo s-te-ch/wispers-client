@@ -1,8 +1,8 @@
 //! P2P client operations - ping and forward commands.
 
 use anyhow::{Context, Result};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use wispers_connect::{Node, NodeState};
 
@@ -272,8 +272,8 @@ async fn handle_forward_connection(
         tokio::join!(tcp_to_quic, quic_to_tcp);
         println!("  Stream {} closed", stream_id);
         Ok(())
-    } else if response.starts_with("ERROR ") {
-        anyhow::bail!("Remote error: {}", &response[6..]);
+    } else if let Some(msg) = response.strip_prefix("ERROR ") {
+        anyhow::bail!("Remote error: {}", msg);
     } else {
         anyhow::bail!("Unexpected response: {}", response);
     }
