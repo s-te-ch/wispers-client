@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libclang-dev
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libclang-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install protoc --yes
+          choco install nasm --yes
+
+      - name: Set LIBCLANG_PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: echo "LIBCLANG_PATH=C:\Program Files\LLVM\lib" >> $env:GITHUB_ENV
+
+      - name: Build
+        run: cargo build --all-targets
+
+      - name: Test
+        run: cargo test
+
+  # All wrapper/example jobs below need the cdylib (libwispers_connect.so/.dylib),
+  # so they build it first, then test the language-specific wrapper against it.
+
+  ffi:
+    name: C FFI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libclang-dev
+
+      - name: Build cdylib
+        run: cargo build -p wispers-connect
+
+      - name: Run C FFI tests
+        working-directory: wispers-connect/tests/c_ffi
+        run: make test
+
+      - name: Build C example
+        working-directory: examples/c
+        run: make
+
+  go:
+    name: Go wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: wrappers/go/go.mod
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libclang-dev
+
+      - name: Build cdylib
+        run: cargo build -p wispers-connect
+
+      - name: Test Go wrapper
+        working-directory: wrappers/go
+        run: make test
+
+      - name: Build Go example
+        working-directory: examples/go
+        run: make
+
+  python:
+    name: Python wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libclang-dev
+
+      - name: Build cdylib
+        run: cargo build -p wispers-connect
+
+      - name: Install Python test dependencies
+        run: pip install pytest
+        working-directory: wrappers/python
+
+      - name: Run Python tests
+        working-directory: wrappers/python
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/target/debug
+          PYTHONPATH: ${{ github.workspace }}/wrappers/python
+        run: pytest tests/
