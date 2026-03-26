@@ -116,7 +116,6 @@ pub async fn serve(
         let result: Result<(ServingHandle, ServingSession, IncomingConnections), anyhow::Error> =
             node.start_serving()
                 .await
-                .map(|(handle, session, incoming)| (handle, session, incoming))
                 .context("failed to start serving");
 
         if let Ok((handle, _session, _)) = &result {

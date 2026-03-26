@@ -967,15 +967,13 @@ mod tests {
                 .map_err(|_| IceError::ChannelClosed)
         }
 
-        fn recv(&self) -> impl std::future::Future<Output = Result<Vec<u8>, IceError>> + Send {
-            async {
-                self.rx
-                    .lock()
-                    .await
-                    .recv()
-                    .await
-                    .ok_or(IceError::ChannelClosed)
-            }
+        async fn recv(&self) -> Result<Vec<u8>, IceError> {
+            self.rx
+                .lock()
+                .await
+                .recv()
+                .await
+                .ok_or(IceError::ChannelClosed)
         }
     }
 
@@ -1145,7 +1143,7 @@ mod tests {
                     let n = stream
                         .read(&mut buf)
                         .await
-                        .expect(&format!("stream {} read failed", i));
+                        .unwrap_or_else(|_| panic!("stream {} read failed", i));
                     if n == 0 {
                         break;
                     }

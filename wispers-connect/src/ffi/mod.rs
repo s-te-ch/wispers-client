@@ -7,6 +7,9 @@
 //! - `p2p`: P2P connection operations
 //! - `runtime`: Tokio runtime management
 
+// FFI functions necessarily dereference raw pointers from C callers.
+#![allow(clippy::not_unsafe_ptr_arg_deref, clippy::mut_from_ref)]
+
 mod node;
 mod p2p;
 pub(crate) mod runtime;

@@ -236,7 +236,7 @@ impl PairingCode {
             .parse()
             .map_err(|_| PairingCodeError::InvalidNodeNumber)?;
         let secret =
-            PairingSecret::from_base36(parts[1]).map_err(|e| PairingCodeError::InvalidSecret(e))?;
+            PairingSecret::from_base36(parts[1]).map_err(PairingCodeError::InvalidSecret)?;
         Ok(Self {
             node_number,
             secret,

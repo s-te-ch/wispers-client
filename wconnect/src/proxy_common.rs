@@ -204,8 +204,8 @@ pub async fn open_stream_with_command(
     let response = String::from_utf8_lossy(&response_buf[..n]);
     let response = response.trim();
 
-    if response.starts_with("ERROR ") {
-        return Err(format!("remote error: {}", &response[6..]));
+    if let Some(msg) = response.strip_prefix("ERROR ") {
+        return Err(format!("remote error: {}", msg));
     }
 
     if response != "OK" {

@@ -265,14 +265,13 @@ fn verify_roster_chain(
                     &mut node_revoked,
                 )?;
                 // Going backwards: un-revoke the node
-                if let Some(payload) = &revocation.payload {
-                    if let Some(node) = working_roster
+                if let Some(payload) = &revocation.payload
+                    && let Some(node) = working_roster
                         .nodes
                         .iter_mut()
                         .find(|n| n.node_number == payload.revoked_node_number)
-                    {
-                        node.revoked = false;
-                    }
+                {
+                    node.revoked = false;
                 }
             }
         }
@@ -460,28 +459,27 @@ fn verify_base_hash(
 
     // Walk backwards from current version to base_version+1, undoing changes
     for i in (base_version as usize..roster.addenda.len()).rev() {
-        if let Some(addendum) = roster.addenda.get(i) {
-            if let Some(kind) = &addendum.kind {
-                match kind {
-                    addendum::Kind::Activation(activation) => {
-                        // Remove the node that was activated (it didn't exist at base_version)
-                        if let Some(payload) = &activation.payload {
-                            base_roster
-                                .nodes
-                                .retain(|n| n.node_number != payload.new_node_number);
-                        }
+        if let Some(addendum) = roster.addenda.get(i)
+            && let Some(kind) = &addendum.kind
+        {
+            match kind {
+                addendum::Kind::Activation(activation) => {
+                    // Remove the node that was activated (it didn't exist at base_version)
+                    if let Some(payload) = &activation.payload {
+                        base_roster
+                            .nodes
+                            .retain(|n| n.node_number != payload.new_node_number);
                     }
-                    addendum::Kind::Revocation(revocation) => {
-                        // Un-revoke the node (it was active at base_version)
-                        if let Some(payload) = &revocation.payload {
-                            if let Some(node) = base_roster
-                                .nodes
-                                .iter_mut()
-                                .find(|n| n.node_number == payload.revoked_node_number)
-                            {
-                                node.revoked = false;
-                            }
-                        }
+                }
+                addendum::Kind::Revocation(revocation) => {
+                    // Un-revoke the node (it was active at base_version)
+                    if let Some(payload) = &revocation.payload
+                        && let Some(node) = base_roster
+                            .nodes
+                            .iter_mut()
+                            .find(|n| n.node_number == payload.revoked_node_number)
+                    {
+                        node.revoked = false;
                     }
                 }
             }
@@ -974,8 +972,8 @@ mod tests {
         let mut roster = build_bootstrap_roster(&keys[0], 0, &keys[1], 1);
 
         // After bootstrap, nodes 0 and 1 should verify
-        for j in 0..5 {
-            let result = verify_roster(&roster, j as i32, &spki(&keys[j]));
+        for (j, key) in keys.iter().enumerate() {
+            let result = verify_roster(&roster, j as i32, &spki(key));
             if j <= 1 {
                 assert!(
                     result.is_ok(),
@@ -1004,8 +1002,8 @@ mod tests {
             );
 
             // Verify that nodes in the roster can verify, nodes not yet added cannot
-            for j in 0..5 {
-                let result = verify_roster(&roster, j as i32, &spki(&keys[j]));
+            for (j, key) in keys.iter().enumerate() {
+                let result = verify_roster(&roster, j as i32, &spki(key));
                 if j <= i {
                     assert!(
                         result.is_ok(),
@@ -1097,10 +1095,10 @@ mod tests {
         add_node(&mut roster, &key3, 3, &key1, 1);
 
         // Corrupt the base hash on the activation of node 3
-        if let Some(addendum::Kind::Activation(ref mut act)) = roster.addenda[1].kind {
-            if let Some(ref mut payload) = act.payload {
-                payload.base_version_hash = b"fake_hash".to_vec();
-            }
+        if let Some(addendum::Kind::Activation(ref mut act)) = roster.addenda[1].kind
+            && let Some(ref mut payload) = act.payload
+        {
+            payload.base_version_hash = b"fake_hash".to_vec();
         }
 
         let result = verify_roster(&roster, 1, &spki(&key1));

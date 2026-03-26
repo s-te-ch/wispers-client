@@ -251,9 +251,9 @@ impl ServingSession {
     }
 
     fn build_status(&self) -> StatusInfo {
-        let endorsing = if self.pending_endorsement.is_some() {
+        let endorsing = if let Some(ref pe) = self.pending_endorsement {
             Some(EndorsingStatus::AwaitingCosign {
-                new_node_number: self.pending_endorsement.as_ref().unwrap().new_node_number,
+                new_node_number: pe.new_node_number,
             })
         } else if self.pairing_secret.is_some() {
             Some(EndorsingStatus::AwaitingPairNode)

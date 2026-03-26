@@ -344,15 +344,14 @@ async fn activate(hub_override: Option<&str>, profile: &str, activation_code: &s
     }
 
     // Check for self-endorsement (code format is "node_number-secret")
-    if let Some(peer_str) = activation_code.split('-').next() {
-        if let Ok(peer_node) = peer_str.parse::<i32>() {
-            if peer_node == node.node_number().unwrap() {
-                anyhow::bail!(
-                    "Cannot activate using your own activation code (self-endorsement). \
-                     You need an activation code from a different node."
-                );
-            }
-        }
+    if let Some(peer_str) = activation_code.split('-').next()
+        && let Ok(peer_node) = peer_str.parse::<i32>()
+        && peer_node == node.node_number().unwrap()
+    {
+        anyhow::bail!(
+            "Cannot activate using your own activation code (self-endorsement). \
+             You need an activation code from a different node."
+        );
     }
 
     println!("Activating with activation code {}...", activation_code);

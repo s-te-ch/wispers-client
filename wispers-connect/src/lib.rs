@@ -1,3 +1,6 @@
+// Error types are intentionally unboxed for ergonomic matching by callers.
+#![allow(clippy::result_large_err)]
+
 pub mod crypto;
 pub mod encryption;
 pub mod errors;

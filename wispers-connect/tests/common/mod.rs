@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Minimal fake hub for integration testing.
 //!
 //! Implements only the RPCs needed for P2P connection establishment:
@@ -287,7 +288,7 @@ impl Hub for FakeHub {
         let response = response_rx
             .await
             .map_err(|_| Status::unavailable("answerer disconnected"))?
-            .map_err(|e| Status::aborted(e))?;
+            .map_err(Status::aborted)?;
 
         Ok(Response::new(response))
     }

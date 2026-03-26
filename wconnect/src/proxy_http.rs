@@ -671,26 +671,26 @@ fn parse_request(buf: &[u8], egress_node: Option<i32>) -> Result<ParsedRequest, 
     }
 
     // If Host header is missing, add it from the target (only for HTTP requests, not tunnels)
-    if host_header.is_none() {
-        if let ProxyMode::HttpRequest { .. } = &target.mode {
-            let host = match &target.destination {
-                Destination::WispersNode { node_number, port } => {
-                    if *port == 80 {
-                        format!("{}.wispers.link", node_number)
-                    } else {
-                        format!("{}.wispers.link:{}", node_number, port)
-                    }
+    if host_header.is_none()
+        && let ProxyMode::HttpRequest { .. } = &target.mode
+    {
+        let host = match &target.destination {
+            Destination::WispersNode { node_number, port } => {
+                if *port == 80 {
+                    format!("{}.wispers.link", node_number)
+                } else {
+                    format!("{}.wispers.link:{}", node_number, port)
                 }
-                Destination::Internet { host, port } => {
-                    if *port == 80 {
-                        host.clone()
-                    } else {
-                        format!("{}:{}", host, port)
-                    }
+            }
+            Destination::Internet { host, port } => {
+                if *port == 80 {
+                    host.clone()
+                } else {
+                    format!("{}:{}", host, port)
                 }
-            };
-            parsed_headers.push(("Host".to_string(), host));
-        }
+            }
+        };
+        parsed_headers.push(("Host".to_string(), host));
     }
 
     Ok(ParsedRequest {
