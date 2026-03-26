@@ -558,13 +558,17 @@ async fn print_daemon_status(cg_id: &str, node_number: i32) {
     };
     println!("  Daemon: running (connected: {})", s.connected);
     if let Some(endorsing) = s.endorsing {
-        match endorsing {
-            daemon::EndorsingData::AwaitingPairNode => {
-                println!("  Endorsing: awaiting pair node");
-            }
-            daemon::EndorsingData::AwaitingCosign { new_node_number } => {
-                println!("  Endorsing: awaiting cosign for node {}", new_node_number);
-            }
+        if endorsing.codes_outstanding > 0 {
+            println!(
+                "  Endorsing: {} activation code(s) outstanding",
+                endorsing.codes_outstanding
+            );
+        }
+        if !endorsing.nodes_awaiting_cosign.is_empty() {
+            println!(
+                "  Endorsing: awaiting cosign for node(s) {:?}",
+                endorsing.nodes_awaiting_cosign
+            );
         }
     }
 }

@@ -105,7 +105,7 @@ pub fn verify_signature_spki(spki: &[u8], message: &[u8], signature: &[u8]) -> b
 //-- Pairing secrets -------------------------------------------------------------------------------
 
 /// A pairing secret for device-to-device activation.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PairingSecret {
     bytes: [u8; PAIRING_SECRET_LEN],
 }
@@ -207,6 +207,7 @@ fn decode_base36(s: &str) -> Result<[u8; PAIRING_SECRET_LEN], PairingSecretError
 //-- Pairing code (node_number + secret) -----------------------------------------------------------
 
 /// A pairing code combining node number and secret for display/entry.
+#[derive(Debug)]
 pub struct PairingCode {
     pub node_number: i32,
     pub secret: PairingSecret,

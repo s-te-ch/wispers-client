@@ -54,10 +54,9 @@ pub struct StatusData {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum EndorsingData {
-    AwaitingPairNode,
-    AwaitingCosign { new_node_number: i32 },
+pub struct EndorsingData {
+    pub codes_outstanding: usize,
+    pub nodes_awaiting_cosign: Vec<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -270,13 +269,9 @@ async fn process_request(line: &str, handle: &ServingHandle) -> Response {
     match request {
         Request::Status => match handle.status().await {
             Ok(status) => {
-                let endorsing = status.endorsing.map(|e| match e {
-                    wispers_connect::EndorsingStatus::AwaitingPairNode => {
-                        EndorsingData::AwaitingPairNode
-                    }
-                    wispers_connect::EndorsingStatus::AwaitingCosign { new_node_number } => {
-                        EndorsingData::AwaitingCosign { new_node_number }
-                    }
+                let endorsing = status.endorsing.map(|e| EndorsingData {
+                    codes_outstanding: e.codes_outstanding,
+                    nodes_awaiting_cosign: e.nodes_awaiting_cosign,
                 });
                 Response::success(ResponseData::Status(StatusData {
                     connected: status.connected,
