@@ -452,8 +452,7 @@ impl DaemonClient {
         let contents = tokio::fs::read_to_string(&path)
             .await
             .with_context(|| format!("daemon not running (no port file {:?})", path))?;
-        let (port, password) = parse_port_file(&contents)
-            .context("invalid daemon port file")?;
+        let (port, password) = parse_port_file(&contents).context("invalid daemon port file")?;
         let stream = TcpStream::connect(("127.0.0.1", port))
             .await
             .with_context(|| format!("daemon not running (port {})", port))?;

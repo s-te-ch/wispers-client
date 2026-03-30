@@ -200,7 +200,9 @@ fn stop_daemon(_hub_override: Option<&str>, profile: &str) -> Result<()> {
         .with_context(|| format!("daemon not running (no port file {:?})", path))?;
     let contents = contents.trim();
     let colon = contents.find(':').context("invalid daemon port file")?;
-    let port: u16 = contents[..colon].parse().context("invalid daemon port file")?;
+    let port: u16 = contents[..colon]
+        .parse()
+        .context("invalid daemon port file")?;
     let password = &contents[colon + 1..];
 
     let mut stream = TcpStream::connect(("127.0.0.1", port))
