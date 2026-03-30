@@ -160,22 +160,21 @@ fn main() -> Result<()> {
 
 //-- Daemon Control Functions --------------------------------------------------
 
-/// Stop a running daemon by sending shutdown command via socket.
+/// Stop a running daemon by sending shutdown command via IPC.
+#[cfg(unix)]
 fn stop_daemon(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
 
     let (cg_id, node_number) = read_registration_sync(profile)?;
-    let socket_path = daemon::socket_path(&cg_id, node_number);
+    let path = daemon::ipc_path(&cg_id, node_number);
 
-    let mut stream = UnixStream::connect(&socket_path)
-        .with_context(|| format!("daemon not running (socket {:?})", socket_path))?;
+    let mut stream = UnixStream::connect(&path)
+        .with_context(|| format!("daemon not running (socket {:?})", path))?;
 
-    // Send shutdown command
     writeln!(stream, r#"{{"cmd":"shutdown"}}"#)?;
     stream.flush()?;
 
-    // Read response
     let mut reader = BufReader::new(&stream);
     let mut response = String::new();
     reader.read_line(&mut response)?;
@@ -188,7 +187,46 @@ fn stop_daemon(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     }
 }
 
-/// Daemonize the process before starting tokio.
+/// Stop a running daemon by sending shutdown command via TCP.
+#[cfg(windows)]
+fn stop_daemon(_hub_override: Option<&str>, profile: &str) -> Result<()> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpStream;
+
+    let (cg_id, node_number) = read_registration_sync(profile)?;
+    let path = daemon::ipc_path(&cg_id, node_number);
+
+    let contents = std::fs::read_to_string(&path)
+        .with_context(|| format!("daemon not running (no port file {:?})", path))?;
+    let contents = contents.trim();
+    let colon = contents.find(':').context("invalid daemon port file")?;
+    let port: u16 = contents[..colon]
+        .parse()
+        .context("invalid daemon port file")?;
+    let password = &contents[colon + 1..];
+
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .with_context(|| format!("daemon not running (port {})", port))?;
+
+    // Send IPC password first
+    writeln!(stream, "{}", password)?;
+    writeln!(stream, r#"{{"cmd":"shutdown"}}"#)?;
+    stream.flush()?;
+
+    let mut reader = BufReader::new(&stream);
+    let mut response = String::new();
+    reader.read_line(&mut response)?;
+
+    if response.contains("\"ok\":true") {
+        println!("Daemon stopped.");
+        Ok(())
+    } else {
+        anyhow::bail!("Failed to stop daemon: {}", response.trim());
+    }
+}
+
+/// Daemonize the process before starting tokio (Unix only).
+#[cfg(unix)]
 fn daemonize_serve(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     use daemonize::Daemonize;
     use std::fs::{self, File};
@@ -197,7 +235,7 @@ fn daemonize_serve(_hub_override: Option<&str>, profile: &str) -> Result<()> {
 
     // Create log directory
     let log_dir = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .unwrap_or_else(std::env::temp_dir)
         .join(".wconnect")
         .join("logs");
     fs::create_dir_all(&log_dir).context("failed to create log directory")?;
@@ -214,6 +252,46 @@ fn daemonize_serve(_hub_override: Option<&str>, profile: &str) -> Result<()> {
 
     daemonize.start().context("failed to daemonize")?;
     Ok(())
+}
+
+/// Daemonize by re-launching as a detached process without a console window.
+#[cfg(windows)]
+fn daemonize_serve(_hub_override: Option<&str>, profile: &str) -> Result<()> {
+    use std::fs::{self, File};
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let (cg_id, node_number) = read_registration_sync(profile)?;
+
+    // Create log directory
+    let log_dir = dirs::home_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(".wconnect")
+        .join("logs");
+    fs::create_dir_all(&log_dir).context("failed to create log directory")?;
+
+    let log_path = log_dir.join(format!("{}-{}.log", cg_id, node_number));
+    let log_file = File::create(&log_path)
+        .with_context(|| format!("failed to create log file {:?}", log_path))?;
+
+    // Re-launch ourselves with the same args minus --daemon / -d
+    let exe = std::env::current_exe().context("failed to get current executable path")?;
+    let args: Vec<String> = std::env::args()
+        .skip(1)
+        .filter(|a| a != "--daemon" && a != "-d")
+        .collect();
+
+    std::process::Command::new(exe)
+        .args(&args)
+        .stdout(log_file.try_clone()?)
+        .stderr(log_file)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .context("failed to spawn background process")?;
+
+    println!("Daemonized, logging to {:?}", log_path);
+    std::process::exit(0);
 }
 
 //-- Storage -------------------------------------------------------------------

@@ -75,6 +75,7 @@ impl State {
             x if x == ffi::juice_state_JUICE_STATE_CONNECTED => State::Connected,
             x if x == ffi::juice_state_JUICE_STATE_COMPLETED => State::Completed,
             x if x == ffi::juice_state_JUICE_STATE_FAILED => State::Failed,
+            #[allow(clippy::unnecessary_cast)]
             other => State::Unknown(other as i32),
         }
     }
