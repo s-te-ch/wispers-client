@@ -175,12 +175,11 @@ impl DaemonServer {
 
         // Check for stale port file
         if path.exists() {
-            if let Ok(contents) = tokio::fs::read_to_string(&path).await {
-                if let Some((port, _)) = parse_port_file(&contents) {
-                    if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
-                        anyhow::bail!("daemon already running on port {}", port);
-                    }
-                }
+            if let Ok(contents) = tokio::fs::read_to_string(&path).await
+                && let Some((port, _)) = parse_port_file(&contents)
+                && TcpStream::connect(("127.0.0.1", port)).await.is_ok()
+            {
+                anyhow::bail!("daemon already running on port {}", port);
             }
             tokio::fs::remove_file(&path)
                 .await
