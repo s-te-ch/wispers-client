@@ -17,38 +17,26 @@
           protobuf
           libclang
         ];
+
+        # Shared environment for all dev shells
+        commonEnv = {
+          LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
+          # Separate target dir so nix builds don't poison the cmake cache
+          # for non-nix builds (and vice versa).
+          CARGO_TARGET_DIR = "target/nix";
+        };
+
+        mkDevShell = extra: pkgs.mkShell {
+          buildInputs = coreDeps ++ extra;
+          env = commonEnv;
+        };
       in
       {
         devShells = {
-          # Default: core Rust library development
-          default = pkgs.mkShell {
-            buildInputs = coreDeps;
-            env.LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
-          };
-
-          # Go wrapper development
-          go = pkgs.mkShell {
-            buildInputs = coreDeps ++ [ pkgs.go ];
-            env.LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
-          };
-
-          # Python wrapper development
-          py = pkgs.mkShell {
-            buildInputs = coreDeps ++ [
-              pkgs.python313
-              pkgs.python313Packages.pytest
-            ];
-            env.LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
-          };
-
-          # Kotlin/Android wrapper development
-          kt = pkgs.mkShell {
-            buildInputs = coreDeps ++ [
-              pkgs.jdk17
-              pkgs.gradle
-            ];
-            env.LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
-          };
+          default = mkDevShell [];
+          go      = mkDevShell [ pkgs.go ];
+          py      = mkDevShell [ pkgs.python313 pkgs.python313Packages.pytest ];
+          kt      = mkDevShell [ pkgs.jdk17 pkgs.gradle ];
         };
       }
     );
