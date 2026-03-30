@@ -128,7 +128,7 @@ To do this with `wconnect`:
 
 ```bash
 # Put one node into serving mode (it needs to stay online for the handshake)
-# and generate an activation code
+# and generate an activation code.
 cargo run --bin wconnect -- --profile="quick-start-1" serve -d
 cargo run --bin wconnect -- --profile="quick-start-1" get-activation-code
 
@@ -175,7 +175,18 @@ peer-to-peer connection!
 
 ### Rust library & CLI tools
 
-Prerequisites: a [Rust toolchain](https://rust-lang.org/tools/install/), `CMake` (for the bundled libjuice ICE library) and `clang-devel`. Protobuf compilation should be handled automatically by `tonic-build` during `cargo build`, but you may need to install `protobuf-compiler`.
+Prerequisites:
+
+- A [Rust toolchain](https://rust-lang.org/tools/install/) (install via `rustup`)
+- [CMake](https://cmake.org/) — builds the bundled libjuice ICE library and BoringSSL
+- [LLVM/Clang](https://releases.llvm.org/) — `bindgen` needs `libclang` for FFI generation
+- [protoc](https://github.com/protocolbuffers/protobuf/releases) — Protocol Buffers compiler (used by `tonic-build`)
+- [Go](https://go.dev/) — required by the BoringSSL build
+- [NASM](https://www.nasm.us/) — assembler for BoringSSL's optimised routines
+
+Install these via your package manager (e.g. `apt` on Linux, `brew` on macOS, `winget` on Windows).
+
+To build:
 
 ```bash
 cargo build          # library + wconnect + wcadm
