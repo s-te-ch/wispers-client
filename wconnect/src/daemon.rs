@@ -108,6 +108,10 @@ pub struct DaemonServer {
     listener: UnixListener,
     #[cfg(windows)]
     listener: TcpListener,
+    /// Password that Windows clients must send before any request.
+    /// Stored in the `.port` file alongside the port, readable only by the user.
+    #[cfg(windows)]
+    windows_ipc_password: String,
     connectivity_group_id: String,
     node_number: i32,
 }
@@ -151,9 +155,15 @@ impl DaemonServer {
         })
     }
 
-    /// Bind to a localhost TCP port and write the port number to a file.
+    /// Bind to a localhost TCP port and write the port + password to a file.
+    ///
+    /// The `.port` file contains `port:password`. Clients must send the password
+    /// as the first line before any request, preventing other local users from
+    /// talking to the daemon.
     #[cfg(windows)]
     pub async fn bind(connectivity_group_id: &str, node_number: i32) -> Result<Self> {
+        use rand::Rng;
+
         let path = ipc_path(connectivity_group_id, node_number);
 
         // Ensure parent directory exists
@@ -165,8 +175,8 @@ impl DaemonServer {
 
         // Check for stale port file
         if path.exists() {
-            if let Ok(port_str) = tokio::fs::read_to_string(&path).await {
-                if let Ok(port) = port_str.trim().parse::<u16>() {
+            if let Ok(contents) = tokio::fs::read_to_string(&path).await {
+                if let Some((port, _)) = parse_port_file(&contents) {
                     if TcpStream::connect(("127.0.0.1", port)).await.is_ok() {
                         anyhow::bail!("daemon already running on port {}", port);
                     }
@@ -181,21 +191,56 @@ impl DaemonServer {
             .await
             .context("failed to bind TCP listener")?;
         let port = listener.local_addr()?.port();
-        tokio::fs::write(&path, port.to_string())
+
+        // Generate a random password for IPC auth
+        let password: String = rand::rng()
+            .sample_iter(rand::distr::Alphanumeric)
+            .take(32)
+            .map(char::from)
+            .collect();
+
+        tokio::fs::write(&path, format!("{}:{}", port, password))
             .await
             .context("failed to write port file")?;
 
         Ok(Self {
             listener,
+            windows_ipc_password: password,
             connectivity_group_id: connectivity_group_id.to_string(),
             node_number,
         })
     }
 
     /// Accept a new connection.
+    ///
+    /// On Windows, the client must send the IPC password as the first line.
+    /// Connections that fail auth are dropped silently.
     pub async fn accept(&self) -> Result<IpcStream> {
-        let (stream, _addr) = self.listener.accept().await?;
-        Ok(stream)
+        loop {
+            let (stream, _addr) = self.listener.accept().await?;
+
+            #[cfg(unix)]
+            return Ok(stream);
+
+            #[cfg(windows)]
+            {
+                // Read the IPC password line before handing the stream off
+                let mut buf_stream = BufReader::new(stream);
+                let mut password_line = String::new();
+                match buf_stream.read_line(&mut password_line).await {
+                    Ok(0) => continue,
+                    Ok(_) if password_line.trim() == self.windows_ipc_password => {
+                        // Auth passed — reconstruct the stream from the BufReader.
+                        // The buffer should be empty since we consumed exactly one line.
+                        return Ok(buf_stream.into_inner());
+                    }
+                    _ => {
+                        // Wrong token or read error — drop the connection
+                        continue;
+                    }
+                }
+            }
+        }
     }
 
     /// Get the IPC path (socket path on Unix, port file on Windows).
@@ -367,6 +412,16 @@ async fn process_request(line: &str, handle: &ServingHandle) -> Response {
     }
 }
 
+/// Parse a port file (`port:password` format).
+#[cfg(windows)]
+fn parse_port_file(contents: &str) -> Option<(u16, &str)> {
+    let contents = contents.trim();
+    let colon = contents.find(':')?;
+    let port: u16 = contents[..colon].parse().ok()?;
+    let password = &contents[colon + 1..];
+    Some((port, password))
+}
+
 /// Client for connecting to the daemon.
 pub struct DaemonClient {
     reader: BufReader<ReadHalf>,
@@ -389,20 +444,25 @@ impl DaemonClient {
     }
 
     /// Connect to the daemon for a specific node (via TCP localhost).
+    ///
+    /// Reads the port and password from the `.port` file, connects, and
+    /// sends the password as the first line for authentication.
     #[cfg(windows)]
     pub async fn connect(connectivity_group_id: &str, node_number: i32) -> Result<Self> {
         let path = ipc_path(connectivity_group_id, node_number);
-        let port_str = tokio::fs::read_to_string(&path)
+        let contents = tokio::fs::read_to_string(&path)
             .await
             .with_context(|| format!("daemon not running (no port file {:?})", path))?;
-        let port: u16 = port_str
-            .trim()
-            .parse()
+        let (port, password) = parse_port_file(&contents)
             .context("invalid daemon port file")?;
         let stream = TcpStream::connect(("127.0.0.1", port))
             .await
             .with_context(|| format!("daemon not running (port {})", port))?;
-        let (reader, writer) = stream.into_split();
+        let (reader, mut writer) = stream.into_split();
+        // Send IPC password
+        writer.write_all(password.as_bytes()).await?;
+        writer.write_all(b"\n").await?;
+        writer.flush().await?;
         Ok(Self {
             reader: BufReader::new(reader),
             writer,

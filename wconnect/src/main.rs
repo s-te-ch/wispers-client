@@ -196,13 +196,18 @@ fn stop_daemon(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     let (cg_id, node_number) = read_registration_sync(profile)?;
     let path = daemon::ipc_path(&cg_id, node_number);
 
-    let port_str = std::fs::read_to_string(&path)
+    let contents = std::fs::read_to_string(&path)
         .with_context(|| format!("daemon not running (no port file {:?})", path))?;
-    let port: u16 = port_str.trim().parse().context("invalid daemon port file")?;
+    let contents = contents.trim();
+    let colon = contents.find(':').context("invalid daemon port file")?;
+    let port: u16 = contents[..colon].parse().context("invalid daemon port file")?;
+    let password = &contents[colon + 1..];
 
     let mut stream = TcpStream::connect(("127.0.0.1", port))
         .with_context(|| format!("daemon not running (port {})", port))?;
 
+    // Send IPC password first
+    writeln!(stream, "{}", password)?;
     writeln!(stream, r#"{{"cmd":"shutdown"}}"#)?;
     stream.flush()?;
 
@@ -247,13 +252,44 @@ fn daemonize_serve(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     Ok(())
 }
 
-/// Daemon mode is not available on Windows.
+/// Daemonize by re-launching as a detached process without a console window.
 #[cfg(windows)]
-fn daemonize_serve(_hub_override: Option<&str>, _profile: &str) -> Result<()> {
-    anyhow::bail!(
-        "Daemon mode (--daemon) is not supported on Windows. \
-         Run 'wconnect serve' in the foreground instead."
-    );
+fn daemonize_serve(_hub_override: Option<&str>, profile: &str) -> Result<()> {
+    use std::fs::{self, File};
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let (cg_id, node_number) = read_registration_sync(profile)?;
+
+    // Create log directory
+    let log_dir = dirs::home_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(".wconnect")
+        .join("logs");
+    fs::create_dir_all(&log_dir).context("failed to create log directory")?;
+
+    let log_path = log_dir.join(format!("{}-{}.log", cg_id, node_number));
+    let log_file = File::create(&log_path)
+        .with_context(|| format!("failed to create log file {:?}", log_path))?;
+
+    // Re-launch ourselves with the same args minus --daemon / -d
+    let exe = std::env::current_exe().context("failed to get current executable path")?;
+    let args: Vec<String> = std::env::args()
+        .skip(1)
+        .filter(|a| a != "--daemon" && a != "-d")
+        .collect();
+
+    std::process::Command::new(exe)
+        .args(&args)
+        .stdout(log_file.try_clone()?)
+        .stderr(log_file)
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .context("failed to spawn background process")?;
+
+    println!("Daemonized, logging to {:?}", log_path);
+    std::process::exit(0);
 }
 
 //-- Storage -------------------------------------------------------------------
