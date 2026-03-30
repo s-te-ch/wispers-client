@@ -13,6 +13,7 @@
 
         # Core dependencies needed for the Rust library
         coreDeps = with pkgs; [
+          rustup
           cmake
           protobuf
           libclang
