@@ -211,33 +211,28 @@ impl DaemonServer {
     }
 
     /// Accept a new connection.
+    #[cfg(unix)]
+    pub async fn accept(&self) -> Result<IpcStream> {
+        let (stream, _addr) = self.listener.accept().await?;
+        Ok(stream)
+    }
+
+    /// Accept a new connection.
     ///
-    /// On Windows, the client must send the IPC password as the first line.
+    /// The client must send the IPC password as the first line.
     /// Connections that fail auth are dropped silently.
+    #[cfg(windows)]
     pub async fn accept(&self) -> Result<IpcStream> {
         loop {
             let (stream, _addr) = self.listener.accept().await?;
-
-            #[cfg(unix)]
-            return Ok(stream);
-
-            #[cfg(windows)]
-            {
-                // Read the IPC password line before handing the stream off
-                let mut buf_stream = BufReader::new(stream);
-                let mut password_line = String::new();
-                match buf_stream.read_line(&mut password_line).await {
-                    Ok(0) => continue,
-                    Ok(_) if password_line.trim() == self.windows_ipc_password => {
-                        // Auth passed — reconstruct the stream from the BufReader.
-                        // The buffer should be empty since we consumed exactly one line.
-                        return Ok(buf_stream.into_inner());
-                    }
-                    _ => {
-                        // Wrong token or read error — drop the connection
-                        continue;
-                    }
+            let mut buf_stream = BufReader::new(stream);
+            let mut password_line = String::new();
+            match buf_stream.read_line(&mut password_line).await {
+                Ok(0) => continue,
+                Ok(_) if password_line.trim() == self.windows_ipc_password => {
+                    return Ok(buf_stream.into_inner());
                 }
+                _ => continue,
             }
         }
     }
