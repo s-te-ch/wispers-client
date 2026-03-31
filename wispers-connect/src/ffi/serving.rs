@@ -86,16 +86,24 @@ pub extern "C" fn wispers_incoming_connections_free(handle: *mut WispersIncoming
     }
 }
 
-// Helper to send incoming connections pointer across threads.
-// Safety: The caller must ensure the pointer remains valid and is not accessed
-// concurrently from multiple threads.
+/// Helper to move an incoming-connections pointer into a spawned async task.
+///
+/// Only `Send` is implemented — never `Sync`. Implementing `Sync` would allow the
+/// same pointer to be accessed from multiple threads simultaneously. Combined with
+/// the mutable reborrow in `get`, that would produce aliased `&mut T` references (UB).
+/// Each `SendableIncomingPtr` is always moved into exactly one `async move` closure.
+///
+/// Safety: The caller must ensure the pointer remains valid for the lifetime of
+/// the spawned task and is not accessed concurrently from other threads.
 struct SendableIncomingPtr(*mut WispersIncomingConnections);
 unsafe impl Send for SendableIncomingPtr {}
-unsafe impl Sync for SendableIncomingPtr {}
 
 impl SendableIncomingPtr {
-    /// Get a mutable reference to the inner IncomingConnections.
-    /// SAFETY: The caller must ensure the pointer is valid.
+    /// Return a mutable reference to the inner `IncomingConnections`.
+    ///
+    /// # Safety
+    /// The caller must ensure the pointer is valid and no other reference to
+    /// the same object exists at the same time.
     unsafe fn get(&self) -> &mut IncomingConnections {
         unsafe { &mut (*self.0).0 }
     }
