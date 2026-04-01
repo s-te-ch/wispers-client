@@ -79,6 +79,17 @@ fn build_libjuice_native(libjuice_dir: &Path) -> BuildResult<()> {
         };
         config.define("ANDROID_ABI", abi);
         config.define("ANDROID_PLATFORM", "android-21");
+    } else if target.contains("apple-ios") {
+        config.define("CMAKE_SYSTEM_NAME", "iOS");
+        config.define("CMAKE_OSX_DEPLOYMENT_TARGET", "15.0");
+        if target.contains("sim") {
+            config.define("CMAKE_OSX_SYSROOT", "iphonesimulator");
+        } else {
+            config.define("CMAKE_OSX_SYSROOT", "iphoneos");
+        }
+        config.define("CMAKE_OSX_ARCHITECTURES", "arm64");
+        // ___chkstk_darwin is not available on iOS; disable stack checking.
+        config.cflag("-fno-stack-check");
     }
 
     let dst = config.build();
@@ -111,14 +122,21 @@ fn build_libjuice_native(libjuice_dir: &Path) -> BuildResult<()> {
 fn generate_libjuice_bindings(libjuice_dir: &Path, header: &Path) -> BuildResult<()> {
     let header_str = header.to_str().ok_or("non-utf8 path to libjuice header")?;
 
-    let bindings = bindgen::Builder::default()
+    let mut builder = bindgen::Builder::default()
         .header(header_str)
         .allowlist_type("juice_.*")
         .allowlist_function("juice_.*")
         .allowlist_var("JUICE_.*")
         .clang_arg(format!("-I{}", libjuice_dir.join("include").display()))
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .generate()?;
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()));
+
+    // Rust's aarch64-apple-ios-sim triple is not valid for clang; remap it.
+    let target = env::var("TARGET").unwrap_or_default();
+    if target == "aarch64-apple-ios-sim" {
+        builder = builder.clang_arg("--target=arm64-apple-ios15.0-simulator");
+    }
+
+    let bindings = builder.generate()?;
 
     let out_path = PathBuf::from(env::var("OUT_DIR")?);
     bindings.write_to_file(out_path.join("juice_bindings.rs"))?;

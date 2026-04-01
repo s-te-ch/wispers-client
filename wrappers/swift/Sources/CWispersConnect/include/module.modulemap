@@ -1,0 +1,4 @@
+module CWispersConnect {
+    header "wispers_connect.h"
+    export *
+}
