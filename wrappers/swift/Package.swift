@@ -8,15 +8,19 @@ let package = Package(
         .library(name: "WispersConnect", targets: ["WispersConnect"]),
     ],
     targets: [
-        .target(
+        .binaryTarget(
             name: "CWispersConnect",
-            path: "Sources/CWispersConnect",
-            publicHeadersPath: "include"
+            path: "CWispersConnect.xcframework"
         ),
         .target(
             name: "WispersConnect",
             dependencies: ["CWispersConnect"],
-            path: "Sources/WispersConnect"
+            path: "Sources/WispersConnect",
+            linkerSettings: [
+                .linkedLibrary("c++"),
+                .linkedLibrary("iconv"),
+                .linkedLibrary("resolv"),
+            ]
         ),
     ]
 )

@@ -68,7 +68,7 @@ for PLATFORM in ios ios-simulator; do
     mkdir -p "$BUILD_DIR/$PLATFORM/Headers"
     cp "$HEADER_DIR/wispers_connect.h" "$BUILD_DIR/$PLATFORM/Headers/"
     cat > "$BUILD_DIR/$PLATFORM/Headers/module.modulemap" <<'EOF'
-framework module CWispersConnect {
+module CWispersConnect {
     header "wispers_connect.h"
     export *
 }
