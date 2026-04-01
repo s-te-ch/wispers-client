@@ -105,11 +105,12 @@ private let storageLoadRegistration: @convention(c) (
         guard let data = try h.callbacks.loadRegistration() else {
             return WISPERS_STATUS_NOT_FOUND
         }
+        // Always report the actual size so the caller can resize if needed.
+        outLen?.pointee = data.count
         guard data.count <= bufferLen else { return WISPERS_STATUS_BUFFER_TOO_SMALL }
         data.withUnsafeBytes { src in
             buffer?.update(from: src.bindMemory(to: UInt8.self).baseAddress!, count: data.count)
         }
-        outLen?.pointee = data.count
         return WISPERS_STATUS_SUCCESS
     } catch {
         return WISPERS_STATUS_STORE_ERROR
