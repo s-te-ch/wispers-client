@@ -40,16 +40,8 @@ fn build_ice_servers_config(config: &StunTurnConfig) -> Result<IceServersConfig>
     // Add TURN server if configured
     if !config.turn_server.is_empty() {
         let (turn_host, turn_port) = parse_host_port(&config.turn_server, 3478)?;
-        let username = if config.turn_username.is_empty() {
-            None
-        } else {
-            Some(config.turn_username.clone())
-        };
-        let password = if config.turn_password.is_empty() {
-            None
-        } else {
-            Some(config.turn_password.clone())
-        };
+        let username = (!config.turn_username.is_empty()).then(|| config.turn_username.clone());
+        let password = (!config.turn_password.is_empty()).then(|| config.turn_password.clone());
 
         ice_config.add_turn_server(TurnServerConfig {
             host: turn_host,
@@ -63,12 +55,12 @@ fn build_ice_servers_config(config: &StunTurnConfig) -> Result<IceServersConfig>
 }
 
 fn parse_host_port(addr: &str, default_port: u16) -> Result<(String, u16)> {
-    if let Some(idx) = addr.rfind(':') {
-        let host = addr[..idx].to_string();
-        let port: u16 = addr[idx + 1..].parse().map_err(|_| IceError::InvalidPort)?;
-        Ok((host, port))
-    } else {
-        Ok((addr.to_string(), default_port))
+    match addr.rsplit_once(':') {
+        Some((host, port_str)) => {
+            let port = port_str.parse().map_err(|_| IceError::InvalidPort)?;
+            Ok((host.to_string(), port))
+        }
+        None => Ok((addr.to_string(), default_port)),
     }
 }
 
@@ -138,11 +130,12 @@ impl IceCaller {
 
     /// Receive data from the remote peer.
     pub async fn recv(&self) -> Result<Vec<u8>> {
-        let mut rx = self.recv_rx.lock().await;
-        match rx.recv().await {
-            Some(bytes) => Ok(bytes),
-            None => Err(IceError::ChannelClosed),
-        }
+        self.recv_rx
+            .lock()
+            .await
+            .recv()
+            .await
+            .ok_or(IceError::ChannelClosed)
     }
 
     /// Close the connection.
@@ -220,11 +213,12 @@ impl IceAnswerer {
 
     /// Receive data from the remote peer.
     pub async fn recv(&self) -> Result<Vec<u8>> {
-        let mut rx = self.recv_rx.lock().await;
-        match rx.recv().await {
-            Some(bytes) => Ok(bytes),
-            None => Err(IceError::ChannelClosed),
-        }
+        self.recv_rx
+            .lock()
+            .await
+            .recv()
+            .await
+            .ok_or(IceError::ChannelClosed)
     }
 
     /// Close the connection.

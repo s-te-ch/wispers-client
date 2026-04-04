@@ -112,7 +112,7 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let hub_override: Option<String> = cli.hub.clone();
+    let hub_override = cli.hub.clone();
     let profile = cli.profile.clone();
 
     // Parse serve options before daemonizing since we need them after.
@@ -379,15 +379,12 @@ async fn register(hub_override: Option<&str>, profile: &str, token: &str) -> Res
 
     let mut node = load_node(&storage).await?;
 
-    match node.state() {
-        NodeState::Pending => {}
-        NodeState::Registered | NodeState::Activated => {
-            anyhow::bail!(
-                "Already registered as node {} in group {}. Use 'wconnect logout' to clear.",
-                node.node_number().unwrap(),
-                node.connectivity_group_id().unwrap()
-            );
-        }
+    if matches!(node.state(), NodeState::Registered | NodeState::Activated) {
+        anyhow::bail!(
+            "Already registered as node {} in group {}. Use 'wconnect logout' to clear.",
+            node.node_number().unwrap(),
+            node.connectivity_group_id().unwrap()
+        );
     }
 
     println!("Registering with token {}...", token);
@@ -531,21 +528,19 @@ async fn nodes(hub_override: Option<&str>, profile: &str) -> Result<()> {
     );
     for node_info in info.nodes {
         let name = if node_info.name.is_empty() {
-            "(unnamed)".to_string()
+            "(unnamed)"
         } else {
-            node_info.name
+            &node_info.name
         };
-        let mut tags = Vec::new();
-        if node_info.is_self {
-            tags.push("you");
-        }
-        if let Some(activated) = node_info.is_activated {
-            if activated {
-                tags.push("activated");
-            } else {
-                tags.push("not activated");
-            }
-        }
+        let tags: Vec<&str> = [
+            node_info.is_self.then_some("you"),
+            node_info
+                .is_activated
+                .map(|a| if a { "activated" } else { "not activated" }),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let status = if node_info.is_online {
             "online".to_string()
         } else {
@@ -572,24 +567,13 @@ fn format_last_seen(millis: i64) -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as i64;
-    let ago_ms = now - millis;
-    if ago_ms < 0 {
-        return "connected just now".to_string();
+    let ago_secs = (now - millis) / 1000;
+    match ago_secs {
+        s if s < 60 => "connected just now".to_string(),
+        s if s < 3600 => format!("connected {}m ago", s / 60),
+        s if s < 86400 => format!("connected {}h ago", s / 3600),
+        s => format!("connected {}d ago", s / 86400),
     }
-    let ago_secs = ago_ms / 1000;
-    if ago_secs < 60 {
-        return "connected just now".to_string();
-    }
-    let ago_mins = ago_secs / 60;
-    if ago_mins < 60 {
-        return format!("connected {}m ago", ago_mins);
-    }
-    let ago_hours = ago_mins / 60;
-    if ago_hours < 24 {
-        return format!("connected {}h ago", ago_hours);
-    }
-    let ago_days = ago_hours / 24;
-    format!("connected {}d ago", ago_days)
 }
 
 async fn status(hub_override: Option<&str>, profile: &str) -> Result<()> {
@@ -600,20 +584,17 @@ async fn status(hub_override: Option<&str>, profile: &str) -> Result<()> {
         NodeState::Pending => {
             println!("Not registered.");
         }
-        NodeState::Registered => {
+        state => {
+            let label = if state == NodeState::Activated {
+                "Activated"
+            } else {
+                "Registered (not yet activated)"
+            };
             let cg_id = node.connectivity_group_id().unwrap();
             let node_num = node.node_number().unwrap();
-            println!("Registered (not yet activated):");
-            println!("  Connectivity group: {}", cg_id);
-            println!("  Node number: {}", node_num);
-            print_daemon_status(&cg_id.to_string(), node_num).await;
-        }
-        NodeState::Activated => {
-            let cg_id = node.connectivity_group_id().unwrap();
-            let node_num = node.node_number().unwrap();
-            println!("Activated:");
-            println!("  Connectivity group: {}", cg_id);
-            println!("  Node number: {}", node_num);
+            println!("{label}:");
+            println!("  Connectivity group: {cg_id}");
+            println!("  Node number: {node_num}");
             print_daemon_status(&cg_id.to_string(), node_num).await;
         }
     }

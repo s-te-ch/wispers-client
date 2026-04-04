@@ -66,6 +66,18 @@ pub struct Node {
     pub is_online: bool,
 }
 
+impl From<proto::hub::Node> for Node {
+    fn from(n: proto::hub::Node) -> Self {
+        Self {
+            node_number: n.node_number,
+            name: n.name,
+            metadata: n.metadata,
+            last_seen_at_millis: n.last_seen_at_millis,
+            is_online: n.is_online,
+        }
+    }
+}
+
 /// Client for communicating with the Wispers Connect Hub.
 pub struct HubClient {
     client: ProtoHubClient<Channel>,
@@ -104,7 +116,7 @@ impl HubClient {
         token: &str,
     ) -> Result<NodeRegistration, HubError> {
         let request = tonic::Request::new(proto::NodeRegistrationRequest {
-            token: token.to_string(),
+            token: token.into(),
         });
         let response = self.client.complete_node_registration(request).await?;
         let reg = response.into_inner();
@@ -129,13 +141,7 @@ impl HubClient {
             .into_inner()
             .nodes
             .into_iter()
-            .map(|n| Node {
-                node_number: n.node_number,
-                name: n.name,
-                metadata: n.metadata,
-                last_seen_at_millis: n.last_seen_at_millis,
-                is_online: n.is_online,
-            })
+            .map(Node::from)
             .collect();
         Ok(nodes)
     }

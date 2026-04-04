@@ -175,17 +175,13 @@ pub enum PairingSecretError {
 
 /// Encode bytes as 10 lowercase base36 characters.
 fn encode_base36(bytes: &[u8]) -> String {
-    let n = BigUint::from_bytes_be(bytes);
-    let mut s = n.to_str_radix(36);
-    // Pad to 10 characters
-    while s.len() < 10 {
-        s.insert(0, '0');
+    let s = BigUint::from_bytes_be(bytes).to_str_radix(36);
+    // Left-pad to 10; if somehow longer, keep the least-significant 10 digits.
+    match s.len().cmp(&10) {
+        std::cmp::Ordering::Less => format!("{:0>10}", s),
+        std::cmp::Ordering::Equal => s,
+        std::cmp::Ordering::Greater => s[s.len() - 10..].to_string(),
     }
-    // Truncate if too long (most significant digits)
-    if s.len() > 10 {
-        s = s[s.len() - 10..].to_string();
-    }
-    s
 }
 
 /// Decode 10 base36 characters to bytes.
@@ -194,13 +190,11 @@ fn decode_base36(s: &str) -> Result<[u8; PAIRING_SECRET_LEN], PairingSecretError
         return Err(PairingSecretError::InvalidLength);
     }
     let n = BigUint::parse_bytes(s.as_bytes(), 36).ok_or(PairingSecretError::InvalidCharacter)?;
-    let mut bytes = n.to_bytes_be();
-    // Pad to 7 bytes
-    while bytes.len() < PAIRING_SECRET_LEN {
-        bytes.insert(0, 0);
-    }
+    let raw = n.to_bytes_be();
+    // Left-pad to PAIRING_SECRET_LEN bytes (raw may be shorter for small values).
     let mut result = [0u8; PAIRING_SECRET_LEN];
-    result.copy_from_slice(&bytes);
+    let offset = PAIRING_SECRET_LEN.saturating_sub(raw.len());
+    result[offset..].copy_from_slice(&raw);
     Ok(result)
 }
 
@@ -269,14 +263,11 @@ pub fn generate_nonce() -> Vec<u8> {
 
 /// Constant-time equality comparison.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        diff |= x ^ y;
-    }
-    diff == 0
+    a.len() == b.len()
+        && a.iter()
+            .zip(b.iter())
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+            == 0
 }
 
 #[cfg(test)]

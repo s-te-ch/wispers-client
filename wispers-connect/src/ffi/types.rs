@@ -7,7 +7,7 @@
 use crate::errors::{NodeStateError, WispersStatus};
 use crate::node::{Node, NodeStorage};
 use crate::storage::StorageError;
-use crate::types::{GroupInfo, GroupState, NodeRegistration};
+use crate::types::{GroupInfo, GroupState, NodeInfo, NodeRegistration};
 use std::ffi::{CStr, CString, c_void};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
@@ -253,25 +253,43 @@ impl WispersGroupInfo {
             });
         }
 
-        let mut c_nodes: Vec<WispersNode> = Vec::with_capacity(count);
-        for node in info.nodes {
-            let name = CString::new(node.name).map_err(|_| WispersStatus::InvalidUtf8)?;
-            let metadata = CString::new(node.metadata).map_err(|_| WispersStatus::InvalidUtf8)?;
-            let activation_status = match node.is_activated {
-                None => WISPERS_ACTIVATION_UNKNOWN,
-                Some(false) => WISPERS_ACTIVATION_NOT_ACTIVATED,
-                Some(true) => WISPERS_ACTIVATION_ACTIVATED,
-            };
-            c_nodes.push(WispersNode {
-                node_number: node.node_number,
-                name: name.into_raw(),
-                metadata: metadata.into_raw(),
-                is_self: node.is_self,
-                activation_status,
-                last_seen_at_millis: node.last_seen_at_millis,
-                is_online: node.is_online,
-            });
-        }
+        // Phase 1: build all CString values while they are still Rust-owned.
+        // If any CString::new() fails the `?` propagates the error and the
+        // Vec<(CString, CString, NodeInfo)> is dropped cleanly — no raw-pointer
+        // leaks because we haven't called into_raw() on anything yet.
+        let owned: Vec<(CString, CString, NodeInfo)> = info
+            .nodes
+            .into_iter()
+            .map(|node| {
+                let name =
+                    CString::new(node.name.as_str()).map_err(|_| WispersStatus::InvalidUtf8)?;
+                let metadata =
+                    CString::new(node.metadata.as_str()).map_err(|_| WispersStatus::InvalidUtf8)?;
+                Ok((name, metadata, node))
+            })
+            .collect::<Result<_, WispersStatus>>()?;
+
+        // Phase 2: all strings built successfully — convert to raw pointers.
+        // This loop is infallible, so no leak is possible here.
+        let mut c_nodes: Vec<WispersNode> = owned
+            .into_iter()
+            .map(|(name, metadata, node)| {
+                let activation_status = match node.is_activated {
+                    None => WISPERS_ACTIVATION_UNKNOWN,
+                    Some(false) => WISPERS_ACTIVATION_NOT_ACTIVATED,
+                    Some(true) => WISPERS_ACTIVATION_ACTIVATED,
+                };
+                WispersNode {
+                    node_number: node.node_number,
+                    name: name.into_raw(),
+                    metadata: metadata.into_raw(),
+                    is_self: node.is_self,
+                    activation_status,
+                    last_seen_at_millis: node.last_seen_at_millis,
+                    is_online: node.is_online,
+                }
+            })
+            .collect();
 
         let nodes_ptr = c_nodes.as_mut_ptr();
         std::mem::forget(c_nodes);
@@ -299,22 +317,26 @@ pub extern "C" fn wispers_group_info_free(group_info: *mut WispersGroupInfo) {
     if group_info.is_null() {
         return;
     }
-    unsafe {
-        let gs = &mut *group_info;
-        if !gs.nodes.is_null() && gs.nodes_count > 0 {
-            let nodes = Vec::from_raw_parts(gs.nodes, gs.nodes_count, gs.nodes_count);
-            for node in nodes {
-                if !node.name.is_null() {
-                    drop(CString::from_raw(node.name));
-                }
-                if !node.metadata.is_null() {
-                    drop(CString::from_raw(node.metadata));
-                }
+    // SAFETY: `group_info` was allocated by Rust via `Box::into_raw(Box::new(...))` in
+    // `handle_group_info_result`. We reconstitute the Box here to free both the inner
+    // `nodes` array and the `WispersGroupInfo` allocation itself.
+    // The previous implementation only freed the `nodes` array (via a borrow) and leaked
+    // the `WispersGroupInfo` Box.
+    let gs = unsafe { Box::from_raw(group_info) };
+    if !gs.nodes.is_null() && gs.nodes_count > 0 {
+        // SAFETY: `nodes` was allocated by Rust via `Vec::into_raw_parts`-equivalent
+        // (`as_mut_ptr` + `mem::forget`) with length == capacity == `nodes_count`.
+        let nodes = unsafe { Vec::from_raw_parts(gs.nodes, gs.nodes_count, gs.nodes_count) };
+        for node in nodes {
+            if !node.name.is_null() {
+                unsafe { drop(CString::from_raw(node.name)) };
+            }
+            if !node.metadata.is_null() {
+                unsafe { drop(CString::from_raw(node.metadata)) };
             }
         }
-        gs.nodes = ptr::null_mut();
-        gs.nodes_count = 0;
     }
+    // `gs` (Box<WispersGroupInfo>) is dropped here, freeing the struct itself.
 }
 
 // =============================================================================

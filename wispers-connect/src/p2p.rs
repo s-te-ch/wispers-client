@@ -92,6 +92,38 @@ enum UdpConnectionInner {
     Answerer { ice: IceAnswerer, cipher: P2pCipher },
 }
 
+impl UdpConnectionInner {
+    fn encrypt_and_send(&self, data: &[u8]) -> Result<(), P2pError> {
+        match self {
+            Self::Caller { ice, cipher } => ice.send(&cipher.encrypt(data)?)?,
+            Self::Answerer { ice, cipher } => ice.send(&cipher.encrypt(data)?)?,
+        }
+        Ok(())
+    }
+
+    async fn recv_and_decrypt(&self) -> Result<Vec<u8>, P2pError> {
+        match self {
+            Self::Caller { ice, cipher } => cipher.decrypt(&ice.recv().await?),
+            Self::Answerer { ice, cipher } => cipher.decrypt(&ice.recv().await?),
+        }
+        .map_err(P2pError::Encryption)
+    }
+
+    fn ice_state(&self) -> IceState {
+        match self {
+            Self::Caller { ice, .. } => ice.state(),
+            Self::Answerer { ice, .. } => ice.state(),
+        }
+    }
+
+    fn ice_close(self) {
+        match self {
+            Self::Caller { ice, .. } => ice.close(),
+            Self::Answerer { ice, .. } => ice.close(),
+        }
+    }
+}
+
 /// A UDP-based P2P connection to another node.
 ///
 /// This provides encrypted UDP communication with a peer node after
@@ -150,17 +182,7 @@ impl UdpConnection {
         if self.state().is_disconnected() {
             return Err(P2pError::Disconnected);
         }
-        match &self.inner {
-            UdpConnectionInner::Caller { ice, cipher } => {
-                let encrypted = cipher.encrypt(data)?;
-                ice.send(&encrypted)?;
-            }
-            UdpConnectionInner::Answerer { ice, cipher } => {
-                let encrypted = cipher.encrypt(data)?;
-                ice.send(&encrypted)?;
-            }
-        }
-        Ok(())
+        self.inner.encrypt_and_send(data)
     }
 
     /// Receive data from the peer.
@@ -170,36 +192,17 @@ impl UdpConnection {
         if self.state().is_disconnected() {
             return Err(P2pError::Disconnected);
         }
-        match &self.inner {
-            UdpConnectionInner::Caller { ice, cipher } => {
-                let encrypted = ice.recv().await?;
-                let decrypted = cipher.decrypt(&encrypted)?;
-                Ok(decrypted)
-            }
-            UdpConnectionInner::Answerer { ice, cipher } => {
-                let encrypted = ice.recv().await?;
-                let decrypted = cipher.decrypt(&encrypted)?;
-                Ok(decrypted)
-            }
-        }
+        self.inner.recv_and_decrypt().await
     }
 
     /// Close the connection.
     pub fn close(self) {
-        match self.inner {
-            UdpConnectionInner::Caller { ice, .. } => ice.close(),
-            UdpConnectionInner::Answerer { ice, .. } => ice.close(),
-        }
+        self.inner.ice_close();
     }
 
     /// Get the current connection state.
     pub fn state(&self) -> ConnectionState {
-        match &self.inner {
-            UdpConnectionInner::Caller { ice, .. } => ConnectionState::from_ice_state(ice.state()),
-            UdpConnectionInner::Answerer { ice, .. } => {
-                ConnectionState::from_ice_state(ice.state())
-            }
-        }
+        ConnectionState::from_ice_state(self.inner.ice_state())
     }
 
     /// Returns true if the connection is established and ready for data.
@@ -216,10 +219,84 @@ enum QuicConnectionInner {
     Answerer(quic::Connection<IceAnswerer>),
 }
 
+impl QuicConnectionInner {
+    async fn open_stream(&self) -> Result<QuicStreamInner, QuicError> {
+        match self {
+            Self::Caller(q) => q.open_stream().await.map(QuicStreamInner::Caller),
+            Self::Answerer(q) => q.open_stream().await.map(QuicStreamInner::Answerer),
+        }
+    }
+
+    async fn accept_stream(&self) -> Result<QuicStreamInner, QuicError> {
+        match self {
+            Self::Caller(q) => q.accept_stream().await.map(QuicStreamInner::Caller),
+            Self::Answerer(q) => q.accept_stream().await.map(QuicStreamInner::Answerer),
+        }
+    }
+
+    async fn is_established(&self) -> bool {
+        match self {
+            Self::Caller(q) => q.is_established().await,
+            Self::Answerer(q) => q.is_established().await,
+        }
+    }
+
+    async fn close(self) -> Result<(), QuicError> {
+        match self {
+            Self::Caller(q) => q.close().await,
+            Self::Answerer(q) => q.close().await,
+        }
+    }
+}
+
 /// Internal enum to hold either caller or answerer QUIC stream.
 enum QuicStreamInner {
     Caller(quic::Stream<IceCaller>),
     Answerer(quic::Stream<IceAnswerer>),
+}
+
+impl QuicStreamInner {
+    fn id(&self) -> u64 {
+        match self {
+            Self::Caller(s) => s.id(),
+            Self::Answerer(s) => s.id(),
+        }
+    }
+
+    async fn write(&self, data: &[u8]) -> Result<usize, QuicError> {
+        match self {
+            Self::Caller(s) => s.write(data).await,
+            Self::Answerer(s) => s.write(data).await,
+        }
+    }
+
+    async fn write_all(&self, data: &[u8]) -> Result<(), QuicError> {
+        match self {
+            Self::Caller(s) => s.write_all(data).await,
+            Self::Answerer(s) => s.write_all(data).await,
+        }
+    }
+
+    async fn read(&self, buf: &mut [u8]) -> Result<usize, QuicError> {
+        match self {
+            Self::Caller(s) => s.read(buf).await,
+            Self::Answerer(s) => s.read(buf).await,
+        }
+    }
+
+    async fn finish(&self) -> Result<(), QuicError> {
+        match self {
+            Self::Caller(s) => s.finish().await,
+            Self::Answerer(s) => s.finish().await,
+        }
+    }
+
+    async fn shutdown(&self) -> Result<(), QuicError> {
+        match self {
+            Self::Caller(s) => s.shutdown().await,
+            Self::Answerer(s) => s.shutdown().await,
+        }
+    }
 }
 
 /// A QUIC stream for reading and writing data.
@@ -232,54 +309,36 @@ pub struct QuicStream {
 impl QuicStream {
     /// Get the stream ID.
     pub fn id(&self) -> u64 {
-        match &self.inner {
-            QuicStreamInner::Caller(s) => s.id(),
-            QuicStreamInner::Answerer(s) => s.id(),
-        }
+        self.inner.id()
     }
 
     /// Write data to the stream.
     ///
     /// Returns the number of bytes written.
     pub async fn write(&self, data: &[u8]) -> Result<usize, P2pError> {
-        match &self.inner {
-            QuicStreamInner::Caller(s) => Ok(s.write(data).await?),
-            QuicStreamInner::Answerer(s) => Ok(s.write(data).await?),
-        }
+        Ok(self.inner.write(data).await?)
     }
 
     /// Write all data to the stream.
     pub async fn write_all(&self, data: &[u8]) -> Result<(), P2pError> {
-        match &self.inner {
-            QuicStreamInner::Caller(s) => Ok(s.write_all(data).await?),
-            QuicStreamInner::Answerer(s) => Ok(s.write_all(data).await?),
-        }
+        Ok(self.inner.write_all(data).await?)
     }
 
     /// Read data from the stream.
     ///
     /// Returns the number of bytes read. Returns 0 if the stream is finished.
     pub async fn read(&self, buf: &mut [u8]) -> Result<usize, P2pError> {
-        match &self.inner {
-            QuicStreamInner::Caller(s) => Ok(s.read(buf).await?),
-            QuicStreamInner::Answerer(s) => Ok(s.read(buf).await?),
-        }
+        Ok(self.inner.read(buf).await?)
     }
 
     /// Close the stream for writing (send FIN).
     pub async fn finish(&self) -> Result<(), P2pError> {
-        match &self.inner {
-            QuicStreamInner::Caller(s) => Ok(s.finish().await?),
-            QuicStreamInner::Answerer(s) => Ok(s.finish().await?),
-        }
+        Ok(self.inner.finish().await?)
     }
 
     /// Shutdown the stream (stop sending and receiving).
     pub async fn shutdown(&self) -> Result<(), P2pError> {
-        match &self.inner {
-            QuicStreamInner::Caller(s) => Ok(s.shutdown().await?),
-            QuicStreamInner::Answerer(s) => Ok(s.shutdown().await?),
-        }
+        Ok(self.inner.shutdown().await?)
     }
 }
 
@@ -351,56 +410,28 @@ impl QuicConnection {
     ///
     /// Returns a stream that can be used for reading and writing data.
     pub async fn open_stream(&self) -> Result<QuicStream, P2pError> {
-        match &self.inner {
-            QuicConnectionInner::Caller(quic) => {
-                let stream = quic.open_stream().await?;
-                Ok(QuicStream {
-                    inner: QuicStreamInner::Caller(stream),
-                })
-            }
-            QuicConnectionInner::Answerer(quic) => {
-                let stream = quic.open_stream().await?;
-                Ok(QuicStream {
-                    inner: QuicStreamInner::Answerer(stream),
-                })
-            }
-        }
+        Ok(QuicStream {
+            inner: self.inner.open_stream().await?,
+        })
     }
 
     /// Accept an incoming stream from the peer.
     ///
     /// Waits for the peer to open a new stream and returns it.
     pub async fn accept_stream(&self) -> Result<QuicStream, P2pError> {
-        match &self.inner {
-            QuicConnectionInner::Caller(quic) => {
-                let stream = quic.accept_stream().await?;
-                Ok(QuicStream {
-                    inner: QuicStreamInner::Caller(stream),
-                })
-            }
-            QuicConnectionInner::Answerer(quic) => {
-                let stream = quic.accept_stream().await?;
-                Ok(QuicStream {
-                    inner: QuicStreamInner::Answerer(stream),
-                })
-            }
-        }
+        Ok(QuicStream {
+            inner: self.inner.accept_stream().await?,
+        })
     }
 
     /// Check if the QUIC connection is established.
     pub async fn is_established(&self) -> bool {
-        match &self.inner {
-            QuicConnectionInner::Caller(quic) => quic.is_established().await,
-            QuicConnectionInner::Answerer(quic) => quic.is_established().await,
-        }
+        self.inner.is_established().await
     }
 
     /// Close the connection.
     pub async fn close(self) -> Result<(), P2pError> {
-        match self.inner {
-            QuicConnectionInner::Caller(quic) => quic.close().await?,
-            QuicConnectionInner::Answerer(quic) => quic.close().await?,
-        }
+        self.inner.close().await?;
         Ok(())
     }
 }

@@ -389,13 +389,17 @@ fn node_state_to_ffi(state: NodeState) -> WispersNodeState {
     }
 }
 
-/// Helper to send node pointer across threads.
+/// Helper to move a node pointer into a spawned async task.
 ///
-/// Safety: The caller must ensure the handle remains valid and
-/// is not accessed concurrently from other threads.
+/// Only `Send` is implemented — never `Sync`. Implementing `Sync` would allow
+/// the same pointer to be accessed from multiple threads simultaneously, which
+/// combined with `get_mut` would produce aliased `&mut T` references (UB).
+/// Each `SendableNodePtr` is always moved into exactly one `async move` closure.
+///
+/// Safety: The caller must ensure the handle remains valid for the lifetime of
+/// the spawned task and is not accessed concurrently from other threads.
 struct SendableNodePtr(*mut WispersNodeHandle);
 unsafe impl Send for SendableNodePtr {}
-unsafe impl Sync for SendableNodePtr {}
 
 impl SendableNodePtr {
     /// Get an immutable reference to the inner handle.
