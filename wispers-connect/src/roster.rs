@@ -369,6 +369,44 @@ fn verify_activation(
     Ok(())
 }
 
+/// Check whether a node was active (present and not revoked) before a revocation.
+///
+/// During backward verification, `node_revoked` reflects the state *after* the
+/// revocation was applied. The only change the revocation makes is marking
+/// `revoked_node` as revoked, so for any other node the current state equals the
+/// previous state. For the revoked node itself we undo that change.
+/// Check whether a node was active (in the roster and not revoked) before a
+/// revocation was applied.
+///
+/// `roster` is the working roster at this version (later activations already
+/// stripped by the backward walk). `node_revoked` reflects the state *after*
+/// the revocation, so for the revoked node itself we undo the flip.
+fn node_was_active_before_revocation(
+    roster: &Roster,
+    node_revoked: &HashMap<i32, bool>,
+    node: i32,
+    revoked_node: i32,
+) -> bool {
+    // Must be in the roster at this version.
+    let in_roster = roster.nodes.iter().any(|n| n.node_number == node);
+    if !in_roster {
+        return false;
+    }
+
+    match node_revoked.get(&node) {
+        None => false,
+        Some(&revoked) => {
+            if node == revoked_node {
+                // This revocation flipped the node from active to revoked.
+                // Undo: if it's revoked now, it was active before.
+                revoked
+            } else {
+                !revoked
+            }
+        }
+    }
+}
+
 /// Verify a revocation addendum.
 fn verify_revocation(
     roster: &Roster,
@@ -401,18 +439,14 @@ fn verify_revocation(
         },
     )?;
 
-    // Verify revoker was active (not revoked) at the time of this revocation.
-    // Since we're going backwards, we need to check their status at this point.
-    let revoker_revoked = node_revoked.get(&payload.revoker_node_number);
-    if revoker_revoked.is_none() || *revoker_revoked.unwrap() {
+    // Verify both the revoker and the revoked node were active before this revocation.
+    if !node_was_active_before_revocation(roster, node_revoked, payload.revoker_node_number, payload.revoked_node_number) {
         return Err(RosterVerificationError::RevokerNotInPreviousRoster {
             version: expected_version,
             revoker: payload.revoker_node_number,
         });
     }
-
-    // Verify the revoked node exists in the roster
-    if !node_revoked.contains_key(&payload.revoked_node_number) {
+    if !node_was_active_before_revocation(roster, node_revoked, payload.revoked_node_number, payload.revoked_node_number) {
         return Err(RosterVerificationError::RevokedNodeNotInRoster {
             version: expected_version,
             revoked: payload.revoked_node_number,
@@ -1531,6 +1565,48 @@ mod tests {
         );
 
         // Revoked node 2 should fail
+        let result = verify_roster(&roster, 2, &spki(&key_b));
+        assert!(matches!(
+            result,
+            Err(RosterVerificationError::VerifierRevoked(2))
+        ));
+    }
+
+    #[test]
+    fn test_self_revocation_verifies() {
+        let key_a = generate_key();
+        let key_b = generate_key();
+
+        // Start with a 2-node roster
+        let base_roster = build_bootstrap_roster(&key_a, 1, &key_b, 2);
+
+        // Node 2 revokes itself (logout)
+        let base_hash = super::compute_roster_hash(&base_roster);
+        let revocation_payload = roster::revocation::Payload {
+            base_version: base_roster.version,
+            base_version_hash: base_hash,
+            new_version: base_roster.version + 1,
+            revoked_node_number: 2,
+            revoker_node_number: 2,
+        };
+        let payload_bytes = revocation_payload.encode_to_vec();
+
+        let roster = super::create_revocation_roster(
+            &base_roster,
+            2, // revoked
+            2, // revoker (same — self-revocation)
+            sign(&key_b, &payload_bytes),
+        );
+
+        // Should verify from the remaining active node
+        let result = verify_roster(&roster, 1, &spki(&key_a));
+        assert!(
+            result.is_ok(),
+            "Self-revocation roster should verify from node 1: {:?}",
+            result
+        );
+
+        // Self-revoked node should fail (it's revoked)
         let result = verify_roster(&roster, 2, &spki(&key_b));
         assert!(matches!(
             result,
