@@ -10,8 +10,8 @@ There are two main approaches:
   serving, and peer-to-peer connections, and it lets you define the protocol on
   top of those peer-to-peer connections. This is the right choice if you're
   building your own software. The library is written in Rust and exposes a C
-  FFI. Wrappers exist for Kotlin/Android and Go; more are planned (Swift,
-  Python). See [Building](../README.md#building) for setup instructions.
+  FFI. Wrappers exist for Go, Kotlin/Android, Swift, and Python. See
+  [Building](../README.md#building) for setup instructions.
 
 * **Use wconnect as a sidecar** — The `wconnect` tool already implements some of
   the most popular and generic use cases of Wispers Connect — port forwarding

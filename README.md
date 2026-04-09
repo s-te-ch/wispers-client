@@ -218,7 +218,32 @@ cd wrappers/go && make build
 cargo ndk -t arm64-v8a build
 ```
 
+**Swift** (`wrappers/swift/`) — Swift Package wrapping an XCFramework. Build the XCFramework from the Rust library first, then add the package as a dependency:
+
+```bash
+cd wrappers/swift && scripts/build-xcframework.sh
+```
+
+**Python** (`wrappers/python/`) — uses ctypes. Requires Python 3.11+. Build the Rust library first, then:
+
+```bash
+pip install -e wrappers/python          # editable install
+# or just set PYTHONPATH=wrappers/python and ensure the shared library is on
+# DYLD_LIBRARY_PATH (macOS) / LD_LIBRARY_PATH (Linux)
+```
+
 See **[How to use it](docs/HOW_TO_USE.md)** for wrapper-specific integration details.
+
+### Examples
+
+The `examples/` directory has small, runnable programs for several languages:
+
+| Directory | Description |
+|-----------|-------------|
+| `examples/c/` | C FFI demo using the shared library directly |
+| `examples/go/` | Go CLI using the Go wrapper (`make` to build) |
+| `examples/kotlin/` | Android app using the Kotlin wrapper |
+| `examples/python/` | Python CLI using the Python wrapper (`./run.sh` to run) |
 
 ## License
 

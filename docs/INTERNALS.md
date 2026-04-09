@@ -14,7 +14,8 @@ wispers-client/
 ├── wrappers/
 │   ├── kotlin/             # Kotlin/Android JNA wrapper
 │   ├── go/                 # Go CGo wrapper
-│   └── swift/              # Swift/iOS wrapper (async/await over C FFI)
+│   ├── swift/              # Swift/iOS wrapper (async/await over C FFI)
+│   └── python/             # Python ctypes wrapper
 ├── wconnect/               # CLI tool
 ├── wcadm/                  # Admin CLI
 ├── third_party/
@@ -76,13 +77,13 @@ flowchart TD
 
 Wrapper equivalents:
 
-| Rust | Go | Kotlin | Swift |
-|------|----|--------|-------|
-| `Node` | `wispersgo.Node` | `dev.wispers.connect.Node` | `WispersConnect.Node` |
-| `ServingHandle` | `wispersgo.ServingHandle` | `dev.wispers.connect.ServingSession` | `WispersConnect.ServingSession` |
-| `UdpConnection` | `wispersgo.UdpConnection` | `dev.wispers.connect.UdpConnection` | `WispersConnect.UdpConnection` |
-| `QuicConnection` | `wispersgo.QuicConnection` | `dev.wispers.connect.QuicConnection` | `WispersConnect.QuicConnection` |
-| `NodeInfo` | `wispersgo.NodeInfo` | `dev.wispers.connect.NodeInfo` | `WispersConnect.NodeInfo` |
+| Rust | Go | Kotlin | Swift | Python |
+|------|----|--------|-------|--------|
+| `Node` | `wispersgo.Node` | `dev.wispers.connect.Node` | `WispersConnect.Node` | `wispers_connect.Node` |
+| `ServingHandle` | `wispersgo.ServingHandle` | `dev.wispers.connect.ServingSession` | `WispersConnect.ServingSession` | `wispers_connect.ServingSession` |
+| `UdpConnection` | `wispersgo.UdpConnection` | `dev.wispers.connect.UdpConnection` | `WispersConnect.UdpConnection` | `wispers_connect.UdpConnection` |
+| `QuicConnection` | `wispersgo.QuicConnection` | `dev.wispers.connect.QuicConnection` | `WispersConnect.QuicConnection` | `wispers_connect.QuicConnection` |
+| `NodeInfo` | `wispersgo.NodeInfo` | `dev.wispers.connect.NodeInfo` | `WispersConnect.NodeInfo` | `wispers_connect.NodeInfo` |
 
 ## FFI boundary
 
