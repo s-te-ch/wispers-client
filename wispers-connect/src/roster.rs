@@ -249,11 +249,11 @@ fn apply_and_verify_activation(
 ) -> Result<(), RosterVerificationError> {
     let payload =
         activation
-        .payload
-        .as_ref()
-        .ok_or(RosterVerificationError::MissingActivationPayload(
-            expected_version,
-        ))?;
+            .payload
+            .as_ref()
+            .ok_or(RosterVerificationError::MissingActivationPayload(
+                expected_version,
+            ))?;
 
     // Version number sanity.
     if payload.version != expected_version {
@@ -319,12 +319,12 @@ fn apply_and_verify_activation(
             }
         })?
     } else {
-        *keys
-            .get(&payload.endorser_node_number)
-            .ok_or(RosterVerificationError::EndorserNotInPreviousRoster {
+        *keys.get(&payload.endorser_node_number).ok_or(
+            RosterVerificationError::EndorserNotInPreviousRoster {
                 version: expected_version,
                 endorser: payload.endorser_node_number,
-            })?
+            },
+        )?
     };
 
     // Apply the addendum to `working_roster`. For the bootstrap, the endorser
@@ -635,10 +635,7 @@ pub fn build_revocation_payload(
 /// `roster.nodes`, and pushes a revocation addendum with an empty
 /// `revoker_signature` (for the caller to fill in via `set_revoker_signature`
 /// after computing the signing hash).
-pub fn add_revocation_to_roster(
-    roster: &mut Roster,
-    payload: roster::revocation::Payload,
-) {
+pub fn add_revocation_to_roster(roster: &mut Roster, payload: roster::revocation::Payload) {
     debug_assert_eq!(
         payload.version,
         roster.version + 1,
@@ -666,10 +663,7 @@ pub fn add_revocation_to_roster(
 /// Set the new node's signature on the latest addendum (which must be an
 /// activation). Panics if the latest addendum is missing or of the wrong kind.
 pub fn set_new_node_signature(roster: &mut Roster, signature: Vec<u8>) {
-    let last = roster
-        .addenda
-        .last_mut()
-        .expect("roster has no addenda");
+    let last = roster.addenda.last_mut().expect("roster has no addenda");
     match last.kind.as_mut().expect("addendum has no kind") {
         addendum::Kind::Activation(act) => act.new_node_signature = signature,
         addendum::Kind::Revocation(_) => {
@@ -681,10 +675,7 @@ pub fn set_new_node_signature(roster: &mut Roster, signature: Vec<u8>) {
 /// Set the endorser's signature on the latest addendum (which must be an
 /// activation). Panics if the latest addendum is missing or of the wrong kind.
 pub fn set_endorser_signature(roster: &mut Roster, signature: Vec<u8>) {
-    let last = roster
-        .addenda
-        .last_mut()
-        .expect("roster has no addenda");
+    let last = roster.addenda.last_mut().expect("roster has no addenda");
     match last.kind.as_mut().expect("addendum has no kind") {
         addendum::Kind::Activation(act) => act.endorser_signature = signature,
         addendum::Kind::Revocation(_) => {
@@ -696,10 +687,7 @@ pub fn set_endorser_signature(roster: &mut Roster, signature: Vec<u8>) {
 /// Set the revoker's signature on the latest addendum (which must be a
 /// revocation). Panics if the latest addendum is missing or of the wrong kind.
 pub fn set_revoker_signature(roster: &mut Roster, signature: Vec<u8>) {
-    let last = roster
-        .addenda
-        .last_mut()
-        .expect("roster has no addenda");
+    let last = roster.addenda.last_mut().expect("roster has no addenda");
     match last.kind.as_mut().expect("addendum has no kind") {
         addendum::Kind::Revocation(rev) => rev.revoker_signature = signature,
         addendum::Kind::Activation(_) => {
@@ -1362,8 +1350,7 @@ mod tests {
             b"new_node_nonce".to_vec(),
             b"endorser_nonce".to_vec(),
         );
-        let mut roster =
-            super::create_bootstrap_roster(payload, &spki(&key_b), &spki(&key_a));
+        let mut roster = super::create_bootstrap_roster(payload, &spki(&key_b), &spki(&key_a));
 
         let signing_hash = super::compute_signing_hash(&roster);
         super::set_new_node_signature(&mut roster, sign(&key_b, &signing_hash));
@@ -1502,13 +1489,8 @@ mod tests {
         super::set_endorser_signature(&mut roster, sign(&key_a, &hash_v1));
 
         // Step 2: v2 activation — add node 3 (key_c), endorsed by node 1.
-        let payload_v2 = super::build_activation_payload(
-            &roster,
-            3,
-            1,
-            vec![0x33; 16],
-            vec![0x44; 16],
-        );
+        let payload_v2 =
+            super::build_activation_payload(&roster, 3, 1, vec![0x33; 16], vec![0x44; 16]);
         super::add_activation_to_roster(&mut roster, payload_v2, &spki_c);
         let hash_v2 = super::compute_signing_hash(&roster);
         assert_eq!(
@@ -1534,7 +1516,10 @@ mod tests {
     /// Decode a hex string to a `Vec<u8>`. Used by the golden hash test
     /// so the hardcoded values stay readable.
     fn hex_decode(s: &str) -> Vec<u8> {
-        assert!(s.len() % 2 == 0, "hex string must have even length");
+        assert!(
+            s.len().is_multiple_of(2),
+            "hex string must have even length"
+        );
         (0..s.len())
             .step_by(2)
             .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex"))
@@ -1667,14 +1652,8 @@ mod tests {
 
         // Hub doesn't have new_node_key's private key, so it can't produce
         // a valid signature. The best it can do is sign with its own key.
-        super::set_new_node_signature(
-            &mut fake_roster,
-            sign(&fake_endorser_key, &signing_hash),
-        );
-        super::set_endorser_signature(
-            &mut fake_roster,
-            sign(&fake_endorser_key, &signing_hash),
-        );
+        super::set_new_node_signature(&mut fake_roster, sign(&fake_endorser_key, &signing_hash));
+        super::set_endorser_signature(&mut fake_roster, sign(&fake_endorser_key, &signing_hash));
 
         // Verification: own-entry check passes (real new node key matches),
         // endorser signature verifies (fake key signed hash), but the

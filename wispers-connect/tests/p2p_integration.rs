@@ -30,11 +30,8 @@ fn create_test_roster(
         b"node2_nonce".to_vec(),
         b"node1_nonce".to_vec(),
     );
-    let mut roster = create_bootstrap_roster(
-        payload,
-        &key2.public_key_spki(),
-        &key1.public_key_spki(),
-    );
+    let mut roster =
+        create_bootstrap_roster(payload, &key2.public_key_spki(), &key1.public_key_spki());
     let signing_hash = compute_signing_hash(&roster);
     set_new_node_signature(&mut roster, key2.sign(&signing_hash));
     set_endorser_signature(&mut roster, key1.sign(&signing_hash));
