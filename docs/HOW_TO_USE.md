@@ -230,3 +230,72 @@ up to Wispers using `wconnect`:
 * `wconnect proxy-socks` works similar to the HTTP variant but starts a SOCKS5
   proxy instead. This allows you to connect more things than just web browsers
   and web servers.
+
+## Example use cases
+
+There are many things you can do with Wispers Connect. Here are a few examples
+to get the inspiration going.
+
+### Wispers Files, a peer-to-peer network of your personal devices
+
+[Wispers Files](https://files.wispers.dev) (currently in open beta) is a great
+example of the multi-platform capabilities of Wispers Connect. It lets you
+connect your personal devices into a little cloud of your own (a wisp of a cloud
+if you will).
+
+<center>
+  <img src="images/wispers-files-topo.svg"
+	   width="320"
+	   alt="An example peer-to-peer topology in Wispers Files"/>
+</center>
+
+Files is focused on sending files directly between devices (the author wanted an
+efficient way to transfer RAW files) but the design could be used for any kind
+of data — remote desktop sessions, a universal clipboard, passwords and API
+keys, etc.
+
+### Securely share your vibe-coded app with coworkers
+
+Vibe coding made it dramatically easier to create a custom-tailored app for your
+internal business process. But when it's time to share it with coworkers, the
+default is to put it on the public internet. At the same time, the single
+biggest thing you can do to secure your app is *not* to put it on the public
+internet.
+
+Wispers resolves the contradiction. Just run the app on a computer you control,
+connect it to Wispers using the `wconnect` sidecar, then add your coworker's
+devices into a connectivity group for that app. Now they can access your app
+even if their devices aren't on your intranet, like their smartphones, but
+nobody else can!
+
+<center>
+  <img src="images/remote-app-access-diagram.svg"
+	   width="480"
+	   alt="Illustration of using wconnect to make internal web apps accessible to coworkers"/>
+</center>
+
+The software that ships with Wispers Connect can already do this today, although not very ergonomically. `wconnect` can be used for port forwarding and HTTP proxying, and the Android example app implements the WebView approach. Also, almost all vibe-coding platforms allow you run your app locally.
+
+### Monitoring devices across several intranets and VPNs
+
+If you're responsible for software running on devices inside networks you don't
+control, monitoring can be a headache. Almost the only sane solution is to have
+all devices connect to a cloud service and wait proactively send monitoring
+data, but that goes against the grain of monitoring solutions like Prometheus
+and it's a headache for data sovereignty.
+
+If you connect your devices with Wispers, the standard approach of scraping
+monitoring variables becomes easy. Just open a QUIC connection to the node and
+send the monitoring requests through that. Your data stays fully under your
+control.
+
+<center>
+  <img src="images/monitoring-topo.svg"
+	   width="320"
+	   alt="Topology of a Wispers-based monitoring system"/>
+</center>
+
+Depending on your case, you can implement this in different ways. If your
+software runs on a server, it may be easiest to run a `wconnect` sidecar to
+port-forward the requests. If it's an embedded app, making your software
+reachable by using the wispers-connect library is probably a better choice.

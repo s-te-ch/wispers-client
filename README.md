@@ -167,7 +167,7 @@ peer-to-peer connection!
 - **[How it works](docs/HOW_IT_WORKS.md)** — Transport, security model,
   and protocol design
 - **[How to use it](docs/HOW_TO_USE.md)** — Integration guide with
-  examples for each wrapper
+  example use cases.
 - **[Internals](docs/INTERNALS.md)** — Code map, module responsibilities,
   and key types
 - **[Frequently Asked Questions](docs/FAQ.md)** — Comparisons to other
