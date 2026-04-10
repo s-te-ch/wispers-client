@@ -231,7 +231,7 @@ up to Wispers using `wconnect`:
   proxy instead. This allows you to connect more things than just web browsers
   and web servers.
 
-## Use cases
+## Example use cases
 
 There are many things you can do with Wispers Connect. Here are a few examples
 to get the inspiration going.
