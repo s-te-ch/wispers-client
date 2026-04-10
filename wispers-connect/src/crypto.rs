@@ -15,6 +15,15 @@ type HmacSha256 = Hmac<Sha256>;
 /// Length of a pairing secret in bytes.
 const PAIRING_SECRET_LEN: usize = 7;
 
+/// Length of the base36-encoded pairing secret in characters.
+///
+/// This used to be 10, which silently clipped ~4 bits of entropy: a
+/// 7-byte (56-bit) secret encodes to up to 11 base36 digits, and the
+/// old encoder kept only the last 10, reducing the effective keyspace
+/// from 2^56 to 36^10 ≈ 2^51.7. 11 base36 digits (36^11 ≈ 2^56.9) is
+/// the smallest length that fits 7 bytes without loss.
+const PAIRING_SECRET_BASE36_LEN: usize = 11;
+
 /// Length of a nonce in bytes.
 const NONCE_LEN: usize = 16;
 
@@ -115,9 +124,6 @@ impl PairingSecret {
     pub fn generate() -> Self {
         let mut bytes = [0u8; PAIRING_SECRET_LEN];
         rand::thread_rng().fill_bytes(&mut bytes);
-        // Round-trip through base36 to ensure consistent encoding
-        let base36 = encode_base36(&bytes);
-        let bytes = decode_base36(&base36).expect("just encoded");
         Self { bytes }
     }
 
@@ -127,7 +133,7 @@ impl PairingSecret {
         Ok(Self { bytes })
     }
 
-    /// Get the base36 encoding (10 lowercase characters).
+    /// Get the base36 encoding (`PAIRING_SECRET_BASE36_LEN` lowercase characters).
     pub fn to_base36(&self) -> String {
         encode_base36(&self.bytes)
     }
@@ -167,33 +173,45 @@ impl PairingSecret {
 /// Error parsing a pairing secret.
 #[derive(Debug, thiserror::Error)]
 pub enum PairingSecretError {
-    #[error("invalid length: expected 10 characters")]
+    #[error("invalid length: expected {PAIRING_SECRET_BASE36_LEN} characters")]
     InvalidLength,
     #[error("invalid base36 character")]
     InvalidCharacter,
+    #[error("pairing secret value out of range")]
+    OutOfRange,
 }
 
-/// Encode bytes as 10 lowercase base36 characters.
+/// Encode bytes as `PAIRING_SECRET_BASE36_LEN` lowercase base36 characters.
+///
+/// A 7-byte value is at most `2^56 - 1 ≈ 7.2 × 10^16`, and `36^11 ≈ 1.3 × 10^17`,
+/// so 11 digits always suffice — no truncation is possible.
 fn encode_base36(bytes: &[u8]) -> String {
     let s = BigUint::from_bytes_be(bytes).to_str_radix(36);
-    // Left-pad to 10; if somehow longer, keep the least-significant 10 digits.
-    match s.len().cmp(&10) {
-        std::cmp::Ordering::Less => format!("{:0>10}", s),
-        std::cmp::Ordering::Equal => s,
-        std::cmp::Ordering::Greater => s[s.len() - 10..].to_string(),
-    }
+    debug_assert!(
+        s.len() <= PAIRING_SECRET_BASE36_LEN,
+        "7 bytes must fit in {PAIRING_SECRET_BASE36_LEN} base36 digits"
+    );
+    format!("{:0>width$}", s, width = PAIRING_SECRET_BASE36_LEN)
 }
 
-/// Decode 10 base36 characters to bytes.
+/// Decode `PAIRING_SECRET_BASE36_LEN` base36 characters to bytes.
 fn decode_base36(s: &str) -> Result<[u8; PAIRING_SECRET_LEN], PairingSecretError> {
-    if s.len() != 10 {
+    if s.len() != PAIRING_SECRET_BASE36_LEN {
         return Err(PairingSecretError::InvalidLength);
     }
     let n = BigUint::parse_bytes(s.as_bytes(), 36).ok_or(PairingSecretError::InvalidCharacter)?;
     let raw = n.to_bytes_be();
+    // Reject values that exceed what `PAIRING_SECRET_LEN` bytes can hold.
+    // `PAIRING_SECRET_BASE36_LEN` base36 digits can represent values up to
+    // `36^11 − 1 ≈ 1.3 × 10^17`, but a 7-byte secret only fits values up
+    // to `2^56 − 1 ≈ 7.2 × 10^16`. The gap is ~45% of the encodable space,
+    // so a user mistyping a code has a reasonable chance of landing in it.
+    if raw.len() > PAIRING_SECRET_LEN {
+        return Err(PairingSecretError::OutOfRange);
+    }
     // Left-pad to PAIRING_SECRET_LEN bytes (raw may be shorter for small values).
     let mut result = [0u8; PAIRING_SECRET_LEN];
-    let offset = PAIRING_SECRET_LEN.saturating_sub(raw.len());
+    let offset = PAIRING_SECRET_LEN - raw.len();
     result[offset..].copy_from_slice(&raw);
     Ok(result)
 }
@@ -278,9 +296,66 @@ mod tests {
     fn test_base36_roundtrip() {
         let secret = PairingSecret::generate();
         let encoded = secret.to_base36();
-        assert_eq!(encoded.len(), 10);
+        assert_eq!(encoded.len(), PAIRING_SECRET_BASE36_LEN);
         let decoded = PairingSecret::from_base36(&encoded).unwrap();
         assert_eq!(secret.bytes, decoded.bytes);
+    }
+
+    /// Maximum-value secret (all 0xff) must round-trip — exercises the
+    /// edge of the encodable range where 7 bytes = 2^56 - 1.
+    #[test]
+    fn test_base36_roundtrip_max_value() {
+        let secret = PairingSecret {
+            bytes: [0xff; PAIRING_SECRET_LEN],
+        };
+        let encoded = secret.to_base36();
+        assert_eq!(encoded.len(), PAIRING_SECRET_BASE36_LEN);
+        let decoded = PairingSecret::from_base36(&encoded).unwrap();
+        assert_eq!(secret.bytes, decoded.bytes);
+    }
+
+    /// All-zero secret must round-trip (tests the left-padding path).
+    #[test]
+    fn test_base36_roundtrip_zero_value() {
+        let secret = PairingSecret {
+            bytes: [0u8; PAIRING_SECRET_LEN],
+        };
+        let encoded = secret.to_base36();
+        assert_eq!(encoded, "0".repeat(PAIRING_SECRET_BASE36_LEN));
+        let decoded = PairingSecret::from_base36(&encoded).unwrap();
+        assert_eq!(secret.bytes, decoded.bytes);
+    }
+
+    /// 11 valid base36 characters whose numeric value exceeds 2^56 must
+    /// be rejected. This is the ~45% of 11-char base36 strings that
+    /// represent values outside the 7-byte range.
+    #[test]
+    fn test_base36_rejects_out_of_range() {
+        // "zzzzzzzzzzz" = 36^11 - 1, well above 2^56.
+        let result = PairingSecret::from_base36("zzzzzzzzzzz");
+        assert!(matches!(result, Err(PairingSecretError::OutOfRange)));
+    }
+
+    /// Wrong length is rejected with the specific error variant.
+    #[test]
+    fn test_base36_rejects_wrong_length() {
+        // 10 chars (the old length) must now be rejected.
+        let result = PairingSecret::from_base36("0123456789");
+        assert!(matches!(result, Err(PairingSecretError::InvalidLength)));
+        // 12 chars too.
+        let result = PairingSecret::from_base36("0123456789ab");
+        assert!(matches!(result, Err(PairingSecretError::InvalidLength)));
+    }
+
+    /// Non-base36 characters are rejected with the specific error variant.
+    #[test]
+    fn test_base36_rejects_invalid_characters() {
+        // '!' is not a base36 digit.
+        let result = PairingSecret::from_base36("abc!def12345");
+        assert!(matches!(
+            result,
+            Err(PairingSecretError::InvalidLength | PairingSecretError::InvalidCharacter)
+        ));
     }
 
     #[test]

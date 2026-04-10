@@ -66,7 +66,7 @@ flowchart TD
 | `ServingSession` | `serving.rs` | Runner that owns the hub gRPC stream |
 | `IncomingConnections` | `serving.rs` | Stream of incoming P2P connection requests |
 | `SigningKeyPair` | `crypto.rs` | Ed25519 signing key pair |
-| `PairingSecret` | `crypto.rs` | Raw 10-byte secret for pairing HMAC |
+| `PairingSecret` | `crypto.rs` | Raw 7-byte secret for pairing HMAC |
 | `PairingCode` | `crypto.rs` | User-facing `{node}-{secret}` string |
 | `NodeInfo` | `types.rs` | Per-node metadata in a group |
 | `GroupInfo` | `types.rs` | Full group state with node list |
