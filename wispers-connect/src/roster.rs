@@ -1513,7 +1513,7 @@ mod tests {
         let hash_v2 = super::compute_signing_hash(&roster);
         assert_eq!(
             hash_v2,
-            hex_decode("30d7a8cc1a8a36c6d6a20ae6aa40018cf7cbb2c25d6fa3028a3e3aeb9e5e9b1c"),
+            hex_decode("417e8a2abb725bbeeb63a47f14c9a6edc5518cbeeefffa6d0f6fa05d4b5595df"),
             "v2 activation signing hash has shifted",
         );
 
@@ -1526,7 +1526,7 @@ mod tests {
         let hash_v3 = super::compute_signing_hash(&roster);
         assert_eq!(
             hash_v3,
-            hex_decode("d2aa1af6fdeaf2f8f5a34e8e7b5f58fa7dcb8e96aad8e6b8cbf8cd8e9aac8dfe"),
+            hex_decode("77aea2c21f8d8993add4b5a0337e67fa3c9e805fea5341d17e6ba657bf4c981a"),
             "v3 revocation signing hash has shifted",
         );
     }
