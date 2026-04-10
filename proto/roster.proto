@@ -35,16 +35,22 @@ message Addendum {
 
 // Records the activation of a new node.
 // Requires two signatures: the new node and an existing endorser.
+//
+// Both signatures are over a SHA-256 hash of the post-addendum roster (the
+// roster as it looks *after* this addendum is applied, with the in-flight
+// addendum's signatures excluded from the encoded bytes that get hashed).
+// The hash is never transmitted: signers compute it before signing,
+// verifiers recompute it from the reconstructed working roster.
 message Activation {
   message Payload {
-    int64 base_version = 1;
-    bytes base_version_hash = 2;
-    int64 new_version = 3;
-    int32 new_node_number = 4;
-    int32 endorser_node_number = 5;
+    // Roster version this addendum produces.
+    int64 version = 1;
+    // The nodes involved in the activation.
+    int32 new_node_number = 2;
+    int32 endorser_node_number = 3;
     // Nonces binding the PairNodes ceremony to this roster update.
-    bytes new_node_nonce = 6;
-    bytes endorser_nonce = 7;
+    bytes new_node_nonce = 4;
+    bytes endorser_nonce = 5;
   }
   Payload payload = 1;
   bytes new_node_signature = 2;
@@ -53,13 +59,16 @@ message Activation {
 
 // Records the revocation of a node from the roster.
 // Any single activated node can revoke any other node.
+//
+// The revoker's signature has the same shape as in Activation: it's over a
+// SHA-256 of the post-revocation roster with this addendum's signature
+// stripped. See Activation for details.
 message Revocation {
   message Payload {
-    int64 base_version = 1;
-    bytes base_version_hash = 2;
-    int64 new_version = 3;
-    int32 revoked_node_number = 4;
-    int32 revoker_node_number = 5;
+    // Roster version this addendum produces.
+    int64 version = 1;
+    int32 revoked_node_number = 2;
+    int32 revoker_node_number = 3;
   }
   Payload payload = 1;
   bytes revoker_signature = 2;

@@ -4,58 +4,41 @@
 
 mod common;
 
-use prost::Message;
 use wispers_connect::Node;
 use wispers_connect::crypto::SigningKeyPair;
-use wispers_connect::hub::proto::roster::{self, Roster, addendum};
+use wispers_connect::hub::proto::roster::Roster;
+use wispers_connect::roster::{
+    build_activation_payload, compute_signing_hash, create_bootstrap_roster,
+    set_endorser_signature, set_new_node_signature,
+};
 use wispers_connect::types::{AuthToken, ConnectivityGroupId, NodeRegistration};
 
 use common::FakeHub;
 
 /// Create a properly signed test roster with two nodes.
-///
-/// This mirrors the test helper in roster.rs but uses SigningKeyPair.
 fn create_test_roster(
     key1: &SigningKeyPair,
     node1_number: i32,
     key2: &SigningKeyPair,
     node2_number: i32,
 ) -> Roster {
-    // Version 1 roster has 2 nodes and 1 addendum (the bootstrap activation)
-    // Node 2 is the "new node" being activated, endorsed by node 1
-    let payload = roster::activation::Payload {
-        base_version: 0,
-        base_version_hash: vec![],
-        new_version: 1,
-        new_node_number: node2_number,
-        endorser_node_number: node1_number,
-        new_node_nonce: b"node2_nonce".to_vec(),
-        endorser_nonce: b"node1_nonce".to_vec(),
-    };
-    let payload_bytes = payload.encode_to_vec();
-
-    Roster {
-        version: 1,
-        nodes: vec![
-            roster::Node {
-                node_number: node1_number,
-                public_key_spki: key1.public_key_spki(),
-                revoked: false,
-            },
-            roster::Node {
-                node_number: node2_number,
-                public_key_spki: key2.public_key_spki(),
-                revoked: false,
-            },
-        ],
-        addenda: vec![roster::Addendum {
-            kind: Some(addendum::Kind::Activation(roster::Activation {
-                payload: Some(payload),
-                new_node_signature: key2.sign(&payload_bytes),
-                endorser_signature: key1.sign(&payload_bytes),
-            })),
-        }],
-    }
+    // Node 2 is the "new node" being activated, endorsed by node 1.
+    let payload = build_activation_payload(
+        &Roster::default(),
+        node2_number,
+        node1_number,
+        b"node2_nonce".to_vec(),
+        b"node1_nonce".to_vec(),
+    );
+    let mut roster = create_bootstrap_roster(
+        payload,
+        &key2.public_key_spki(),
+        &key1.public_key_spki(),
+    );
+    let signing_hash = compute_signing_hash(&roster);
+    set_new_node_signature(&mut roster, key2.sign(&signing_hash));
+    set_endorser_signature(&mut roster, key1.sign(&signing_hash));
+    roster
 }
 
 /// Test that two nodes can connect via the fake hub and exchange messages.

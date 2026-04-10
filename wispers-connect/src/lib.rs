@@ -25,8 +25,9 @@ pub use p2p::{
     ConnectionState, P2pError, QuicConnection, QuicStream, StunTurnConfig, UdpConnection,
 };
 pub use roster::{
-    RosterVerificationError, active_nodes, build_activation_payload, compute_roster_hash,
-    create_activation_roster, create_bootstrap_roster, create_revocation_roster, verify_roster,
+    RosterVerificationError, active_nodes, add_activation_to_roster, add_revocation_to_roster,
+    build_activation_payload, build_revocation_payload, clear_latest_addendum_signatures,
+    compute_signing_hash, create_bootstrap_roster, verify_roster,
 };
 pub use serving::{
     EndorsingStatus, IncomingConnections, P2pConfig, ServingError, ServingHandle, ServingSession,

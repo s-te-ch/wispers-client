@@ -263,12 +263,7 @@ impl EndorsingState {
             .as_ref()
             .ok_or("activation missing payload")?;
 
-        // Verify base_version_hash
-        if !verify_base_version_hash(roster, activation_payload, new_node_number) {
-            return Err("base version hash mismatch".into());
-        }
-
-        // Verify nonces
+        // Verify nonces match the pair_nodes ceremony we previously ran.
         if activation_payload.new_node_nonce != expected_new_nonce {
             return Err("new node nonce mismatch".into());
         }
@@ -281,21 +276,40 @@ impl EndorsingState {
             return Err("wrong endorser node number".into());
         }
 
-        // Verify new node's public key in roster matches pairing
+        // Cross-check the new node's pubkey in the nodes list against what
+        // we exchanged via the HMAC-authenticated pair_nodes flow.
         let new_node_in_roster = roster
             .nodes
             .iter()
             .find(|n| n.node_number == new_node_number)
             .ok_or("new node not in roster")?;
         if new_node_in_roster.public_key_spki != expected_pubkey {
-            return Err("public key mismatch".into());
+            return Err("nodes list new_node key does not match paired key".into());
+        }
+
+        // Cross-check our own entry: the roster must commit us to our actual
+        // public key, not something the hub picked.
+        let our_public_key_spki = signing_key.public_key_spki();
+        let endorser_in_roster = roster
+            .nodes
+            .iter()
+            .find(|n| n.node_number == node_number)
+            .ok_or("endorser not in roster")?;
+        if endorser_in_roster.public_key_spki != our_public_key_spki {
+            return Err("nodes list endorser key does not match our own key".into());
         }
 
         log::debug!("  All verifications passed, signing activation");
 
-        // Sign the activation payload
-        let payload_bytes = activation_payload.encode_to_vec();
-        let signature = signing_key.sign(&payload_bytes);
+        // Compute the signing hash over the entire post-activation roster
+        // and sign it. The roster from the request has the new node's
+        // signature already filled in, so we clone and clear before
+        // hashing — `compute_signing_hash` requires empty signatures so
+        // that both cosigners arrive at the same hash bytes.
+        let mut roster_for_hash = roster.clone();
+        crate::roster::clear_latest_addendum_signatures(&mut roster_for_hash);
+        let signing_hash = crate::roster::compute_signing_hash(&roster_for_hash);
+        let signature = signing_key.sign(&signing_hash);
 
         // Clear this pending endorsement
         self.pending_endorsements.remove(&new_node_number);
@@ -304,51 +318,6 @@ impl EndorsingState {
             endorser_signature: signature,
         })
     }
-}
-
-/// Verify the base_version_hash in an activation payload.
-///
-/// Reconstructs the base roster from new_roster by removing the new node
-/// and the last addendum, then verifies the hash matches.
-fn verify_base_version_hash(
-    new_roster: &proto::roster::Roster,
-    activation_payload: &proto::roster::activation::Payload,
-    new_node_number: i32,
-) -> bool {
-    use sha2::{Digest, Sha256};
-
-    let mut base_roster = new_roster.clone();
-
-    if activation_payload.base_version == 0 {
-        // Bootstrap case: base roster version 0 is completely empty
-        base_roster.nodes.clear();
-    } else {
-        // Normal activation: only remove the new node
-        base_roster
-            .nodes
-            .retain(|n| n.node_number != new_node_number);
-    }
-
-    // Remove the last addendum (the activation we're being asked to sign)
-    base_roster.addenda.pop();
-    base_roster.version = activation_payload.base_version;
-
-    let mut hasher = Sha256::new();
-    hasher.update(base_roster.encode_to_vec());
-    let computed_hash = hasher.finalize().to_vec();
-
-    if computed_hash != activation_payload.base_version_hash {
-        log::warn!(
-            "  Base hash mismatch: computed {:?}, expected {:?}",
-            &computed_hash[..8],
-            &activation_payload.base_version_hash
-                [..activation_payload.base_version_hash.len().min(8)]
-        );
-        return false;
-    }
-
-    log::debug!("  Base version hash verified");
-    true
 }
 
 //-- ServingHandle + ServingSession ---------------------------------------------------------------------
