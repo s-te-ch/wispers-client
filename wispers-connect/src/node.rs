@@ -567,7 +567,8 @@ impl Node {
     /// Requires: Registered state.
     /// Transitions to: Activated state.
     ///
-    /// The activation code format is "node_number-secret" where secret is 10 base36 characters.
+    /// The activation code format is "node_number-secret" where secret is
+    /// `PAIRING_SECRET_BASE36_LEN` base36 characters.
     pub async fn activate(&mut self, activation_code: &str) -> Result<(), NodeStateError> {
         use crate::hub::HubClient;
 

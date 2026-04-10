@@ -79,7 +79,17 @@ pub struct EndorsingStatus {
 const MAX_ACTIVE_ACTIVATIONS: usize = 100;
 
 /// How long an activation code remains valid after generation.
-const SECRET_TTL: Duration = Duration::from_secs(120);
+///
+/// This is the security margin against offline brute-force of the
+/// pairing secret: the window an attacker has to crack the secret and
+/// inject a forged response before it expires. `crypto::PAIRING_SECRET_LEN`
+/// is calibrated against this window, so changing one without reviewing
+/// the other invalidates the entropy-vs-time trade.
+///
+/// Also used as the client-side deadline on `pair_nodes` RPCs (see
+/// `hub::HubClient::pair_nodes`) — without that deadline a malicious
+/// hub could stall indefinitely and break the window bound.
+pub(crate) const SECRET_TTL: Duration = Duration::from_secs(120);
 
 //-- Endorsing state (testable without hub connection) -------------------------------------------------
 
