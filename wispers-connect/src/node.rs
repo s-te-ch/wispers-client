@@ -14,7 +14,8 @@ use crate::crypto::{PairingCode, SigningKeyPair, generate_nonce};
 use crate::errors::NodeStateError;
 use crate::hub::proto;
 use crate::roster::{
-    build_activation_payload, create_activation_roster, create_bootstrap_roster, verify_roster,
+    add_activation_to_roster, build_activation_payload, compute_signing_hash,
+    create_bootstrap_roster, set_new_node_signature, verify_roster,
 };
 use crate::storage::{NodeStateStore, SharedStore};
 use crate::types::{
@@ -643,39 +644,30 @@ impl Node {
             .map_err(NodeStateError::RosterVerificationFailed)?;
         }
 
-        // Build and sign the activation payload
+        // Build the new roster, then sign over its signing hash.
+        let self_public_key_spki = self.signing_key.public_key_spki();
+        let endorser_public_key_spki = response_payload.public_key_spki.clone();
         let activation_payload = build_activation_payload(
             &current_roster,
-            endorser_node_number,
             registration.node_number,
+            endorser_node_number,
             nonce,
             endorser_nonce,
         );
-        let activation_payload_bytes = activation_payload.encode_to_vec();
-        let new_node_signature = self.signing_key.sign(&activation_payload_bytes);
-
-        // Build the new roster
-        let new_roster = if current_roster.version == 0 {
+        let mut new_roster = if current_roster.version == 0 {
             create_bootstrap_roster(
-                endorser_node_number,
-                &response_payload.public_key_spki,
-                registration.node_number,
-                &self.signing_key.public_key_spki(),
-                activation_payload.new_node_nonce,
-                activation_payload.endorser_nonce,
-                new_node_signature,
+                activation_payload,
+                &self_public_key_spki,
+                &endorser_public_key_spki,
             )
         } else {
-            create_activation_roster(
-                &current_roster,
-                endorser_node_number,
-                registration.node_number,
-                &self.signing_key.public_key_spki(),
-                activation_payload.new_node_nonce,
-                activation_payload.endorser_nonce,
-                new_node_signature,
-            )
+            let mut r = current_roster.clone();
+            add_activation_to_roster(&mut r, activation_payload, &self_public_key_spki);
+            r
         };
+        let signing_hash = compute_signing_hash(&new_roster);
+        let new_node_signature = self.signing_key.sign(&signing_hash);
+        set_new_node_signature(&mut new_roster, new_node_signature);
 
         // Submit the roster update
         let cosigned_roster = client
@@ -966,14 +958,16 @@ impl Node {
                 self.store.delete().map_err(NodeStateError::store)
             }
             NodeState::Activated => {
-                use crate::hub::proto::roster::revocation;
-                use crate::roster::{active_nodes, compute_roster_hash, create_revocation_roster};
+                use crate::roster::{
+                    active_nodes, add_revocation_to_roster, build_revocation_payload,
+                    set_revoker_signature,
+                };
 
                 let registration = self.persisted.registration.as_ref().expect("activated");
-                let roster = self.roster.read().unwrap().clone().expect("activated");
+                let mut new_roster = self.roster.read().unwrap().clone().expect("activated");
 
                 // Check: prevent revoking the last active node
-                let active_count = active_nodes(&roster).count();
+                let active_count = active_nodes(&new_roster).count();
                 if active_count <= 1 {
                     return Err(NodeStateError::LastActiveNode);
                 }
@@ -982,23 +976,16 @@ impl Node {
                     .await
                     .map_err(NodeStateError::hub)?;
 
-                // Step 1: Self-revoke from roster
-                let base_hash = compute_roster_hash(&roster);
-                let payload = revocation::Payload {
-                    base_version: roster.version,
-                    base_version_hash: base_hash,
-                    new_version: roster.version + 1,
-                    revoked_node_number: registration.node_number,
-                    revoker_node_number: registration.node_number,
-                };
-                let signature = self.signing_key.sign(&payload.encode_to_vec());
-
-                let new_roster = create_revocation_roster(
-                    &roster,
-                    registration.node_number,
-                    registration.node_number,
-                    signature,
+                // Step 1: Self-revoke from roster.
+                let revocation_payload = build_revocation_payload(
+                    &new_roster,
+                    registration.node_number, // revoked
+                    registration.node_number, // revoker (self)
                 );
+                add_revocation_to_roster(&mut new_roster, revocation_payload);
+                let signing_hash = compute_signing_hash(&new_roster);
+                let signature = self.signing_key.sign(&signing_hash);
+                set_revoker_signature(&mut new_roster, signature);
 
                 // If unauthenticated, node was already removed server-side — skip to local cleanup.
                 match client.update_roster(registration, new_roster).await {
