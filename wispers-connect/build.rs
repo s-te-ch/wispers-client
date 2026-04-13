@@ -14,11 +14,11 @@ fn compile_protos() -> BuildResult<()> {
         .build_server(true) // Enable server for integration tests
         .compile_protos(
             &[
-                "../proto/hub.proto",
-                "../proto/roster.proto",
-                "../proto/storage.proto",
+                "proto/hub.proto",
+                "proto/roster.proto",
+                "proto/storage.proto",
             ],
-            &["../proto"],
+            &["proto"],
         )?;
     Ok(())
 }
@@ -26,7 +26,7 @@ fn compile_protos() -> BuildResult<()> {
 fn build_libjuice() -> BuildResult<()> {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
     // libjuice is in third_party/libjuice (git submodule)
-    let libjuice_dir = manifest_dir.join("../third_party/libjuice");
+    let libjuice_dir = manifest_dir.join("third_party/libjuice");
     let header = libjuice_dir.join("include/juice/juice.h");
 
     if !libjuice_dir.exists() {

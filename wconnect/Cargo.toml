@@ -1,8 +1,12 @@
 [package]
 name = "wconnect"
-version = "0.1.0"
+version = "0.8.0"
 edition = "2024"
-description = "CLI for Wispers Connect nodes"
+license = "MIT"
+authors = ["Matthias Scheidegger <mbs@s-te.ch>"]
+homepage = "https://wispers.dev"
+repository = "https://github.com/s-te-ch/wispers"
+description = "Wispers Connect connectivity test and sidecar utility"
 
 [[bin]]
 name = "wconnect"
@@ -16,7 +20,7 @@ httparse = "1.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "fs", "signal"] }
-wispers-connect = { path = "../wispers-connect" }
+wispers-connect = { path = "../wispers-connect", version = "0.8.0" }
 
 [target.'cfg(unix)'.dependencies]
 daemonize = "0.5"

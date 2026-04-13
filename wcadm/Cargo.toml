@@ -1,7 +1,11 @@
 [package]
 name = "wcadm"
-version = "0.1.0"
+version = "0.8.0"
 edition = "2024"
+license = "MIT"
+authors = ["Matthias Scheidegger <mbs@s-te.ch>"]
+homepage = "https://wispers.dev"
+repository = "https://github.com/s-te-ch/wispers"
 description = "CLI tool for managing Wispers Connect domains"
 
 [[bin]]
