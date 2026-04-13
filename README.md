@@ -220,10 +220,12 @@ go build ./...
 cargo ndk -t arm64-v8a build
 ```
 
-**Swift** (`wrappers/swift/`) — Swift Package wrapping an XCFramework. Build the XCFramework from the Rust library first, then add the package as a dependency:
+**Swift** (`wrappers/swift/`) — Swift Package wrapping an XCFramework. Add as a dependency in Xcode using the repository URL `https://github.com/s-te-ch/wispers-client`. The prebuilt xcframework is downloaded automatically via SPM.
+
+To rebuild the xcframework from source (for development):
 
 ```bash
-cd wrappers/swift && scripts/build-xcframework.sh
+cd wrappers/swift && scripts/build-xcframework.sh --release
 ```
 
 **Python** (`wrappers/python/`) — uses ctypes. Requires Python 3.11+. Install from PyPI (includes the native library):
