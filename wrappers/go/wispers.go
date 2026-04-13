@@ -1,6 +1,10 @@
 package wispersgo
 
+//go:generate cargo build --release -p wispers-connect --manifest-path ../../Cargo.toml
+
 /*
+#cgo CFLAGS: -I${SRCDIR}/../../wispers-connect/include
+#cgo LDFLAGS: -L${SRCDIR}/../../target/release -lwispers_connect
 #include "wispers_helpers.h"
 #include <stdlib.h>
 */
