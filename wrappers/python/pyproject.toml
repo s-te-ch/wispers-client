@@ -1,18 +1,26 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "wispers-connect"
-version = "0.1.0"
+version = "0.8.0"
 requires-python = ">=3.11"
-description = "Python ctypes wrapper for wispers-connect"
+license = "MIT"
+authors = [{name = "Matthias Scheidegger", email = "mbs@s-te.ch"}]
+description = "Python wrapper for the Wispers Connect peer-to-peer connectivity library"
+
+[project.urls]
+Homepage = "https://wispers.dev"
+Repository = "https://github.com/s-te-ch/wispers-client"
 
 [project.optional-dependencies]
 dev = ["pytest", "mypy", "ruff"]
 
-[tool.setuptools.packages.find]
-include = ["wispers_connect*"]
+[tool.maturin]
+manifest-path = "../../wispers-connect/Cargo.toml"
+python-packages = ["wispers_connect"]
+module-name = "wispers_connect._native"
 
 [tool.ruff]
 target-version = "py311"

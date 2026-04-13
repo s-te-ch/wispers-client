@@ -25,19 +25,27 @@ def _load_lib() -> ctypes.CDLL:
     if env_path:
         return ctypes.CDLL(env_path)
 
-    # 2. Dev build path (relative to this file)
+    # 2. Bundled library (installed via maturin wheel)
+    native_dir = Path(__file__).resolve().parent / "_native"
+    if native_dir.is_dir():
+        for ext in (".dylib", ".so", ".dll"):
+            candidate = native_dir / f"lib_native{ext}"
+            if candidate.exists():
+                return ctypes.CDLL(str(candidate))
+
+    # 3. Dev build path (relative to this file)
     dev_path = Path(__file__).resolve().parent.parent.parent.parent / "target" / "debug" / _lib_filename()
     if dev_path.exists():
         return ctypes.CDLL(str(dev_path))
 
-    # 3. System search
+    # 4. System search
     found = ctypes.util.find_library("wispers_connect")
     if found:
         return ctypes.CDLL(found)
 
     raise OSError(
         f"Could not find {_lib_filename()}. "
-        "Set WISPERS_CONNECT_LIB or build with `cargo build` in connect/client/."
+        "Install via 'pip install wispers-connect' or build with 'cargo build' in the wispers-client repo."
     )
 
 
