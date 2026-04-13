@@ -206,10 +206,12 @@ The workspace produces three artifacts:
 
 Wrappers live in `wrappers/` and link against the shared library built above.
 
-**Go** (`wrappers/go/`) — uses CGo. Build the Rust library first, then:
+**Go** (`wrappers/go/`) — uses CGo. Requires a Rust toolchain. From the wrapper directory:
 
 ```bash
-cd wrappers/go && make build
+cd wrappers/go
+go generate ./...   # builds the Rust library (release profile)
+go build ./...
 ```
 
 **Kotlin/Android** (`wrappers/kotlin/`) — uses JNA. Build with Gradle; requires a pre-built `libwispers_connect.so` for your target ABI. Cross-compile the Rust library with the Android NDK (`ANDROID_NDK_HOME` environment variable) and [cargo-ndk](https://github.com/nickelc/cargo-ndk):
