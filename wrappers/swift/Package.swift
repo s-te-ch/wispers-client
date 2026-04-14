@@ -1,4 +1,12 @@
 // swift-tools-version: 5.9
+//
+// Local Package.swift for use by the Files iOS app and Xcode development.
+// References the xcframework built on disk (via scripts/build-xcframework.sh),
+// not a remote download.
+//
+// For SPM consumers adding this repo as a remote dependency, the root-level
+// Package.swift is used instead (SPM requires the manifest at the repo root).
+
 import PackageDescription
 
 let package = Package(
