@@ -1,14 +1,15 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
+requires = ["maturin>=1.0,<2.0", "cffi"]
 build-backend = "maturin"
 
 [project]
 name = "wispers-connect"
-version = "0.8.0rc2"
+version = "0.8.0rc3"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{name = "Matthias Scheidegger", email = "mbs@s-te.ch"}]
 description = "Python wrapper for the Wispers Connect peer-to-peer connectivity library"
+dependencies = ["cffi"]
 
 [project.urls]
 Homepage = "https://wispers.dev"
