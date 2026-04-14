@@ -45,13 +45,13 @@ cd "$CLIENT_DIR"
 
 # macOS arm64 (native)
 echo "    macOS arm64..."
-MACOSX_DEPLOYMENT_TARGET=11.0 cargo rustc -p wispers-connect --release --crate-type staticlib 2>&1 | tail -1
+MACOSX_DEPLOYMENT_TARGET=11.0 CMAKE_OSX_DEPLOYMENT_TARGET=11.0 cargo rustc -p wispers-connect --release --crate-type staticlib 2>&1 | tail -1
 cp target/release/libwispers_connect.a "$OUT/libwispers_connect-darwin_arm64.a"
 
 # macOS x86_64
 if rustup target list --installed | grep -q x86_64-apple-darwin; then
     echo "    macOS x86_64..."
-    MACOSX_DEPLOYMENT_TARGET=11.0 cargo rustc -p wispers-connect --release --crate-type staticlib --target x86_64-apple-darwin 2>&1 | tail -1
+    MACOSX_DEPLOYMENT_TARGET=11.0 CMAKE_OSX_DEPLOYMENT_TARGET=11.0 cargo rustc -p wispers-connect --release --crate-type staticlib --target x86_64-apple-darwin 2>&1 | tail -1
     cp target/x86_64-apple-darwin/release/libwispers_connect.a "$OUT/libwispers_connect-darwin_amd64.a"
 else
     echo "    macOS x86_64: SKIPPED (run: rustup target add x86_64-apple-darwin)"
