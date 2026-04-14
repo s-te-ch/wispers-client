@@ -1,10 +1,15 @@
 package wispersgo
 
-//go:generate cargo build --release -p wispers-connect --manifest-path ../../Cargo.toml
+//go:generate go run ./cmd/fetch-lib
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/../../wispers-connect/include
-#cgo LDFLAGS: -L${SRCDIR}/../../target/release -lwispers_connect
+#cgo CFLAGS: -I${SRCDIR}/lib
+#cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/lib/darwin_arm64 -lwispers_connect
+#cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/lib/darwin_amd64 -lwispers_connect
+#cgo linux,arm64 LDFLAGS: -L${SRCDIR}/lib/linux_arm64 -lwispers_connect
+#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/lib/linux_amd64 -lwispers_connect
+#cgo darwin LDFLAGS: -framework Security -framework CoreFoundation -liconv -lresolv
+#cgo linux LDFLAGS: -lm -ldl -lpthread
 #include "wispers_helpers.h"
 #include <stdlib.h>
 */

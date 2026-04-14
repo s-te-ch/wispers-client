@@ -206,11 +206,11 @@ The workspace produces three artifacts:
 
 Wrappers live in `wrappers/` and link against the shared library built above.
 
-**Go** (`wrappers/go/`) — uses CGo. Requires a Rust toolchain. From the wrapper directory:
+**Go** (`wrappers/go/`) — uses CGo with a prebuilt static library. No Rust toolchain needed:
 
 ```bash
-cd wrappers/go
-go generate ./...   # builds the Rust library (release profile)
+go get github.com/s-te-ch/wispers-client/wrappers/go@latest
+go run github.com/s-te-ch/wispers-client/wrappers/go/cmd/fetch-lib@latest
 go build ./...
 ```
 

@@ -60,6 +60,9 @@ local.properties
 examples/c/ffi_demo
 wispers-connect/tests/c_ffi/ffi_test
 
+# Go wrapper - downloaded by fetch-lib.sh
+wrappers/go/lib/
+
 # Python
 .venv/
 __pycache__/
