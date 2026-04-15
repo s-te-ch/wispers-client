@@ -71,5 +71,8 @@ wrappers/kotlin/src/main/jniLibs/
 __pycache__/
 wrappers/python/wispers_connect/_native/
 
+# Swift build cache
+.build/
+
 # Claude Code
 .claude/
