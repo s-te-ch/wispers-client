@@ -90,11 +90,12 @@ val cleanNativeLibs by tasks.registering(Delete::class) {
     delete(jniLibsDir)
 }
 
-// Wire native build into AAR packaging
-tasks.matching { it.name == "mergeReleaseJniLibFolders" }.configureEach {
-    mustRunAfter(buildNativeLibs)
-    if (jniLibsDir.exists()) {
-        inputs.dir(jniLibsDir)
+// Wire native build into AAR packaging when buildNativeLibs is in the task graph
+gradle.taskGraph.whenReady {
+    if (hasTask(":buildNativeLibs") || hasTask("buildNativeLibs")) {
+        tasks.named("mergeReleaseJniLibFolders") {
+            dependsOn(buildNativeLibs)
+        }
     }
 }
 
