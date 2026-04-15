@@ -82,7 +82,6 @@ val buildNativeLibs by tasks.registering(Exec::class) {
         "--output-dir", jniLibsDir.absolutePath,
         "build", "--release", "-p", "wispers-connect"
     )
-    outputs.dir(jniLibsDir)
     onlyIf { ndkHome != null }
 }
 
@@ -90,14 +89,6 @@ val cleanNativeLibs by tasks.registering(Delete::class) {
     delete(jniLibsDir)
 }
 
-// Wire native build into AAR packaging when buildNativeLibs is in the task graph
-gradle.taskGraph.whenReady {
-    if (hasTask(":buildNativeLibs") || hasTask("buildNativeLibs")) {
-        tasks.named("mergeReleaseJniLibFolders") {
-            dependsOn(buildNativeLibs)
-        }
-    }
-}
 
 signing {
     useGpgCmd()
