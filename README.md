@@ -25,9 +25,16 @@ a peer-to-peer connection.
 
 ### 0. Prerequisites
 
-- A local clone of the `wispers-client` repository (this one)
-- Initialise submodules: `git submodule update --init --recursive`
-- The build prerequisites listed under [Building](#building) below
+- A [Rust toolchain](https://rust-lang.org/tools/install/) (install via `rustup`)
+- [CMake](https://cmake.org/), [LLVM/Clang](https://releases.llvm.org/),
+  [protoc](https://github.com/protocolbuffers/protobuf/releases),
+  [Go](https://go.dev/), and [NASM](https://www.nasm.us/) — install via your
+  package manager (e.g. `brew install cmake llvm protobuf go nasm` on macOS)
+- A local clone with submodules:
+  ```bash
+  git clone --recurse-submodules https://github.com/s-te-ch/wispers-client
+  cd wispers-client
+  ```
 
 ### 1. Get a Connect account & API key
 
@@ -172,6 +179,7 @@ peer-to-peer connection!
   and key types
 - **[Frequently Asked Questions](docs/FAQ.md)** — Comparisons to other
   solutions, licensing questions, etc.
+
 ## Building
 
 ### Rust library & CLI tools
@@ -214,10 +222,10 @@ go run github.com/s-te-ch/wispers-client/wrappers/go/cmd/fetch-lib@latest
 go build ./...
 ```
 
-**Kotlin/Android** (`wrappers/kotlin/`) — uses JNA. Build with Gradle; requires a pre-built `libwispers_connect.so` for your target ABI. Cross-compile the Rust library with the Android NDK (`ANDROID_NDK_HOME` environment variable) and [cargo-ndk](https://github.com/nickelc/cargo-ndk):
+**Kotlin/Android** (`wrappers/kotlin/`) — uses JNA. Add the dependency from Maven Central (native `.so` files are bundled in the AAR):
 
-```bash
-cargo ndk -t arm64-v8a build
+```kotlin
+implementation("dev.wispers:connect:0.8.0")
 ```
 
 **Swift** (`wrappers/swift/`) — Swift Package wrapping an XCFramework. Add as a dependency in Xcode using the repository URL `https://github.com/s-te-ch/wispers-client`. The prebuilt xcframework is downloaded automatically via SPM.
@@ -251,7 +259,7 @@ The `examples/` directory has small, runnable programs for several languages:
 | Directory | Description |
 |-----------|-------------|
 | `examples/c/` | C FFI demo using the shared library directly |
-| `examples/go/` | Go CLI using the Go wrapper (`make` to build) |
+| `examples/go/` | Go CLI using the Go wrapper |
 | `examples/kotlin/` | Android app using the Kotlin wrapper |
 | `examples/python/` | Python CLI using the Python wrapper (`./run.sh` to run) |
 
