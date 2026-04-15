@@ -65,6 +65,7 @@ wrappers/go/lib/
 
 # Kotlin wrapper - built by cargo-ndk before publishing
 wrappers/kotlin/src/main/jniLibs/
+wrappers/kotlin/gradle/wrapper/gradle-wrapper.jar
 
 # Python
 .venv/

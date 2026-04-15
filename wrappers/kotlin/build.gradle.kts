@@ -90,8 +90,9 @@ val cleanNativeLibs by tasks.registering(Delete::class) {
     delete(jniLibsDir)
 }
 
-// Wire native build into AAR packaging when jniLibs are present
+// Wire native build into AAR packaging
 tasks.matching { it.name == "mergeReleaseJniLibFolders" }.configureEach {
+    mustRunAfter(buildNativeLibs)
     if (jniLibsDir.exists()) {
         inputs.dir(jniLibsDir)
     }
