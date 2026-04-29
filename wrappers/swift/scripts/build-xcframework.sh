@@ -22,6 +22,13 @@ if [[ "${1:-}" == "--release" ]]; then
     CARGO_FLAG="--release"
 fi
 
+# Stamp object files with the iOS deployment target the Package.swift
+# advertises (iOS 15). Without this, builds inherit the SDK default
+# (e.g. iOS 26 on current Xcode), and consumers targeting iOS 15 see
+# "was built for newer iOS-simulator version" warnings on every link.
+# Propagates through cargo to the C/C++ builds (libjuice, BoringSSL).
+export IPHONEOS_DEPLOYMENT_TARGET=15.0
+
 # Verify iOS SDK is available.
 if ! IOS_SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path 2>&1); then
     echo "ERROR: Could not find iOS SDK. Is Xcode installed?"
