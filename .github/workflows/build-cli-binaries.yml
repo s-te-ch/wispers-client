@@ -46,6 +46,7 @@ jobs:
     steps:
       - name: Validate version format
         if: ${{ !inputs.dry_run }}
+        shell: bash
         run: |
           if [[ -z "${{ inputs.version }}" ]]; then
             echo "ERROR: Version is required when dry_run is false"
@@ -93,6 +94,7 @@ jobs:
         run: echo "RUSTFLAGS=-C target-feature=+crt-static" >> "$GITHUB_ENV"
 
       - name: Build binaries
+        shell: bash
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
           CMAKE_OSX_DEPLOYMENT_TARGET: "11.0"
