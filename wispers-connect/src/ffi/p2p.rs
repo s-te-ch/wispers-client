@@ -91,10 +91,10 @@ pub extern "C" fn wispers_node_connect_udp_async(
     };
 
     let ctx = CallbackContext(ctx);
-    let inner = unsafe { &*handle }.clone_inner();
+    let handle_clone = unsafe { &*handle }.clone();
 
     runtime::spawn(async move {
-        let node = inner.lock().await;
+        let node = handle_clone.lock().await;
         let result = node.connect_udp(peer_node_number).await;
 
         match result {
@@ -309,10 +309,10 @@ pub extern "C" fn wispers_node_connect_quic_async(
     };
 
     let ctx = CallbackContext(ctx);
-    let inner = unsafe { &*handle }.clone_inner();
+    let handle_clone = unsafe { &*handle }.clone();
 
     runtime::spawn(async move {
-        let node = inner.lock().await;
+        let node = handle_clone.lock().await;
         let result = node.connect_quic(peer_node_number).await;
 
         match result {

@@ -29,23 +29,28 @@ pub struct WispersNodeStorageHandle(pub(crate) NodeStorage);
 /// threads without violating Rust's aliasing rules: every method acquires
 /// the mutex before touching the inner `Node`, so there is at most one
 /// borrow at any moment.
-///
-/// Use the helper methods on `WispersNodeHandle` to get a guard or clone
-/// the inner `Arc` instead of dereferencing `pub(crate)` field directly.
-pub struct WispersNodeHandle(pub(crate) Arc<Mutex<Node>>);
+#[derive(Clone)]
+pub struct WispersNodeHandle(Arc<Mutex<Node>>);
 
+// Lock helpers are scoped to the FFI module: `blocking_lock` panics if
+// called from inside the runtime, which is a footgun we don't want
+// available to non-FFI code in this crate.
 impl WispersNodeHandle {
     /// Wrap a freshly-created `Node` in a handle suitable for boxing into
     /// a raw pointer for FFI return values.
-    pub(crate) fn new(node: Node) -> Self {
+    pub(in crate::ffi) fn new(node: Node) -> Self {
         Self(Arc::new(Mutex::new(node)))
     }
 
-    /// Clone the inner `Arc` so the clone can be moved into a spawned
-    /// async task. The original handle (and its `Arc` reference) stays
-    /// owned by the C caller.
-    pub(crate) fn clone_inner(&self) -> Arc<Mutex<Node>> {
-        Arc::clone(&self.0)
+    /// Acquire the inner mutex asynchronously.
+    pub(in crate::ffi) async fn lock(&self) -> tokio::sync::MutexGuard<'_, Node> {
+        self.0.lock().await
+    }
+
+    /// Acquire the inner mutex synchronously. Panics if called from
+    /// inside the library's tokio runtime — see callsite docs.
+    pub(in crate::ffi) fn blocking_lock(&self) -> tokio::sync::MutexGuard<'_, Node> {
+        self.0.blocking_lock()
     }
 }
 

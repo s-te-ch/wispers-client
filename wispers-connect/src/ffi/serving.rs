@@ -261,7 +261,7 @@ pub extern "C" fn wispers_node_start_serving_async(
         None => return WispersStatus::MissingCallback,
     };
 
-    let inner = unsafe { &*handle }.clone_inner();
+    let handle_clone = unsafe { &*handle }.clone();
     let ctx = CallbackContext(ctx);
 
     // Extract what we need before spawning. We hold the inner mutex
@@ -270,7 +270,7 @@ pub extern "C" fn wispers_node_start_serving_async(
     // Node at all, so there's no need to keep the lock through the
     // network round trips.
     let params = {
-        let node = inner.blocking_lock();
+        let node = handle_clone.blocking_lock();
         extract_serving_params(&node)
     };
     let params = match params {

@@ -203,7 +203,7 @@ pub extern "C" fn wispers_node_state(handle: *mut WispersNodeHandle) -> WispersN
     }
 
     let wrapper = unsafe { &*handle };
-    let node = wrapper.0.blocking_lock();
+    let node = wrapper.blocking_lock();
     node_state_to_ffi(node.state())
 }
 
@@ -233,10 +233,10 @@ pub extern "C" fn wispers_node_register_async(
     };
 
     let ctx = CallbackContext(ctx);
-    let inner = unsafe { &*handle }.clone_inner();
+    let handle_clone = unsafe { &*handle }.clone();
 
     runtime::spawn(async move {
-        let mut node = inner.lock().await;
+        let mut node = handle_clone.lock().await;
         let result = node.register(&token_str).await;
 
         match result {
@@ -283,10 +283,10 @@ pub extern "C" fn wispers_node_activate_async(
     };
 
     let ctx = CallbackContext(ctx);
-    let inner = unsafe { &*handle }.clone_inner();
+    let handle_clone = unsafe { &*handle }.clone();
 
     runtime::spawn(async move {
-        let mut node = inner.lock().await;
+        let mut node = handle_clone.lock().await;
         let result = node.activate(&activation_code_str).await;
 
         match result {
@@ -328,16 +328,15 @@ pub extern "C" fn wispers_node_logout_async(
         None => return WispersStatus::MissingCallback,
     };
 
-    // Consume the handle box. The inner Arc lives on inside the spawned
-    // task; any other tasks holding clones will keep the Mutex<Node>
-    // alive until they finish.
+    // Consume the handle box and move it into the spawned task, which
+    // drops its inner Arc when it finishes. Any in-flight tasks holding
+    // clones of the handle keep the Mutex<Node> alive until they finish.
     let wrapper = unsafe { Box::from_raw(handle) };
-    let inner = wrapper.0;
     let ctx = CallbackContext(ctx);
 
     runtime::spawn(async move {
         let result = {
-            let mut node = inner.lock().await;
+            let mut node = wrapper.lock().await;
             node.logout().await
         };
 
@@ -380,10 +379,10 @@ pub extern "C" fn wispers_node_group_info_async(
     };
 
     let ctx = CallbackContext(ctx);
-    let inner = unsafe { &*handle }.clone_inner();
+    let handle_clone = unsafe { &*handle }.clone();
 
     runtime::spawn(async move {
-        let node = inner.lock().await;
+        let node = handle_clone.lock().await;
         let result = node.group_info().await;
         handle_group_info_result(result, ctx, callback);
     });
