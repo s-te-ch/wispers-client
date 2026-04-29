@@ -8,8 +8,10 @@ package wispersgo
 #cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/lib/darwin_amd64 -lwispers_connect
 #cgo linux,arm64 LDFLAGS: -L${SRCDIR}/lib/linux_arm64 -lwispers_connect
 #cgo linux,amd64 LDFLAGS: -L${SRCDIR}/lib/linux_amd64 -lwispers_connect
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/lib/windows_amd64 -lwispers_connect
 #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation -liconv -lresolv
 #cgo linux LDFLAGS: -lm -ldl -lpthread
+#cgo windows LDFLAGS: -lws2_32 -lbcrypt
 #include "wispers_helpers.h"
 #include <stdlib.h>
 */
