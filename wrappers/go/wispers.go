@@ -11,7 +11,7 @@ package wispersgo
 #cgo windows,amd64 LDFLAGS: -L${SRCDIR}/lib/windows_amd64 -lwispers_connect
 #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation -liconv -lresolv
 #cgo linux LDFLAGS: -lm -ldl -lpthread
-#cgo windows LDFLAGS: -lws2_32 -lbcrypt
+#cgo windows LDFLAGS: -lws2_32 -lbcrypt -luserenv -lntdll
 #include "wispers_helpers.h"
 #include <stdlib.h>
 */
