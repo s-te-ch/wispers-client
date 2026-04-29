@@ -12,6 +12,13 @@ description = "Wispers Connect connectivity test and sidecar utility"
 name = "wconnect"
 path = "src/main.rs"
 
+# cargo-binstall metadata. Resolves to the archives produced by
+# .github/workflows/build-cli-binaries.yml; the binary is at the
+# archive root (not in a versioned subdirectory).
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ version }-{ target }{ archive-suffix }"
+bin-dir = "{ bin }{ binary-ext }"
+
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4", features = ["derive", "env"] }
