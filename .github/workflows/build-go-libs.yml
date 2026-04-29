@@ -4,8 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release tag to upload assets to (e.g. v0.8.0). Must include the 'v' prefix."
-        required: true
+        description: "Release tag to upload assets to (e.g. v0.8.0). Must include the 'v' prefix. Required unless dry_run is true."
+        required: false
+      dry_run:
+        description: "Build only; skip release upload. Artifacts are still attached to the workflow run for inspection."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -36,9 +40,14 @@ jobs:
             platform: windows_amd64
     steps:
       - name: Validate version format
+        if: ${{ !inputs.dry_run }}
         run: |
-          if [[ ! "${{ github.event.inputs.version }}" =~ ^v ]]; then
-            echo "ERROR: Version must start with 'v' (e.g. v0.8.0), got: ${{ github.event.inputs.version }}"
+          if [[ -z "${{ inputs.version }}" ]]; then
+            echo "ERROR: Version is required when dry_run is false"
+            exit 1
+          fi
+          if [[ ! "${{ inputs.version }}" =~ ^v ]]; then
+            echo "ERROR: Version must start with 'v' (e.g. v0.8.0), got: ${{ inputs.version }}"
             exit 1
           fi
 
@@ -74,12 +83,24 @@ jobs:
           LIBCLANG_PATH: ${{ runner.os == 'Windows' && 'C:\Program Files\LLVM\bin' || '' }}
         run: cargo rustc -p wispers-connect --release --crate-type staticlib --target ${{ matrix.target }}
 
-      - name: Upload to release
+      - name: Stage artifact with platform-suffixed name
         shell: bash
         run: |
           cp target/${{ matrix.target }}/release/libwispers_connect.a \
              libwispers_connect-${{ matrix.platform }}.a
-          gh release upload ${{ github.event.inputs.version }} \
+
+      - name: Upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libwispers_connect-${{ matrix.platform }}
+          path: libwispers_connect-${{ matrix.platform }}.a
+          if-no-files-found: error
+
+      - name: Upload to release
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        run: |
+          gh release upload ${{ inputs.version }} \
              libwispers_connect-${{ matrix.platform }}.a \
              --clobber
         env:
@@ -88,12 +109,13 @@ jobs:
   upload-header:
     name: Upload header
     runs-on: ubuntu-latest
+    if: ${{ !inputs.dry_run }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Upload header to release
         run: |
-          gh release upload ${{ github.event.inputs.version }} \
+          gh release upload ${{ inputs.version }} \
              wispers-connect/include/wispers_connect.h \
              --clobber
         env:
