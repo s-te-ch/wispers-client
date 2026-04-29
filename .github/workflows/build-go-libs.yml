@@ -75,12 +75,15 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install -y --no-progress protoc nasm
 
+      - name: Configure LIBCLANG_PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> "$GITHUB_ENV"
+
       - name: Build static library
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
           CMAKE_OSX_DEPLOYMENT_TARGET: "11.0"
-          # LLVM is preinstalled on windows-latest; bindgen needs LIBCLANG_PATH.
-          LIBCLANG_PATH: ${{ runner.os == 'Windows' && 'C:\Program Files\LLVM\bin' || '' }}
         run: cargo rustc -p wispers-connect --release --crate-type staticlib --target ${{ matrix.target }}
 
       - name: Stage artifact with platform-suffixed name
