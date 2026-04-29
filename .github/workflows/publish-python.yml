@@ -4,8 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to publish (e.g. 0.8.0 or 0.8.0rc1)"
-        required: true
+        description: "Version to publish (e.g. 0.8.0 or 0.8.0rc1). Operator confirmation only — maturin reads the actual version from pyproject.toml."
+        required: false
+      dry_run:
+        description: "Build wheels only; skip PyPI publish. Wheels are still attached to the workflow run for inspection."
+        type: boolean
+        default: false
 
 jobs:
   build-wheels:
@@ -25,6 +29,8 @@ jobs:
             target: x86_64-apple-darwin
           - os: macos-latest
             target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,6 +56,15 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install protobuf
 
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: choco install -y --no-progress protoc nasm
+
+      - name: Configure LIBCLANG_PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> "$GITHUB_ENV"
+
       - name: Install maturin and cffi
         run: pip install maturin cffi
 
@@ -72,6 +87,7 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: build-wheels
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
