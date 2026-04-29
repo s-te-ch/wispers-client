@@ -4,8 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to publish (e.g. 0.8.0 or 0.8.0rc1)"
-        required: true
+        description: "Version to publish (e.g. 0.8.0 or 0.8.0rc1). Operator confirmation only — maturin reads the actual version from pyproject.toml."
+        required: false
+      dry_run:
+        description: "Build wheels only; skip PyPI publish. Wheels are still attached to the workflow run for inspection."
+        type: boolean
+        default: false
 
 jobs:
   build-wheels:
@@ -83,6 +87,7 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: build-wheels
+    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
