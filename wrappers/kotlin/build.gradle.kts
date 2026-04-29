@@ -78,6 +78,7 @@ val buildNativeLibs by tasks.registering(Exec::class) {
     commandLine(
         cargo, "ndk",
         "--target", "arm64-v8a",
+        "--target", "armeabi-v7a",
         "--target", "x86_64",
         "--output-dir", jniLibsDir.absolutePath,
         "build", "--release", "-p", "wispers-connect"
