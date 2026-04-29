@@ -41,6 +41,7 @@ jobs:
     steps:
       - name: Validate version format
         if: ${{ !inputs.dry_run }}
+        shell: bash
         run: |
           if [[ -z "${{ inputs.version }}" ]]; then
             echo "ERROR: Version is required when dry_run is false"
