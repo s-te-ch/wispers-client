@@ -1,0 +1,159 @@
+name: Build CLI binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to upload assets to (e.g. v0.8.1). Must include the 'v' prefix. Required unless dry_run is true."
+        required: false
+      dry_run:
+        description: "Build only; skip release upload. Archives are still attached to the workflow run for inspection."
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+            binary_suffix: ""
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive: tar.gz
+            binary_suffix: ""
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+            binary_suffix: ""
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: tar.gz
+            binary_suffix: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+            binary_suffix: ".exe"
+    steps:
+      - name: Validate version format
+        if: ${{ !inputs.dry_run }}
+        run: |
+          if [[ -z "${{ inputs.version }}" ]]; then
+            echo "ERROR: Version is required when dry_run is false"
+            exit 1
+          fi
+          if [[ ! "${{ inputs.version }}" =~ ^v ]]; then
+            echo "ERROR: Version must start with 'v' (e.g. v0.8.1), got: ${{ inputs.version }}"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cli-${{ matrix.target }}
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libclang-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: choco install -y --no-progress protoc nasm
+
+      - name: Configure LIBCLANG_PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> "$GITHUB_ENV"
+
+      - name: Configure static CRT (Windows)
+        # Self-contained .exe — no Visual C++ Redistributable needed on
+        # the target machine.
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "RUSTFLAGS=-C target-feature=+crt-static" >> "$GITHUB_ENV"
+
+      - name: Build binaries
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+          CMAKE_OSX_DEPLOYMENT_TARGET: "11.0"
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            --bin wcadm \
+            --bin wconnect
+
+      - name: Resolve archive version string
+        id: ver
+        shell: bash
+        run: |
+          # Strip leading 'v' for archive filename (matches cargo-binstall's
+          # default {name}-{version}-{target} pattern).
+          VERSION="${{ inputs.version }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION="dry-run"
+          fi
+          echo "version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage binaries
+        shell: bash
+        run: |
+          mkdir staging
+          cp "target/${{ matrix.target }}/release/wcadm${{ matrix.binary_suffix }}" staging/
+          cp "target/${{ matrix.target }}/release/wconnect${{ matrix.binary_suffix }}" staging/
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          V=${{ steps.ver.outputs.version }}
+          T=${{ matrix.target }}
+          tar -C staging -czf "wcadm-$V-$T.tar.gz" "wcadm${{ matrix.binary_suffix }}"
+          tar -C staging -czf "wconnect-$V-$T.tar.gz" "wconnect${{ matrix.binary_suffix }}"
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        shell: bash
+        run: |
+          V=${{ steps.ver.outputs.version }}
+          T=${{ matrix.target }}
+          (cd staging && 7z a "../wcadm-$V-$T.zip" "wcadm${{ matrix.binary_suffix }}")
+          (cd staging && 7z a "../wconnect-$V-$T.zip" "wconnect${{ matrix.binary_suffix }}")
+
+      - name: Upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: |
+            wcadm-*.${{ matrix.archive }}
+            wconnect-*.${{ matrix.archive }}
+          if-no-files-found: error
+
+      - name: Upload to release
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        run: |
+          gh release upload "${{ inputs.version }}" \
+             wcadm-*.${{ matrix.archive }} \
+             wconnect-*.${{ matrix.archive }} \
+             --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
