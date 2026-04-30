@@ -1,6 +1,6 @@
 [package]
 name = "wispers-connect"
-version = "0.8.1-rc2"
+version = "0.8.1-rc3"
 edition = "2024"
 license = "MIT"
 authors = ["Matthias Scheidegger <mbs@s-te.ch>"]
