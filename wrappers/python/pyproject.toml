@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "wispers-connect"
-version = "0.8.1rc1"
+version = "0.8.1rc2"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{name = "Matthias Scheidegger", email = "mbs@s-te.ch"}]

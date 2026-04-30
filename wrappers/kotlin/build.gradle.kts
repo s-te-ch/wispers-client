@@ -99,7 +99,7 @@ mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
     signAllPublications()
 
-    coordinates("dev.wispers", "connect", findProperty("VERSION_NAME") as String? ?: "0.8.1-rc1")
+    coordinates("dev.wispers", "connect", findProperty("VERSION_NAME") as String? ?: "0.8.1-rc2")
 
     pom {
         name.set("Wispers Connect")
