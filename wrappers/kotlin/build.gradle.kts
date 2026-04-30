@@ -96,7 +96,10 @@ signing {
 }
 
 mavenPublishing {
-    publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL)
+    publishToMavenCentral(
+        com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL,
+        automaticRelease = true,
+    )
     signAllPublications()
 
     coordinates("dev.wispers", "connect", findProperty("VERSION_NAME") as String? ?: "0.8.1-rc2")
