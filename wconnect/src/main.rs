@@ -10,7 +10,7 @@ use clap::{Parser, Subcommand};
 use wispers_connect::{FileNodeStateStore, Node, NodeState, NodeStorage};
 
 #[derive(Parser)]
-#[command(name = "wconnect")]
+#[command(name = "wconnect", version)]
 #[command(about = "CLI for Wispers Connect nodes")]
 struct Cli {
     /// Override hub address (for testing)
