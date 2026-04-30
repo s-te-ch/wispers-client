@@ -1,0 +1,167 @@
+name: Verify release (Windows)
+
+# Manually-triggered workflow that exercises the Windows-specific install
+# paths added in 0.8.1: install.ps1, cargo-binstall metadata, direct-download
+# of the CLI archive, the published Python wheel, and the Go wrapper's
+# Windows static lib via a consumer build.
+#
+# macOS / Linux / Android / iOS verifications are done locally — only the
+# Windows paths are hard to test without a Windows machine.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to verify (e.g. v0.8.1-rc1). Must include the 'v' prefix."
+        required: true
+
+jobs:
+  install-script:
+    name: install.ps1 end-to-end
+    runs-on: windows-latest
+    steps:
+      - name: Run install.ps1 with pinned version
+        shell: pwsh
+        run: |
+          $env:VERSION = '${{ inputs.version }}'
+          $env:INSTALL_DIR = "$env:RUNNER_TEMP\wispers-test-install"
+          irm "https://raw.githubusercontent.com/s-te-ch/wispers-client/main/scripts/install.ps1" | iex
+
+      - name: Confirm binaries run
+        shell: pwsh
+        run: |
+          $bin = "$env:RUNNER_TEMP\wispers-test-install"
+          & "$bin\wcadm.exe" --version
+          & "$bin\wconnect.exe" --version
+
+  cargo-binstall:
+    name: cargo binstall (prebuilt)
+    runs-on: windows-latest
+    steps:
+      - uses: cargo-bins/cargo-binstall@main
+
+      - name: Install via binstall
+        shell: bash
+        run: |
+          V="${{ inputs.version }}"
+          # Strip leading 'v' for the crate version spec.
+          cargo binstall --no-confirm "wcadm@${V#v}" "wconnect@${V#v}"
+
+      - name: Confirm binaries run
+        shell: bash
+        run: |
+          wcadm --version
+          wconnect --version
+
+      - name: Confirm binstall used prebuilt (not source build)
+        # If the prebuilt URL/template is broken, binstall silently falls
+        # back to source build. Force the issue: --no-confirm + --strategies
+        # disable-source-fallback would be cleaner if available, but we can
+        # tell from the binstall logs by re-running with verbose output.
+        shell: bash
+        run: |
+          V="${{ inputs.version }}"
+          cargo binstall --no-confirm --force --log-level debug "wcadm@${V#v}" 2>&1 \
+            | tee binstall.log
+          if grep -q "will be installed from source" binstall.log; then
+            echo "::error::binstall fell back to source build — pkg-url likely broken"
+            exit 1
+          fi
+
+  direct-download:
+    name: Direct archive download
+    runs-on: windows-latest
+    steps:
+      - name: Download wcadm archive
+        shell: bash
+        run: |
+          V="${{ inputs.version }}"
+          VNV="${V#v}"
+          gh release download "$V" \
+              --repo s-te-ch/wispers-client \
+              --pattern "wcadm-$VNV-x86_64-pc-windows-msvc.zip"
+          gh release download "$V" \
+              --repo s-te-ch/wispers-client \
+              --pattern "wconnect-$VNV-x86_64-pc-windows-msvc.zip"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify archive layout (binary at root)
+        shell: bash
+        run: |
+          V="${{ inputs.version }}"
+          VNV="${V#v}"
+          # 7z l output: file names appear after 'Date Time Attr Size...' header.
+          7z l "wcadm-$VNV-x86_64-pc-windows-msvc.zip" | grep -q '^[0-9].*wcadm.exe$' \
+            || { echo "::error::wcadm.exe not at archive root"; exit 1; }
+          7z l "wconnect-$VNV-x86_64-pc-windows-msvc.zip" | grep -q '^[0-9].*wconnect.exe$' \
+            || { echo "::error::wconnect.exe not at archive root"; exit 1; }
+
+      - name: Extract and run
+        shell: bash
+        run: |
+          V="${{ inputs.version }}"
+          VNV="${V#v}"
+          7z x "wcadm-$VNV-x86_64-pc-windows-msvc.zip" -odist
+          7z x "wconnect-$VNV-x86_64-pc-windows-msvc.zip" -odist
+          ./dist/wcadm.exe --version
+          ./dist/wconnect.exe --version
+
+  pip-install:
+    name: PyPI wheel (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install from PyPI
+        shell: bash
+        run: |
+          V="${{ inputs.version }}"
+          # PyPI / PEP 440 strips leading 'v' and the dash before 'rc'.
+          PV="${V#v}"
+          PV="${PV/-rc/rc}"
+          PV="${PV/-a/a}"
+          PV="${PV/-b/b}"
+          pip install "wispers-connect==$PV"
+
+      - name: Import (forces FFI load)
+        shell: bash
+        run: |
+          python -c "import wispers_connect; print('imported:', wispers_connect.__version__ if hasattr(wispers_connect, '__version__') else 'ok')"
+
+  go-consumer-build:
+    name: Go consumer link (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Build a tiny Go consumer against the published wrapper
+        shell: bash
+        run: |
+          V="${{ inputs.version }}"
+          mkdir consumer && cd consumer
+          # Use the wrapper's Go module + tagged version. Note the tag is
+          # the subdirectory-prefixed form for Go.
+          go mod init smoke
+          go get "github.com/s-te-ch/wispers-client/wrappers/go@$V"
+          # Fetch the prebuilt static lib (cgo links it into the final binary).
+          go run "github.com/s-te-ch/wispers-client/wrappers/go/cmd/fetch-lib@$V"
+          cat > main.go <<'EOF'
+          package main
+
+          import (
+              "fmt"
+              wispers "github.com/s-te-ch/wispers-client/wrappers/go"
+          )
+
+          func main() {
+              // Reference an exported symbol so cgo links the static lib.
+              fmt.Println("compiled against wispersgo;", wispers.NodeStatePending)
+          }
+          EOF
+          go build -o smoke.exe .
+          ./smoke.exe
