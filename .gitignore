@@ -60,8 +60,11 @@ local.properties
 examples/c/ffi_demo
 wispers-connect/tests/c_ffi/ffi_test
 
-# Go wrapper - downloaded by fetch-lib.sh
-wrappers/go/lib/
+# Go wrapper — platform-specific .a files are downloaded by fetch-lib.
+# wispers_connect.h is checked in (Bazel needs the full source tree at
+# build time; non-Bazel consumers benefit from one fewer round-trip).
+wrappers/go/lib/*
+!wrappers/go/lib/wispers_connect.h
 
 # Kotlin wrapper - built by cargo-ndk before publishing
 wrappers/kotlin/src/main/jniLibs/

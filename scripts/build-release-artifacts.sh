@@ -37,6 +37,16 @@ if [[ -n "$(git -C "$CLIENT_DIR" status --porcelain)" ]]; then
     exit 1
 fi
 
+# --- Sync the canonical C header into wrappers/go/lib/ ---
+# The Go wrapper module ships its public header so Bazel consumers see a
+# complete source tree (their cgo build can't run fetch-lib mid-build).
+# `cp` is a no-op when the two files match; if cbindgen changed the API,
+# the diff is captured in the release commit below.
+echo ""
+echo "==> Syncing wispers_connect.h into wrappers/go/lib/..."
+cp "$CLIENT_DIR/wispers-connect/include/wispers_connect.h" \
+   "$CLIENT_DIR/wrappers/go/lib/wispers_connect.h"
+
 # --- Swift xcframework ---
 echo ""
 echo "==> Building Swift xcframework..."
@@ -75,7 +85,7 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
-git -C "$CLIENT_DIR" add Package.swift
+git -C "$CLIENT_DIR" add Package.swift wrappers/go/lib/wispers_connect.h
 git -C "$CLIENT_DIR" commit -m "Update Package.swift for $VERSION"
 git -C "$CLIENT_DIR" tag -a "$VERSION" -m "Release $VERSION"
 git -C "$CLIENT_DIR" tag -a "wrappers/go/$VERSION" -m "Go module release $VERSION"
