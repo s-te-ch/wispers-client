@@ -43,11 +43,13 @@ impl ConnectionState {
     }
 
     /// Returns true if the connection is established and ready for data.
+    #[must_use]
     pub fn is_connected(self) -> bool {
         matches!(self, ConnectionState::Connected)
     }
 
     /// Returns true if the connection is disconnected or failed.
+    #[must_use]
     pub fn is_disconnected(self) -> bool {
         matches!(
             self,

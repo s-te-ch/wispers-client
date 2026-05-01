@@ -34,21 +34,15 @@ pub async fn run(
 
     let listener = TcpListener::bind(bind_addr)
         .await
-        .with_context(|| format!("failed to bind to {}", bind_addr))?;
+        .with_context(|| format!("failed to bind to {bind_addr}"))?;
 
-    println!("HTTP proxy listening on {}", bind_addr);
+    println!("HTTP proxy listening on {bind_addr}");
     if let Some(egress) = egress_node {
-        println!("  Internet egress: enabled via node {}", egress);
-        println!(
-            "Example: curl --proxy http://{} https://example.com/",
-            bind_addr
-        );
+        println!("  Internet egress: enabled via node {egress}");
+        println!("Example: curl --proxy http://{bind_addr} https://example.com/");
     } else {
         println!("  Internet egress: disabled (wispers.link only)");
-        println!(
-            "Example: curl --proxy http://{} http://3.wispers.link/",
-            bind_addr
-        );
+        println!("Example: curl --proxy http://{bind_addr} http://3.wispers.link/");
     }
 
     let node = Arc::new(node);
@@ -167,11 +161,11 @@ async fn handle_client_connection(
         // that differs between wispers-node and internet-egress routing.
         let (target_node, command, routing_via_egress) = match &request.target.destination {
             Destination::WispersNode { node_number, port } => {
-                (*node_number, format!("FORWARD {}\n", port), false)
+                (*node_number, format!("FORWARD {port}\n"), false)
             }
             Destination::Internet { host, port } => (
                 egress_node.unwrap(),
-                format!("CONNECT {}:{}\n", host, port),
+                format!("CONNECT {host}:{port}\n"),
                 true,
             ),
         };
@@ -215,9 +209,9 @@ async fn handle_client_connection(
                 Ok(Ok(s)) => s,
                 Ok(Err(e)) => {
                     let msg = if routing_via_egress {
-                        format!("failed to open stream to egress node: {}", e)
+                        format!("failed to open stream to egress node: {e}")
                     } else {
-                        format!("failed to open stream to node: {}", e)
+                        format!("failed to open stream to node: {e}")
                     };
                     send_proxy_error(&mut stream, &ProxyError::BadGateway(msg)).await?;
                     break;
@@ -236,7 +230,7 @@ async fn handle_client_connection(
 
         // Send the FORWARD/CONNECT command and wait for the OK ack.
         if let Err(e) = send_command(&quic_stream, &command).await {
-            send_proxy_error(&mut stream, &ProxyError::BadGateway(format!("{}", e))).await?;
+            send_proxy_error(&mut stream, &ProxyError::BadGateway(format!("{e}"))).await?;
             break;
         }
 
@@ -316,7 +310,7 @@ async fn read_request_bytes(stream: &mut TcpStream) -> Result<ReadResult, ProxyE
         let n = stream
             .read(&mut buf[total_read..])
             .await
-            .map_err(|e| ProxyError::BadRequest(format!("failed to read request: {}", e)))?;
+            .map_err(|e| ProxyError::BadRequest(format!("failed to read request: {e}")))?;
 
         if n == 0 {
             if total_read == 0 {
@@ -432,7 +426,7 @@ fn build_http_request(request: &ParsedRequest, path: &str) -> String {
 
     // Headers
     for (name, value) in &request.headers {
-        http.push_str(&format!("{}: {}\r\n", name, value));
+        http.push_str(&format!("{name}: {value}\r\n"));
     }
 
     // End of headers
@@ -448,7 +442,7 @@ fn parse_request(buf: &[u8], egress_node: Option<i32>) -> Result<ParsedRequest, 
 
     let status = req
         .parse(buf)
-        .map_err(|e| ProxyError::BadRequest(format!("failed to parse HTTP request: {}", e)))?;
+        .map_err(|e| ProxyError::BadRequest(format!("failed to parse HTTP request: {e}")))?;
     if status.is_partial() {
         return Err(ProxyError::BadRequest(
             "incomplete HTTP request".to_string(),
@@ -516,16 +510,16 @@ fn parse_request(buf: &[u8], egress_node: Option<i32>) -> Result<ParsedRequest, 
         let host = match &target.destination {
             Destination::WispersNode { node_number, port } => {
                 if *port == 80 {
-                    format!("{}.wispers.link", node_number)
+                    format!("{node_number}.wispers.link")
                 } else {
-                    format!("{}.wispers.link:{}", node_number, port)
+                    format!("{node_number}.wispers.link:{port}")
                 }
             }
             Destination::Internet { host, port } => {
                 if *port == 80 {
                     host.clone()
                 } else {
-                    format!("{}:{}", host, port)
+                    format!("{host}:{port}")
                 }
             }
         };
@@ -547,7 +541,7 @@ fn parse_connect_target(target: &str, egress_node: Option<i32>) -> Result<ProxyT
         Some(pos) => {
             let port_str = &target[pos + 1..];
             let port: u16 = port_str.parse().map_err(|_| {
-                ProxyError::BadRequest(format!("invalid port in CONNECT: {}", port_str))
+                ProxyError::BadRequest(format!("invalid port in CONNECT: {port_str}"))
             })?;
             (&target[..pos], port)
         }
@@ -579,8 +573,7 @@ fn parse_connect_target(target: &str, egress_node: Option<i32>) -> Result<ProxyT
                 })
             } else {
                 Err(ProxyError::Forbidden(format!(
-                    "CONNECT to non-wispers.link hosts requires --egress-node, got: {}",
-                    host
+                    "CONNECT to non-wispers.link hosts requires --egress-node, got: {host}"
                 )))
             }
         }
@@ -614,7 +607,7 @@ fn parse_proxy_target(url: &str, egress_node: Option<i32>) -> Result<ProxyTarget
             let port_str = &host_port[pos + 1..];
             let port: u16 = port_str
                 .parse()
-                .map_err(|_| ProxyError::BadRequest(format!("invalid port: {}", port_str)))?;
+                .map_err(|_| ProxyError::BadRequest(format!("invalid port: {port_str}")))?;
             (&host_port[..pos], port)
         }
         None => (host_port, 80),
@@ -645,8 +638,7 @@ fn parse_proxy_target(url: &str, egress_node: Option<i32>) -> Result<ProxyTarget
                 })
             } else {
                 Err(ProxyError::Forbidden(format!(
-                    "only *.wispers.link hosts are allowed without --egress-node, got: {}",
-                    host
+                    "only *.wispers.link hosts are allowed without --egress-node, got: {host}"
                 )))
             }
         }
@@ -670,7 +662,7 @@ fn is_hop_by_hop_header(name: &str) -> bool {
 }
 
 /// Send an HTTP error response.
-/// Send an HTTP error response for a ProxyError.
+/// Send an HTTP error response for a `ProxyError`.
 async fn send_proxy_error(stream: &mut TcpStream, error: &ProxyError) -> Result<()> {
     send_error(stream, error.status_code(), &error.to_string()).await
 }
@@ -686,8 +678,7 @@ async fn send_error(stream: &mut TcpStream, status: u16, message: &str) -> Resul
     };
 
     let response = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{}\n",
-        status, status_text, message
+        "HTTP/1.1 {status} {status_text}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{message}\n"
     );
     stream.write_all(response.as_bytes()).await?;
     Ok(())

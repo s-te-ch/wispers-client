@@ -194,7 +194,7 @@ fn stop_server(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     let path = ipc::ipc_path(&cg_id, node_number);
 
     let mut stream = UnixStream::connect(&path)
-        .with_context(|| format!("server not running (socket {:?})", path))?;
+        .with_context(|| format!("server not running (socket {path:?})"))?;
 
     writeln!(stream, r#"{{"cmd":"shutdown"}}"#)?;
     stream.flush()?;
@@ -264,11 +264,11 @@ fn daemonize_serve(_hub_override: Option<&str>, profile: &str) -> Result<()> {
         .join("logs");
     fs::create_dir_all(&log_dir).context("failed to create log directory")?;
 
-    let log_path = log_dir.join(format!("{}-{}.log", cg_id, node_number));
+    let log_path = log_dir.join(format!("{cg_id}-{node_number}.log"));
     let log_file = File::create(&log_path)
-        .with_context(|| format!("failed to create log file {:?}", log_path))?;
+        .with_context(|| format!("failed to create log file {log_path:?}"))?;
 
-    println!("Daemonizing, logging to {:?}", log_path);
+    println!("Daemonizing, logging to {log_path:?}");
 
     let daemonize = Daemonize::new()
         // The crate defaults to 0o027 post-fork, which would loosen the
@@ -416,7 +416,7 @@ async fn register(hub_override: Option<&str>, profile: &str, token: &str) -> Res
         );
     }
 
-    println!("Registering with token {}...", token);
+    println!("Registering with token {token}...");
 
     node.register(token).await.context("registration failed")?;
 
@@ -458,7 +458,7 @@ async fn activate(hub_override: Option<&str>, profile: &str, activation_code: &s
         );
     }
 
-    println!("Activating with activation code {}...", activation_code);
+    println!("Activating with activation code {activation_code}...");
     node.activate(activation_code)
         .await
         .context("activation failed")?;
@@ -506,7 +506,7 @@ async fn get_activation_code(
             println!("{}", p.activation_code);
         }
         ipc::Response::Error { error, .. } => {
-            anyhow::bail!("{}", error);
+            anyhow::bail!("{error}");
         }
         _ => {
             anyhow::bail!("unexpected response from server");

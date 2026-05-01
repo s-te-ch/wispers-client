@@ -65,7 +65,7 @@ async fn test_p2p_connection_via_hub() {
     // Start fake hub with the roster
     let hub = FakeHub::with_roster(roster.clone());
     let (hub_addr, _hub_handle) = hub.start().await.expect("hub starts");
-    let hub_url = format!("http://{}", hub_addr);
+    let hub_url = format!("http://{hub_addr}");
 
     // Create registrations
     let group_id = ConnectivityGroupId::from("test-group");
@@ -134,7 +134,7 @@ async fn test_serving_reconnects_after_hub_blip() {
     let hub = FakeHub::with_roster(roster.clone());
     let ctrl = hub.controller();
     let (hub_addr, _hub_handle) = hub.start().await.expect("hub starts");
-    let hub_url = format!("http://{}", hub_addr);
+    let hub_url = format!("http://{hub_addr}");
 
     let registration_2 = NodeRegistration::new(
         ConnectivityGroupId::from("test-reconnect"),
@@ -207,7 +207,7 @@ async fn test_p2p_multiple_messages() {
 
     let hub = FakeHub::with_roster(roster.clone());
     let (hub_addr, _hub_handle) = hub.start().await.expect("hub starts");
-    let hub_url = format!("http://{}", hub_addr);
+    let hub_url = format!("http://{hub_addr}");
 
     let group_id = ConnectivityGroupId::from("test");
     let node1 = Node::new_activated_for_test(
@@ -240,12 +240,12 @@ async fn test_p2p_multiple_messages() {
 
     // Send 10 messages each way
     for i in 0..10 {
-        let msg = format!("message {} from caller", i);
+        let msg = format!("message {i} from caller");
         caller.send(msg.as_bytes()).expect("send succeeds");
         let received = answerer.recv().await.expect("recv succeeds");
         assert_eq!(received, msg.as_bytes());
 
-        let msg = format!("message {} from answerer", i);
+        let msg = format!("message {i} from answerer");
         answerer.send(msg.as_bytes()).expect("send succeeds");
         let received = caller.recv().await.expect("recv succeeds");
         assert_eq!(received, msg.as_bytes());

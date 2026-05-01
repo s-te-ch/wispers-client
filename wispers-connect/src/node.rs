@@ -37,14 +37,14 @@ pub(crate) struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
-    /// Create a new RuntimeConfig with the default hub address.
+    /// Create a new `RuntimeConfig` with the default hub address.
     pub(crate) fn new() -> Self {
         Self {
             hub_addr: DEFAULT_HUB_ADDR.to_string(),
         }
     }
 
-    /// Create a new RuntimeConfig with a custom hub address.
+    /// Create a new `RuntimeConfig` with a custom hub address.
     pub(crate) fn new_with_addr(hub_addr: impl Into<String>) -> Self {
         Self {
             hub_addr: hub_addr.into(),
@@ -109,17 +109,16 @@ impl NodeStorage {
     pub async fn restore_or_init_node(&self) -> Result<Node, NodeStateError> {
         use crate::hub::HubClient;
 
-        let state = match self.store.load().map_err(NodeStateError::store)? {
-            Some(state) => state,
-            None => {
-                let state = PersistedNodeState::new();
-                self.store.save(&state).map_err(NodeStateError::store)?;
-                return Ok(Node::Pending(PendingNode::new(
-                    state,
-                    self.store.clone(),
-                    self.config.clone(),
-                )));
-            }
+        let state = if let Some(state) = self.store.load().map_err(NodeStateError::store)? {
+            state
+        } else {
+            let state = PersistedNodeState::new();
+            self.store.save(&state).map_err(NodeStateError::store)?;
+            return Ok(Node::Pending(PendingNode::new(
+                state,
+                self.store.clone(),
+                self.config.clone(),
+            )));
         };
 
         // Not registered yet
@@ -390,10 +389,7 @@ impl ActivatedNode {
             }
         }
 
-        log::info!(
-            "Peer node {} not in cached roster, refetching from hub",
-            peer_node_number
-        );
+        log::info!("Peer node {peer_node_number} not in cached roster, refetching from hub");
         let fresh_roster = client
             .get_and_verify_roster(&self.registration, &self.signing_key.public_key_spki())
             .await?;
@@ -670,20 +666,17 @@ impl Node {
             .map_err(NodeStateError::hub)?;
 
         let node = std::mem::replace(self, Node::Placeholder);
-        match node {
-            Node::Pending(mut p) => {
-                p.persisted.set_registration(registration.clone());
-                p.store.save(&p.persisted).map_err(NodeStateError::store)?;
-                *self = Node::Registered(RegisteredNode::new(p.persisted, p.store, p.config)?);
-                Ok(())
-            }
-            _ => {
-                *self = node;
-                Err(NodeStateError::InvalidState {
-                    current: self.state(),
-                    required: "Pending",
-                })
-            }
+        if let Node::Pending(mut p) = node {
+            p.persisted.set_registration(registration.clone());
+            p.store.save(&p.persisted).map_err(NodeStateError::store)?;
+            *self = Node::Registered(RegisteredNode::new(p.persisted, p.store, p.config)?);
+            Ok(())
+        } else {
+            *self = node;
+            Err(NodeStateError::InvalidState {
+                current: self.state(),
+                required: "Pending",
+            })
         }
     }
 
@@ -807,23 +800,20 @@ impl Node {
 
         // NOW we transition
         let node = std::mem::replace(self, Node::Placeholder);
-        match node {
-            Node::Registered(r) => {
-                *self = Node::Activated(ActivatedNode::new(
-                    r.persisted,
-                    r.store,
-                    r.config,
-                    cosigned_roster,
-                ));
-                Ok(())
-            }
-            _ => {
-                *self = node;
-                Err(NodeStateError::InvalidState {
-                    current: self.state(),
-                    required: "Registered",
-                })
-            }
+        if let Node::Registered(r) = node {
+            *self = Node::Activated(ActivatedNode::new(
+                r.persisted,
+                r.store,
+                r.config,
+                cosigned_roster,
+            ));
+            Ok(())
+        } else {
+            *self = node;
+            Err(NodeStateError::InvalidState {
+                current: self.state(),
+                required: "Registered",
+            })
         }
     }
 
@@ -966,6 +956,7 @@ impl Node {
 /// Test helper for creating Node instances.
 #[doc(hidden)]
 impl Node {
+    #[must_use]
     pub fn new_activated_for_test(
         root_key: [u8; 32],
         roster: proto::roster::Roster,
