@@ -106,24 +106,23 @@ impl ForeignNodeStateStore {
                     self.callbacks.ctx,
                     buffer.as_mut_ptr(),
                     buffer.len(),
-                    &mut required,
+                    &raw mut required,
                 )
             };
 
             match status {
                 WispersStatus::Success => {
                     buffer.truncate(required);
-                    match deserialize_registration_opt(&buffer) {
-                        Ok(reg) => return Ok(reg),
-                        Err(_) => {
-                            // Old format (bincode) — discard and let the caller
-                            // treat it as missing so restoreOrInit re-registers.
-                            log::warn!(
-                                "Registration decode failed (format migration), treating as empty"
-                            );
-                            let _ = self.call_delete_registration();
-                            return Ok(None);
-                        }
+                    if let Ok(reg) = deserialize_registration_opt(&buffer) {
+                        return Ok(reg);
+                    } else {
+                        // Old format (bincode) — discard and let the caller
+                        // treat it as missing so restoreOrInit re-registers.
+                        log::warn!(
+                            "Registration decode failed (format migration), treating as empty"
+                        );
+                        let _ = self.call_delete_registration();
+                        return Ok(None);
                     }
                 }
                 WispersStatus::NotFound => return Ok(None),

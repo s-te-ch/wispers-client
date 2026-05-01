@@ -40,7 +40,7 @@ impl AllowedPorts {
             }
             let port: u16 = part
                 .parse()
-                .with_context(|| format!("invalid port number: {}", part))?;
+                .with_context(|| format!("invalid port number: {part}"))?;
             ports.insert(port);
         }
 
@@ -96,7 +96,7 @@ pub async fn serve(
             AllowedPorts::Whitelist(set) => {
                 let mut ports: Vec<_> = set.iter().collect();
                 ports.sort();
-                println!("  Port forwarding: allowed ports {:?}", ports);
+                println!("  Port forwarding: allowed ports {ports:?}");
             }
         }
     } else {
@@ -154,7 +154,7 @@ pub async fn serve(
                         return Err(e);
                     }
                     Err(e) => {
-                        return Err(anyhow::anyhow!("Connect task panicked: {}", e));
+                        return Err(anyhow::anyhow!("Connect task panicked: {e}"));
                     }
                 }
             }
@@ -167,10 +167,10 @@ pub async fn serve(
                         break;
                     }
                     Ok(Err(e)) => {
-                        return Err(anyhow::anyhow!("Session error: {}", e));
+                        return Err(anyhow::anyhow!("Session error: {e}"));
                     }
                     Err(e) => {
-                        return Err(anyhow::anyhow!("Session task panicked: {}", e));
+                        return Err(anyhow::anyhow!("Session task panicked: {e}"));
                     }
                 }
             }
@@ -328,15 +328,12 @@ async fn handle_quic_stream(
         }
         cmd if cmd.starts_with(b"FORWARD ") => {
             let port_str = String::from_utf8_lossy(&cmd[8..]);
-            match port_str.trim().parse::<u16>() {
-                Ok(port) => {
-                    info!(stream_id, port, "Received FORWARD");
-                    handle_forward_stream(stream, port, &allowed_ports).await;
-                }
-                Err(_) => {
-                    let _ = stream.write_all(b"ERROR invalid port\n").await;
-                    let _ = stream.finish().await;
-                }
+            if let Ok(port) = port_str.trim().parse::<u16>() {
+                info!(stream_id, port, "Received FORWARD");
+                handle_forward_stream(stream, port, &allowed_ports).await;
+            } else {
+                let _ = stream.write_all(b"ERROR invalid port\n").await;
+                let _ = stream.finish().await;
             }
         }
         cmd if cmd.starts_with(b"CONNECT ") => {
@@ -378,7 +375,7 @@ async fn handle_forward_stream(
     let stream = Arc::new(stream);
 
     // Connect to localhost:port
-    let tcp = match TcpStream::connect(format!("127.0.0.1:{}", port)).await {
+    let tcp = match TcpStream::connect(format!("127.0.0.1:{port}")).await {
         Ok(tcp) => {
             if let Err(e) = stream.write_all(b"OK\n").await {
                 warn!(error = %e, "Failed to send OK");
@@ -387,7 +384,7 @@ async fn handle_forward_stream(
             tcp
         }
         Err(e) => {
-            let msg = format!("ERROR {}\n", e);
+            let msg = format!("ERROR {e}\n");
             let _ = stream.write_all(msg.as_bytes()).await;
             let _ = stream.finish().await;
             return;
@@ -459,14 +456,13 @@ async fn handle_connect_stream(
     }
 
     // Parse host:port
-    let (host, port) = match parse_host_port(target) {
-        Some(hp) => hp,
-        None => {
-            warn!(target, "CONNECT invalid target");
-            let _ = stream.write_all(b"ERROR invalid target format\n").await;
-            let _ = stream.finish().await;
-            return;
-        }
+    let (host, port) = if let Some(hp) = parse_host_port(target) {
+        hp
+    } else {
+        warn!(target, "CONNECT invalid target");
+        let _ = stream.write_all(b"ERROR invalid target format\n").await;
+        let _ = stream.finish().await;
+        return;
     };
 
     let stream = Arc::new(stream);
@@ -481,7 +477,7 @@ async fn handle_connect_stream(
             tcp
         }
         Err(e) => {
-            let msg = format!("ERROR {}\n", e);
+            let msg = format!("ERROR {e}\n");
             let _ = stream.write_all(msg.as_bytes()).await;
             let _ = stream.finish().await;
             return;

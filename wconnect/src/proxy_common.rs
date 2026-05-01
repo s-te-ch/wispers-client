@@ -16,7 +16,7 @@ use wispers_connect::P2pError;
 use wispers_connect::{Node, QuicConnection, QuicStream};
 
 /// Default idle timeout for pooled connections (60 seconds).
-pub const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+pub const IDLE_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// Interval for checking and cleaning up idle connections.
 pub const CLEANUP_INTERVAL: Duration = Duration::from_secs(15);
@@ -40,10 +40,10 @@ pub enum ProxyError {
 impl fmt::Display for ProxyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ProxyError::BadRequest(msg) => write!(f, "{}", msg),
-            ProxyError::Forbidden(msg) => write!(f, "{}", msg),
-            ProxyError::BadGateway(msg) => write!(f, "{}", msg),
-            ProxyError::GatewayTimeout(msg) => write!(f, "{}", msg),
+            ProxyError::BadRequest(msg) => write!(f, "{msg}"),
+            ProxyError::Forbidden(msg) => write!(f, "{msg}"),
+            ProxyError::BadGateway(msg) => write!(f, "{msg}"),
+            ProxyError::GatewayTimeout(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -190,15 +190,13 @@ pub fn parse_wispers_host(host: &str) -> Result<WispersHost, Option<ProxyError>>
     // Parse node number
     let node_number: i32 = node_str.parse().map_err(|_| {
         Some(ProxyError::BadRequest(format!(
-            "invalid node number in hostname: {}",
-            node_str
+            "invalid node number in hostname: {node_str}"
         )))
     })?;
 
     if node_number <= 0 {
         return Err(Some(ProxyError::BadRequest(format!(
-            "node number must be positive, got: {}",
-            node_number
+            "node number must be positive, got: {node_number}"
         ))));
     }
 
@@ -217,8 +215,8 @@ pub enum OpenStreamError {
 impl fmt::Display for OpenStreamError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Connect(e) => write!(f, "failed to connect to peer: {}", e),
-            Self::Stream(e) => write!(f, "failed to open stream: {}", e),
+            Self::Connect(e) => write!(f, "failed to connect to peer: {e}"),
+            Self::Stream(e) => write!(f, "failed to open stream: {e}"),
         }
     }
 }
@@ -239,9 +237,9 @@ pub enum CommandError {
 impl fmt::Display for CommandError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Io(e) => write!(f, "stream I/O failed: {}", e),
-            Self::Rejected(msg) => write!(f, "remote rejected: {}", msg),
-            Self::Protocol(msg) => write!(f, "unexpected response: {}", msg),
+            Self::Io(e) => write!(f, "stream I/O failed: {e}"),
+            Self::Rejected(msg) => write!(f, "remote rejected: {msg}"),
+            Self::Protocol(msg) => write!(f, "unexpected response: {msg}"),
         }
     }
 }
@@ -314,12 +312,9 @@ mod tests {
 
     #[test]
     fn test_proxy_error_status_codes() {
-        assert_eq!(ProxyError::BadRequest("".to_string()).status_code(), 400);
-        assert_eq!(ProxyError::Forbidden("".to_string()).status_code(), 403);
-        assert_eq!(ProxyError::BadGateway("".to_string()).status_code(), 502);
-        assert_eq!(
-            ProxyError::GatewayTimeout("".to_string()).status_code(),
-            504
-        );
+        assert_eq!(ProxyError::BadRequest(String::new()).status_code(), 400);
+        assert_eq!(ProxyError::Forbidden(String::new()).status_code(), 403);
+        assert_eq!(ProxyError::BadGateway(String::new()).status_code(), 502);
+        assert_eq!(ProxyError::GatewayTimeout(String::new()).status_code(), 504);
     }
 }

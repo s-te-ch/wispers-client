@@ -41,7 +41,7 @@ pub struct WispersIncomingConnections {
 
 // Callback types for serving operations
 
-/// Callback for start_serving that receives the session components.
+/// Callback for `start_serving` that receives the session components.
 pub type WispersStartServingCallback = Option<
     unsafe extern "C" fn(
         ctx: *mut c_void,
@@ -244,7 +244,7 @@ pub extern "C" fn wispers_incoming_accept_quic_async(
 /// Registered nodes can serve for bootstrapping but cannot accept P2P connections
 /// (incoming will be NULL). Activated nodes receive an incoming connections handle.
 ///
-/// Returns INVALID_STATE if the node is in Pending state.
+/// Returns `INVALID_STATE` if the node is in Pending state.
 /// The node handle is NOT consumed.
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_node_start_serving_async(
@@ -345,7 +345,7 @@ impl From<WispersTtlProfile> for crate::crypto::TtlProfile {
 /// Generate an activation code for endorsing a new node (interactive profile).
 ///
 /// The serving handle is NOT consumed.
-/// On success, the callback receives the activation code string (caller must free with wispers_string_free).
+/// On success, the callback receives the activation code string (caller must free with `wispers_string_free`).
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_serving_handle_generate_activation_code_async(
     handle: *mut WispersServingHandle,

@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 // Handle wrappers
 // =============================================================================
 
-/// Opaque handle to a NodeStorage instance.
+/// Opaque handle to a `NodeStorage` instance.
 pub struct WispersNodeStorageHandle(pub(crate) NodeStorage);
 
 /// Opaque handle to a Node instance.
@@ -143,11 +143,13 @@ pub struct WispersRegistrationInfo {
 }
 
 impl WispersRegistrationInfo {
-    /// Create from a NodeRegistration, allocating C strings.
+    /// Create from a `NodeRegistration`, allocating C strings.
     pub(crate) fn from_registration(reg: &NodeRegistration) -> Result<Self, WispersStatus> {
         let cg_id = CString::new(reg.connectivity_group_id.to_string())
             .map_err(|_| WispersStatus::InvalidUtf8)?;
-        let token_str = reg.auth_token().map(|t| t.as_str()).unwrap_or("");
+        let token_str = reg
+            .auth_token()
+            .map_or("", super::super::types::AuthToken::as_str);
         let token = CString::new(token_str).map_err(|_| WispersStatus::InvalidUtf8)?;
         let jwt_ptr = CString::new(reg.attestation_jwt.as_str())
             .map_err(|_| WispersStatus::InvalidUtf8)?
@@ -360,8 +362,7 @@ pub extern "C" fn wispers_group_info_node_at(
     let info = unsafe { &*info };
     info.nodes
         .get(index)
-        .map(|n| n as *const WispersNode)
-        .unwrap_or(ptr::null())
+        .map_or(ptr::null(), std::ptr::from_ref::<WispersNode>)
 }
 
 // -----------------------------------------------------------------------------
@@ -448,7 +449,7 @@ pub(crate) fn c_str_to_string(ptr: *const c_char) -> Result<String, WispersStatu
     unsafe {
         CStr::from_ptr(ptr)
             .to_str()
-            .map(|s| s.to_owned())
+            .map(std::borrow::ToOwned::to_owned)
             .map_err(|_| WispersStatus::InvalidUtf8)
     }
 }

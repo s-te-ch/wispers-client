@@ -48,10 +48,11 @@ impl TtlProfile {
 
     /// How long a generated code stays valid. This is the offline
     /// brute-force window the secret length is calibrated against.
+    #[must_use]
     pub fn ttl(self) -> Duration {
         match self {
-            TtlProfile::Interactive => Duration::from_secs(120),
-            TtlProfile::Asynchronous => Duration::from_secs(24 * 60 * 60),
+            TtlProfile::Interactive => Duration::from_mins(2),
+            TtlProfile::Asynchronous => Duration::from_hours(24),
         }
     }
 
@@ -79,7 +80,7 @@ impl TtlProfile {
 /// stalling pairing to give itself time to derive the pairing code. The
 /// `no_profile_is_weaker_than_interactive` test makes sure we don't introduce
 /// a lower-entropy code in the future for which this deadline is too long.
-pub(crate) const PAIRING_RPC_DEADLINE: Duration = Duration::from_secs(120);
+pub(crate) const PAIRING_RPC_DEADLINE: Duration = Duration::from_mins(2);
 
 /// Length of a nonce in bytes.
 const NONCE_LEN: usize = 16;
@@ -92,6 +93,7 @@ pub struct SigningKeyPair {
 
 impl SigningKeyPair {
     /// Derive a signing keypair from the root key using HKDF.
+    #[must_use]
     pub fn derive_from_root_key(root_key: &[u8; 32]) -> Self {
         let hk = Hkdf::<Sha256>::new(Some(b"wispers-connect-v1"), root_key);
         let mut signing_seed = [0u8; 32];
@@ -102,7 +104,8 @@ impl SigningKeyPair {
         Self { signing_key }
     }
 
-    /// Get the public key in SPKI (X.509 SubjectPublicKeyInfo) DER format.
+    /// Get the public key in SPKI (X.509 `SubjectPublicKeyInfo`) DER format.
+    #[must_use]
     pub fn public_key_spki(&self) -> Vec<u8> {
         self.signing_key
             .verifying_key()
@@ -112,11 +115,13 @@ impl SigningKeyPair {
     }
 
     /// Get the raw public key bytes.
+    #[must_use]
     pub fn public_key_bytes(&self) -> [u8; 32] {
         self.signing_key.verifying_key().to_bytes()
     }
 
     /// Sign a message.
+    #[must_use]
     pub fn sign(&self, message: &[u8]) -> Vec<u8> {
         self.signing_key.sign(message).to_bytes().to_vec()
     }
@@ -240,7 +245,7 @@ fn encode_base36(bytes: &[u8]) -> String {
         "{} bytes must fit in {width} base36 digits",
         bytes.len()
     );
-    format!("{:0>width$}", s, width = width)
+    format!("{s:0>width$}")
 }
 
 /// Decode base36 characters to secret bytes.

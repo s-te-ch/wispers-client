@@ -39,6 +39,7 @@ pub enum NodeStateError {
 }
 
 impl NodeStateError {
+    #[must_use]
     pub fn store(error: StorageError) -> Self {
         Self::Store(error)
     }
