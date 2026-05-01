@@ -41,7 +41,7 @@ pub struct WispersIncomingConnections {
 
 // Callback types for serving operations
 
-/// Callback for start_serving that receives the session components.
+/// Callback for `start_serving` that receives the session components.
 pub type WispersStartServingCallback = Option<
     unsafe extern "C" fn(
         ctx: *mut c_void,
@@ -130,9 +130,8 @@ pub extern "C" fn wispers_incoming_accept_udp_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);
@@ -191,9 +190,8 @@ pub extern "C" fn wispers_incoming_accept_quic_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);
@@ -244,7 +242,7 @@ pub extern "C" fn wispers_incoming_accept_quic_async(
 /// Registered nodes can serve for bootstrapping but cannot accept P2P connections
 /// (incoming will be NULL). Activated nodes receive an incoming connections handle.
 ///
-/// Returns INVALID_STATE if the node is in Pending state.
+/// Returns `INVALID_STATE` if the node is in Pending state.
 /// The node handle is NOT consumed.
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_node_start_serving_async(
@@ -256,9 +254,8 @@ pub extern "C" fn wispers_node_start_serving_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let handle_clone = unsafe { &*handle }.clone();
@@ -325,7 +322,7 @@ pub extern "C" fn wispers_node_start_serving_async(
 /// Generate an activation code for endorsing a new node.
 ///
 /// The serving handle is NOT consumed.
-/// On success, the callback receives the activation code string (caller must free with wispers_string_free).
+/// On success, the callback receives the activation code string (caller must free with `wispers_string_free`).
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_serving_handle_generate_activation_code_async(
     handle: *mut WispersServingHandle,
@@ -336,9 +333,8 @@ pub extern "C" fn wispers_serving_handle_generate_activation_code_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let wrapper = unsafe { &*handle };
@@ -403,19 +399,15 @@ pub extern "C" fn wispers_serving_session_run_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     // Consume the session
     let mut wrapper = unsafe { Box::from_raw(handle) };
-    let session = match wrapper.0.take() {
-        Some(s) => s,
-        None => {
-            // Session was already consumed
-            return WispersStatus::InvalidState;
-        }
+    let Some(session) = wrapper.0.take() else {
+        // Session was already consumed
+        return WispersStatus::InvalidState;
     };
     let ctx = CallbackContext(ctx);
 
@@ -459,9 +451,8 @@ pub extern "C" fn wispers_serving_handle_shutdown_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let wrapper = unsafe { &*handle };

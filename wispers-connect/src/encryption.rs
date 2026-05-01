@@ -135,12 +135,12 @@ impl P2pCipher {
         // Caller encrypts with c2a key, decrypts with a2c key
         let (send_key, send_nonce_prefix) = derive_direction_keys(
             shared_secret,
-            &connection_id_bytes,
+            connection_id_bytes,
             PRK_INFO_CALLER_TO_ANSWERER,
         )?;
         let (recv_key, recv_nonce_prefix) = derive_direction_keys(
             shared_secret,
-            &connection_id_bytes,
+            connection_id_bytes,
             PRK_INFO_ANSWERER_TO_CALLER,
         )?;
 
@@ -160,12 +160,12 @@ impl P2pCipher {
         // Answerer encrypts with a2c key, decrypts with c2a key
         let (send_key, send_nonce_prefix) = derive_direction_keys(
             shared_secret,
-            &connection_id_bytes,
+            connection_id_bytes,
             PRK_INFO_ANSWERER_TO_CALLER,
         )?;
         let (recv_key, recv_nonce_prefix) = derive_direction_keys(
             shared_secret,
-            &connection_id_bytes,
+            connection_id_bytes,
             PRK_INFO_CALLER_TO_ANSWERER,
         )?;
 
@@ -189,11 +189,11 @@ impl P2pCipher {
 /// Derive direction-specific AEAD key and nonce prefix.
 fn derive_direction_keys(
     shared_secret: &[u8; 32],
-    connection_id: &[u8; 8],
+    connection_id: [u8; 8],
     direction_info: &[u8],
 ) -> Result<([u8; 32], [u8; 4]), EncryptionError> {
     // Use connection_id as salt
-    let hkdf = Hkdf::<Sha256>::new(Some(connection_id), shared_secret);
+    let hkdf = Hkdf::<Sha256>::new(Some(&connection_id), shared_secret);
 
     let mut aead_key = [0u8; 32];
     hkdf.expand(direction_info, &mut aead_key)
@@ -271,12 +271,12 @@ mod tests {
 
         // Multiple messages in both directions
         for i in 0..5 {
-            let msg = format!("caller message {}", i);
+            let msg = format!("caller message {i}");
             let enc = caller.encrypt(msg.as_bytes()).unwrap();
             let dec = answerer.decrypt(&enc).unwrap();
             assert_eq!(dec, msg.as_bytes());
 
-            let msg = format!("answerer message {}", i);
+            let msg = format!("answerer message {i}");
             let enc = answerer.encrypt(msg.as_bytes()).unwrap();
             let dec = caller.decrypt(&enc).unwrap();
             assert_eq!(dec, msg.as_bytes());

@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 // Handle wrappers
 // =============================================================================
 
-/// Opaque handle to a NodeStorage instance.
+/// Opaque handle to a `NodeStorage` instance.
 pub struct WispersNodeStorageHandle(pub(crate) NodeStorage);
 
 /// Opaque handle to a Node instance.
@@ -130,11 +130,11 @@ pub struct WispersRegistrationInfo {
 }
 
 impl WispersRegistrationInfo {
-    /// Create from a NodeRegistration, allocating C strings.
+    /// Create from a `NodeRegistration`, allocating C strings.
     pub(crate) fn from_registration(reg: &NodeRegistration) -> Result<Self, WispersStatus> {
         let cg_id = CString::new(reg.connectivity_group_id.to_string())
             .map_err(|_| WispersStatus::InvalidUtf8)?;
-        let token_str = reg.auth_token().map(|t| t.as_str()).unwrap_or("");
+        let token_str = reg.auth_token().map_or("", super::super::types::AuthToken::as_str);
         let token = CString::new(token_str).map_err(|_| WispersStatus::InvalidUtf8)?;
         let jwt_ptr = CString::new(reg.attestation_jwt.as_str())
             .map_err(|_| WispersStatus::InvalidUtf8)?
@@ -200,7 +200,7 @@ pub struct WispersNode {
     pub is_online: bool,
 }
 
-/// Activation status values for WispersNode.
+/// Activation status values for `WispersNode`.
 pub const WISPERS_ACTIVATION_UNKNOWN: c_int = 0;
 pub const WISPERS_ACTIVATION_NOT_ACTIVATED: c_int = 1;
 pub const WISPERS_ACTIVATION_ACTIVATED: c_int = 2;
@@ -220,7 +220,8 @@ pub extern "C" fn wispers_node_list_free(list: *mut WispersNodeList) {
     unsafe {
         let list = &mut *list;
         if !list.nodes.is_null() && list.count > 0 {
-            // Reconstruct the Vec to properly free it
+            // Reconstruct the Vec to properly free it; length == capacity by construction.
+            #[allow(clippy::same_length_and_capacity)]
             let nodes = Vec::from_raw_parts(list.nodes, list.count, list.count);
             for node in nodes {
                 if !node.name.is_null() {
@@ -272,7 +273,7 @@ pub struct WispersGroupInfo {
 }
 
 impl WispersGroupInfo {
-    /// Create from a GroupInfo, allocating C strings.
+    /// Create from a `GroupInfo`, allocating C strings.
     pub(crate) fn from_group_info(info: GroupInfo) -> Result<Self, WispersStatus> {
         let state = WispersGroupState::from(&info.state);
         let count = info.nodes.len();
@@ -358,6 +359,7 @@ pub extern "C" fn wispers_group_info_free(group_info: *mut WispersGroupInfo) {
     if !gs.nodes.is_null() && gs.nodes_count > 0 {
         // SAFETY: `nodes` was allocated by Rust via `Vec::into_raw_parts`-equivalent
         // (`as_mut_ptr` + `mem::forget`) with length == capacity == `nodes_count`.
+        #[allow(clippy::same_length_and_capacity)]
         let nodes = unsafe { Vec::from_raw_parts(gs.nodes, gs.nodes_count, gs.nodes_count) };
         for node in nodes {
             if !node.name.is_null() {
@@ -392,7 +394,7 @@ pub(crate) fn c_str_to_string(ptr: *const c_char) -> Result<String, WispersStatu
     unsafe {
         CStr::from_ptr(ptr)
             .to_str()
-            .map(|s| s.to_owned())
+            .map(std::borrow::ToOwned::to_owned)
             .map_err(|_| WispersStatus::InvalidUtf8)
     }
 }
@@ -417,11 +419,12 @@ impl From<NodeStateError> for WispersStatus {
             NodeStateError::AlreadyRegistered => WispersStatus::AlreadyRegistered,
             NodeStateError::NotRegistered => WispersStatus::NotRegistered,
             NodeStateError::InvalidActivationCode(_) => WispersStatus::InvalidActivationCode,
-            NodeStateError::MacVerificationFailed => WispersStatus::ActivationFailed,
-            NodeStateError::MissingEndorserResponse => WispersStatus::ActivationFailed,
-            NodeStateError::RosterVerificationFailed(_) => WispersStatus::ActivationFailed,
-            NodeStateError::LastActiveNode => WispersStatus::InvalidState,
-            NodeStateError::InvalidState { .. } => WispersStatus::InvalidState,
+            NodeStateError::MacVerificationFailed
+            | NodeStateError::MissingEndorserResponse
+            | NodeStateError::RosterVerificationFailed(_) => WispersStatus::ActivationFailed,
+            NodeStateError::LastActiveNode | NodeStateError::InvalidState { .. } => {
+                WispersStatus::InvalidState
+            }
         }
     }
 }

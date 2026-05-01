@@ -1,7 +1,7 @@
 //! Local daemon server for wconnect CLI.
 //!
 //! The daemon listens on a Unix Domain Socket (Unix) or TCP localhost (Windows)
-//! and accepts JSON-lines commands that are translated to ServingHandle method calls.
+//! and accepts JSON-lines commands that are translated to `ServingHandle` method calls.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -39,7 +39,7 @@ pub fn ipc_path(connectivity_group_id: &str, node_number: i32) -> PathBuf {
     let base = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
     let dir = base.join(".wconnect").join("sockets");
     #[cfg(unix)]
-    return dir.join(format!("{}-{}.sock", connectivity_group_id, node_number));
+    return dir.join(format!("{connectivity_group_id}-{node_number}.sock"));
     #[cfg(windows)]
     return dir.join(format!("{}-{}.port", connectivity_group_id, node_number));
 }
@@ -135,7 +135,7 @@ impl DaemonServer {
         if path.exists() {
             match UnixStream::connect(&path).await {
                 Ok(_) => {
-                    anyhow::bail!("daemon already running at {:?}", path);
+                    anyhow::bail!("daemon already running at {}", path.display());
                 }
                 Err(_) => {
                     // Stale socket, remove it
@@ -266,20 +266,20 @@ pub async fn handle_client(stream: IpcStream, handle: ServingHandle) {
             Ok(_) => {
                 let response = process_request(&line, &handle).await;
                 let response_json = serde_json::to_string(&response).unwrap_or_else(|e| {
-                    serde_json::to_string(&Response::error(format!("serialization error: {}", e)))
+                    serde_json::to_string(&Response::error(format!("serialization error: {e}")))
                         .unwrap()
                 });
 
                 if let Err(e) = writer.write_all(response_json.as_bytes()).await {
-                    eprintln!("Failed to write response: {}", e);
+                    eprintln!("Failed to write response: {e}");
                     break;
                 }
                 if let Err(e) = writer.write_all(b"\n").await {
-                    eprintln!("Failed to write newline: {}", e);
+                    eprintln!("Failed to write newline: {e}");
                     break;
                 }
                 if let Err(e) = writer.flush().await {
-                    eprintln!("Failed to flush: {}", e);
+                    eprintln!("Failed to flush: {e}");
                     break;
                 }
 
@@ -292,14 +292,14 @@ pub async fn handle_client(stream: IpcStream, handle: ServingHandle) {
                 }
             }
             Err(e) => {
-                eprintln!("Failed to read from client: {}", e);
+                eprintln!("Failed to read from client: {e}");
                 break;
             }
         }
     }
 }
 
-/// Handle a client connection when the ServingHandle may not be available yet.
+/// Handle a client connection when the `ServingHandle` may not be available yet.
 pub async fn handle_client_with_optional_handle(
     stream: IpcStream,
     handle_state: std::sync::Arc<tokio::sync::RwLock<Option<ServingHandle>>>,
@@ -315,41 +315,38 @@ pub async fn handle_client_with_optional_handle(
             Ok(_) => {
                 let response = {
                     let guard = handle_state.read().await;
-                    match &*guard {
-                        Some(handle) => process_request(&line, handle).await,
-                        None => {
-                            // Hub not connected yet
-                            let request: Result<Request, _> = serde_json::from_str(&line);
-                            match request {
-                                Ok(Request::Status) => {
-                                    Response::success(ResponseData::Status(StatusData {
-                                        connected: false,
-                                        node_number: 0, // We don't have this info without the handle
-                                        cg_id: String::new(),
-                                        endorsing: None,
-                                    }))
-                                }
-                                Ok(_) => Response::error("hub not connected yet"),
-                                Err(e) => Response::error(format!("invalid request: {}", e)),
+                    if let Some(handle) = &*guard { process_request(&line, handle).await } else {
+                        // Hub not connected yet
+                        let request: Result<Request, _> = serde_json::from_str(&line);
+                        match request {
+                            Ok(Request::Status) => {
+                                Response::success(ResponseData::Status(StatusData {
+                                    connected: false,
+                                    node_number: 0, // We don't have this info without the handle
+                                    cg_id: String::new(),
+                                    endorsing: None,
+                                }))
                             }
+                            Ok(_) => Response::error("hub not connected yet"),
+                            Err(e) => Response::error(format!("invalid request: {e}")),
                         }
                     }
                 };
                 let response_json = serde_json::to_string(&response).unwrap_or_else(|e| {
-                    serde_json::to_string(&Response::error(format!("serialization error: {}", e)))
+                    serde_json::to_string(&Response::error(format!("serialization error: {e}")))
                         .unwrap()
                 });
 
                 if let Err(e) = writer.write_all(response_json.as_bytes()).await {
-                    eprintln!("Failed to write response: {}", e);
+                    eprintln!("Failed to write response: {e}");
                     break;
                 }
                 if let Err(e) = writer.write_all(b"\n").await {
-                    eprintln!("Failed to write newline: {}", e);
+                    eprintln!("Failed to write newline: {e}");
                     break;
                 }
                 if let Err(e) = writer.flush().await {
-                    eprintln!("Failed to flush: {}", e);
+                    eprintln!("Failed to flush: {e}");
                     break;
                 }
 
@@ -361,7 +358,7 @@ pub async fn handle_client_with_optional_handle(
                 }
             }
             Err(e) => {
-                eprintln!("Failed to read from client: {}", e);
+                eprintln!("Failed to read from client: {e}");
                 break;
             }
         }
@@ -372,7 +369,7 @@ pub async fn handle_client_with_optional_handle(
 async fn process_request(line: &str, handle: &ServingHandle) -> Response {
     let request: Request = match serde_json::from_str(line) {
         Ok(r) => r,
-        Err(e) => return Response::error(format!("invalid request: {}", e)),
+        Err(e) => return Response::error(format!("invalid request: {e}")),
     };
 
     match request {
@@ -389,14 +386,14 @@ async fn process_request(line: &str, handle: &ServingHandle) -> Response {
                     endorsing,
                 }))
             }
-            Err(e) => Response::error(format!("status failed: {}", e)),
+            Err(e) => Response::error(format!("status failed: {e}")),
         },
 
         Request::GetActivationCode => match handle.generate_activation_code().await {
             Ok(code) => Response::success(ResponseData::ActivationCode(ActivationCodeData {
                 activation_code: code.format(),
             })),
-            Err(e) => Response::error(format!("{}", e)),
+            Err(e) => Response::error(format!("{e}")),
         },
 
         Request::Shutdown => {
@@ -428,7 +425,7 @@ impl DaemonClient {
     pub async fn connect(connectivity_group_id: &str, node_number: i32) -> Result<Self> {
         let path = ipc_path(connectivity_group_id, node_number);
         let stream = UnixStream::connect(&path).await.with_context(|| {
-            format!("failed to connect to daemon at {:?} (is it running?)", path)
+            format!("failed to connect to daemon at {} (is it running?)", path.display())
         })?;
         let (reader, writer) = stream.into_split();
         Ok(Self {

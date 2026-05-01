@@ -28,7 +28,7 @@ impl RootKey {
 
 impl fmt::Debug for RootKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "RootKey([redacted; {}])", ROOT_KEY_LEN)
+        write!(f, "RootKey([redacted; {ROOT_KEY_LEN}])")
     }
 }
 
@@ -48,6 +48,7 @@ pub struct NodeRegistration {
 }
 
 impl NodeRegistration {
+    #[must_use] 
     pub fn new(
         connectivity_group_id: ConnectivityGroupId,
         node_number: i32,
@@ -62,6 +63,7 @@ impl NodeRegistration {
         }
     }
 
+    #[must_use] 
     pub fn auth_token(&self) -> Option<&AuthToken> {
         self.auth_token.as_ref()
     }
@@ -76,6 +78,7 @@ impl AuthToken {
         Self(value.into())
     }
 
+    #[must_use] 
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -169,6 +172,7 @@ pub struct PersistedNodeState {
 
 impl PersistedNodeState {
     /// Creates a new node state with a freshly generated root key.
+    #[must_use] 
     pub fn new() -> Self {
         PersistedNodeState {
             root_key: RootKey::generate(),
@@ -177,6 +181,7 @@ impl PersistedNodeState {
     }
 
     /// Reconstruct from stored parts. For use by `NodeStateStore` implementations.
+    #[must_use] 
     pub fn from_stored(
         root_key_bytes: [u8; ROOT_KEY_LEN],
         registration: Option<NodeRegistration>,
@@ -188,15 +193,18 @@ impl PersistedNodeState {
     }
 
     /// The root key as raw bytes. For use by `NodeStateStore` implementations.
+    #[must_use] 
     pub fn root_key_bytes(&self) -> &[u8; ROOT_KEY_LEN] {
         self.root_key.as_bytes()
     }
 
     /// The registration, if any. For use by `NodeStateStore` implementations.
+    #[must_use] 
     pub fn registration(&self) -> Option<&NodeRegistration> {
         self.registration.as_ref()
     }
 
+    #[must_use] 
     pub fn is_registered(&self) -> bool {
         self.registration.is_some()
     }

@@ -37,14 +37,14 @@ pub(crate) struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
-    /// Create a new RuntimeConfig with the default hub address.
+    /// Create a new `RuntimeConfig` with the default hub address.
     pub(crate) fn new() -> Self {
         Self {
             hub_addr: DEFAULT_HUB_ADDR.to_string(),
         }
     }
 
-    /// Create a new RuntimeConfig with a custom hub address.
+    /// Create a new `RuntimeConfig` with a custom hub address.
     pub(crate) fn new_with_addr(hub_addr: impl Into<String>) -> Self {
         Self {
             hub_addr: hub_addr.into(),
@@ -81,12 +81,20 @@ impl NodeStorage {
     }
 
     /// Override the hub address (for testing).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal config lock is poisoned.
     pub fn override_hub_addr(&self, addr: impl Into<String>) {
         self.config.write().unwrap().hub_addr = addr.into();
     }
 
     /// Delete all persisted state. Used for logout when the node can't be
     /// restored (e.g. hub rejected our credentials).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the underlying storage delete operation fails.
     pub fn delete_state(&self) -> Result<(), NodeStateError> {
         self.store.delete().map_err(NodeStateError::store)
     }
@@ -95,6 +103,10 @@ impl NodeStorage {
     ///
     /// Returns `None` if not registered. This is useful when you need
     /// registration info before starting an async runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the underlying storage load operation fails.
     pub fn read_registration(&self) -> Result<Option<NodeRegistration>, NodeStateError> {
         let state = self.store.load().map_err(NodeStateError::store)?;
         Ok(state.and_then(|s| s.registration))
@@ -106,20 +118,25 @@ impl NodeStorage {
     /// - `Pending` if not registered
     /// - `Registered` if registered but not in the roster
     /// - `Activated` if registered and in the roster
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if storage access or hub communication fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a registered state is inconsistent (missing registration after `is_registered` check).
     pub async fn restore_or_init_node(&self) -> Result<Node, NodeStateError> {
         use crate::hub::HubClient;
 
-        let state = match self.store.load().map_err(NodeStateError::store)? {
-            Some(state) => state,
-            None => {
-                let state = PersistedNodeState::new();
-                self.store.save(&state).map_err(NodeStateError::store)?;
-                return Ok(Node::Pending(PendingNode::new(
-                    state,
-                    self.store.clone(),
-                    self.config.clone(),
-                )));
-            }
+        let Some(state) = self.store.load().map_err(NodeStateError::store)? else {
+            let state = PersistedNodeState::new();
+            self.store.save(&state).map_err(NodeStateError::store)?;
+            return Ok(Node::Pending(PendingNode::new(
+                state,
+                self.store.clone(),
+                self.config.clone(),
+            )));
         };
 
         // Not registered yet
@@ -247,7 +264,10 @@ impl PendingNode {
         self.config.read().unwrap().hub_addr.clone()
     }
 
-    pub async fn logout(self) -> Result<PendingNode, NodeStateError> {
+    /// # Errors
+    ///
+    /// Returns `Err` if deleting persisted state fails.
+    pub fn logout(self) -> Result<PendingNode, NodeStateError> {
         self.store.delete().map_err(NodeStateError::store)?;
         let mut persisted = self.persisted;
         persisted.registration = None;
@@ -279,6 +299,10 @@ impl RegisteredNode {
         self.config.read().unwrap().hub_addr.clone()
     }
 
+    /// # Errors
+    ///
+    /// Returns `Err` if connecting to the hub fails, deregistration is rejected,
+    /// or deleting persisted state fails.
     pub async fn logout(self) -> Result<PendingNode, NodeStateError> {
         use crate::hub::HubClient;
 
@@ -322,6 +346,14 @@ impl ActivatedNode {
         self.config.read().unwrap().hub_addr.clone()
     }
 
+    /// # Errors
+    ///
+    /// Returns `Err` if this is the last active node, hub communication fails,
+    /// or deleting persisted state fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal roster lock is poisoned.
     pub async fn logout(self) -> Result<PendingNode, NodeStateError> {
         use crate::hub::HubClient;
         use crate::roster::{
@@ -383,10 +415,7 @@ impl ActivatedNode {
             }
         }
 
-        log::info!(
-            "Peer node {} not in cached roster, refetching from hub",
-            peer_node_number
-        );
+        log::info!("Peer node {peer_node_number} not in cached roster, refetching from hub");
         let fresh_roster = client
             .get_and_verify_roster(&self.registration, &self.signing_key.public_key_spki())
             .await?;
@@ -402,6 +431,9 @@ impl ActivatedNode {
         Ok(peer_node)
     }
 
+    /// # Errors
+    ///
+    /// Returns `Err` if hub signalling or ICE negotiation fails.
     pub async fn connect_udp(
         &self,
         peer_node_number: i32,
@@ -451,6 +483,9 @@ impl ActivatedNode {
         )
     }
 
+    /// # Errors
+    ///
+    /// Returns `Err` if hub signalling, ICE negotiation, or QUIC handshake fails.
     pub async fn connect_quic(
         &self,
         peer_node_number: i32,
@@ -532,10 +567,9 @@ impl Node {
 
     pub fn registration(&self) -> Option<&NodeRegistration> {
         match self {
-            Node::Pending(_) => None,
             Node::Registered(n) => Some(&n.registration),
             Node::Activated(n) => Some(&n.registration),
-            Node::Placeholder => None,
+            Node::Pending(_) | Node::Placeholder => None,
         }
     }
 
@@ -561,6 +595,9 @@ impl Node {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns `Err` if the node is not registered, or hub communication fails.
     pub async fn group_info(&self) -> Result<GroupInfo, NodeStateError> {
         use crate::hub::HubClient;
         use crate::roster::active_nodes;
@@ -596,9 +633,7 @@ impl Node {
         let nodes: Vec<NodeInfo> = hub_nodes
             .into_iter()
             .map(|hub_node| {
-                let is_activated = if is_dead_roster {
-                    Some(false)
-                } else if roster.version == 0 && activated_set.is_empty() {
+                let is_activated = if is_dead_roster || (roster.version == 0 && activated_set.is_empty()) {
                     Some(false)
                 } else if self_activated {
                     Some(activated_set.contains(&hub_node.node_number))
@@ -635,6 +670,10 @@ impl Node {
         Ok(GroupInfo { state, nodes })
     }
 
+    /// # Errors
+    ///
+    /// Returns `Err` if the node is already registered, hub registration fails,
+    /// or persisting the new state fails.
     pub async fn register(&mut self, token: &str) -> Result<(), NodeStateError> {
         use crate::hub::HubClient;
 
@@ -655,23 +694,25 @@ impl Node {
             .map_err(NodeStateError::hub)?;
 
         let node = std::mem::replace(self, Node::Placeholder);
-        match node {
-            Node::Pending(mut p) => {
-                p.persisted.set_registration(registration.clone());
-                p.store.save(&p.persisted).map_err(NodeStateError::store)?;
-                *self = Node::Registered(RegisteredNode::new(p.persisted, p.store, p.config)?);
-                Ok(())
-            }
-            _ => {
-                *self = node;
-                Err(NodeStateError::InvalidState {
-                    current: self.state(),
-                    required: "Pending",
-                })
-            }
+        if let Node::Pending(mut p) = node {
+            p.persisted.set_registration(registration.clone());
+            p.store.save(&p.persisted).map_err(NodeStateError::store)?;
+            *self = Node::Registered(RegisteredNode::new(p.persisted, p.store, p.config)?);
+            Ok(())
+        } else {
+            *self = node;
+            Err(NodeStateError::InvalidState {
+                current: self.state(),
+                required: "Pending",
+            })
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns `Err` if the activation code is invalid, the node is not registered,
+    /// hub communication fails, MAC verification fails, or endorsement verification fails.
+    #[allow(clippy::too_many_lines)]
     pub async fn activate(&mut self, activation_code: &str) -> Result<(), NodeStateError> {
         use crate::hub::HubClient;
 
@@ -792,33 +833,33 @@ impl Node {
 
         // NOW we transition
         let node = std::mem::replace(self, Node::Placeholder);
-        match node {
-            Node::Registered(r) => {
-                *self = Node::Activated(ActivatedNode::new(
-                    r.persisted,
-                    r.store,
-                    r.config,
-                    cosigned_roster,
-                ));
-                Ok(())
-            }
-            _ => {
-                *self = node;
-                Err(NodeStateError::InvalidState {
-                    current: self.state(),
-                    required: "Registered",
-                })
-            }
+        if let Node::Registered(r) = node {
+            *self = Node::Activated(ActivatedNode::new(
+                r.persisted,
+                r.store,
+                r.config,
+                cosigned_roster,
+            ));
+            Ok(())
+        } else {
+            *self = node;
+            Err(NodeStateError::InvalidState {
+                current: self.state(),
+                required: "Registered",
+            })
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns `Err` if the logout fails for the current node state.
     pub async fn logout(&mut self) -> Result<(), NodeStateError> {
         let node = std::mem::replace(self, Node::Placeholder);
         let (p, res) = match node {
             Node::Pending(p) => {
                 let store = p.store.clone();
                 let config = p.config.clone();
-                let res = p.logout().await;
+                let res = p.logout();
                 match res {
                     Ok(new_p) => (new_p, Ok(())),
                     Err(e) => (
@@ -887,6 +928,9 @@ impl Node {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns `Err` if the node is not activated or hub communication fails.
     pub async fn start_serving(
         &self,
     ) -> Result<
@@ -917,6 +961,9 @@ impl Node {
         .map_err(NodeStateError::hub)
     }
 
+    /// # Errors
+    ///
+    /// Returns `Err` if the node is not activated, or the UDP connection fails.
     pub async fn connect_udp(
         &self,
         peer_node_number: i32,
@@ -927,6 +974,9 @@ impl Node {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns `Err` if the node is not activated, or the QUIC connection fails.
     pub async fn connect_quic(
         &self,
         peer_node_number: i32,
@@ -945,10 +995,11 @@ impl Node {
 /// Test helper for creating Node instances.
 #[doc(hidden)]
 impl Node {
+    #[must_use]
     pub fn new_activated_for_test(
         root_key: [u8; 32],
         roster: proto::roster::Roster,
-        registration: NodeRegistration,
+        registration: &NodeRegistration,
         hub_addr: String,
     ) -> Self {
         use crate::storage::InMemoryNodeStateStore;

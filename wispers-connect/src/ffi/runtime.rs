@@ -10,7 +10,7 @@ static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 /// Initialize logging for the platform.
 ///
 /// On Android, this routes `log` crate output to logcat.
-/// On other platforms, this is a no-op (use RUST_LOG env var with env_logger if needed).
+/// On other platforms, this is a no-op (use `RUST_LOG` env var with `env_logger` if needed).
 fn init_logging() {
     #[cfg(target_os = "android")]
     {

@@ -35,9 +35,8 @@ pub extern "C" fn wispers_storage_new_with_callbacks(
     }
 
     let callbacks = unsafe { *callbacks };
-    let store = match ForeignNodeStateStore::new(callbacks) {
-        Ok(store) => store,
-        Err(_) => return std::ptr::null_mut(),
+    let Ok(store) = ForeignNodeStateStore::new(callbacks) else {
+        return std::ptr::null_mut();
     };
     let storage = NodeStorage::new(store);
     Box::into_raw(Box::new(WispersNodeStorageHandle(storage)))
@@ -131,9 +130,8 @@ pub extern "C" fn wispers_storage_restore_or_init_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let wrapper = unsafe { &*handle };
@@ -209,7 +207,7 @@ pub extern "C" fn wispers_node_state(handle: *mut WispersNodeHandle) -> WispersN
 
 /// Register the node with the hub using a registration token.
 ///
-/// Returns INVALID_STATE if the node is not in Pending state.
+/// Returns `INVALID_STATE` if the node is not in Pending state.
 /// The node handle is NOT consumed - it transitions to Registered state on success.
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_node_register_async(
@@ -227,9 +225,8 @@ pub extern "C" fn wispers_node_register_async(
         Err(status) => return status,
     };
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);
@@ -259,7 +256,7 @@ pub extern "C" fn wispers_node_register_async(
 /// Activate the node using an activation code from an endorser.
 ///
 /// The activation code format is "node_number-secret" (e.g., "1-abc123xyz0").
-/// Returns INVALID_STATE if the node is not in Registered state.
+/// Returns `INVALID_STATE` if the node is not in Registered state.
 /// The node handle is NOT consumed - it transitions to Activated state on success.
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_node_activate_async(
@@ -277,9 +274,8 @@ pub extern "C" fn wispers_node_activate_async(
         Err(status) => return status,
     };
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);
@@ -323,9 +319,8 @@ pub extern "C" fn wispers_node_logout_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     // Consume the handle box and move it into the spawned task, which
@@ -359,10 +354,10 @@ pub extern "C" fn wispers_node_logout_async(
 
 /// Get the group's activation state and node list.
 ///
-/// Returns INVALID_STATE if the node is in Pending state.
+/// Returns `INVALID_STATE` if the node is in Pending state.
 /// The node handle is NOT consumed.
-/// On success, callback receives a WispersGroupInfo that must be freed
-/// with wispers_group_info_free().
+/// On success, callback receives a `WispersGroupInfo` that must be freed
+/// with `wispers_group_info_free()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_node_group_info_async(
     handle: *mut WispersNodeHandle,
@@ -373,9 +368,8 @@ pub extern "C" fn wispers_node_group_info_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);

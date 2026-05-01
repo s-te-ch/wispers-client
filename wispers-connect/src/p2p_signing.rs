@@ -163,7 +163,13 @@ mod tests {
     }
 
     fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{:02x}", b)).collect()
+        use std::fmt::Write;
+        bytes
+            .iter()
+            .fold(String::with_capacity(bytes.len() * 2), |mut output, b| {
+                let _ = write!(output, "{b:02x}");
+                output
+            })
     }
 
     /// Tripwire: catches any drift in the caller signing input bytes (e.g.

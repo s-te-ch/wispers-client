@@ -43,11 +43,13 @@ impl ConnectionState {
     }
 
     /// Returns true if the connection is established and ready for data.
+    #[must_use] 
     pub fn is_connected(self) -> bool {
         matches!(self, ConnectionState::Connected)
     }
 
     /// Returns true if the connection is disconnected or failed.
+    #[must_use] 
     pub fn is_disconnected(self) -> bool {
         matches!(
             self,
@@ -178,6 +180,10 @@ impl UdpConnection {
     /// Send data to the peer.
     ///
     /// The data is encrypted before transmission.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the connection is closed or encryption fails.
     pub fn send(&self, data: &[u8]) -> Result<(), P2pError> {
         if self.state().is_disconnected() {
             return Err(P2pError::Disconnected);
@@ -188,6 +194,10 @@ impl UdpConnection {
     /// Receive data from the peer.
     ///
     /// Returns decrypted data from the peer.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the connection is closed or decryption fails.
     pub async fn recv(&self) -> Result<Vec<u8>, P2pError> {
         if self.state().is_disconnected() {
             return Err(P2pError::Disconnected);
@@ -315,11 +325,19 @@ impl QuicStream {
     /// Write data to the stream.
     ///
     /// Returns the number of bytes written.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the stream is closed or the write fails.
     pub async fn write(&self, data: &[u8]) -> Result<usize, P2pError> {
         Ok(self.inner.write(data).await?)
     }
 
     /// Write all data to the stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the stream is closed or the write fails.
     pub async fn write_all(&self, data: &[u8]) -> Result<(), P2pError> {
         Ok(self.inner.write_all(data).await?)
     }
@@ -327,16 +345,28 @@ impl QuicStream {
     /// Read data from the stream.
     ///
     /// Returns the number of bytes read. Returns 0 if the stream is finished.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the stream encounters an error.
     pub async fn read(&self, buf: &mut [u8]) -> Result<usize, P2pError> {
         Ok(self.inner.read(buf).await?)
     }
 
     /// Close the stream for writing (send FIN).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the stream cannot be finished.
     pub async fn finish(&self) -> Result<(), P2pError> {
         Ok(self.inner.finish().await?)
     }
 
     /// Shutdown the stream (stop sending and receiving).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the shutdown fails.
     pub async fn shutdown(&self) -> Result<(), P2pError> {
         Ok(self.inner.shutdown().await?)
     }
@@ -409,6 +439,10 @@ impl QuicConnection {
     /// Open a new bidirectional stream.
     ///
     /// Returns a stream that can be used for reading and writing data.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the connection is closed or the stream cannot be opened.
     pub async fn open_stream(&self) -> Result<QuicStream, P2pError> {
         Ok(QuicStream {
             inner: self.inner.open_stream().await?,
@@ -418,6 +452,10 @@ impl QuicConnection {
     /// Accept an incoming stream from the peer.
     ///
     /// Waits for the peer to open a new stream and returns it.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the connection is closed before a stream arrives.
     pub async fn accept_stream(&self) -> Result<QuicStream, P2pError> {
         Ok(QuicStream {
             inner: self.inner.accept_stream().await?,
@@ -430,11 +468,15 @@ impl QuicConnection {
     }
 
     /// Close the connection.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the close handshake fails.
     pub async fn close(self) -> Result<(), P2pError> {
         self.inner.close().await?;
         Ok(())
     }
 }
 
-/// Re-export StunTurnConfig from proto.
+/// Re-export `StunTurnConfig` from proto.
 pub use crate::hub::proto::StunTurnConfig;

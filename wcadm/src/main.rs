@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Parser)]
 #[command(name = "wcadm", version, about)]
 struct Cli {
-    /// API key (can also be set via WC_API_KEY env var)
+    /// API key (can also be set via `WC_API_KEY` env var)
     #[arg(long, env = "WC_API_KEY", hide_env_values = true)]
     api_key: String,
 

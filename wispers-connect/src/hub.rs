@@ -12,10 +12,12 @@ use tonic::transport::{Channel, ClientTlsConfig};
 pub mod proto {
     /// Roster proto types.
     pub mod roster {
+        #![allow(clippy::all, clippy::pedantic)]
         tonic::include_proto!("connect.roster");
     }
     /// Hub proto types.
     pub mod hub {
+        #![allow(clippy::all, clippy::pedantic)]
         tonic::include_proto!("connect.hub");
     }
     pub use hub::*;
@@ -87,6 +89,11 @@ impl HubClient {
     /// Connect to a hub at the given address.
     ///
     /// Supports both `http://` (plaintext) and `https://` (TLS) schemes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the address is an invalid URI, TLS configuration fails,
+    /// or the underlying transport cannot connect.
     pub async fn connect(hub_addr: impl Into<String>) -> Result<Self, HubError> {
         let addr = hub_addr.into();
         let mut endpoint = Channel::from_shared(addr.clone())?;
@@ -111,6 +118,10 @@ impl HubClient {
     /// Complete node registration using a registration token.
     ///
     /// Returns the node's credentials for future authenticated requests.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the Hub rejects the token or the gRPC call fails.
     pub async fn complete_registration(
         &mut self,
         token: &str,
@@ -129,6 +140,10 @@ impl HubClient {
     }
 
     /// List all nodes in the connectivity group.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if authentication fails or the gRPC call fails.
     pub async fn list_nodes(
         &mut self,
         registration: &NodeRegistration,
@@ -154,6 +169,10 @@ impl HubClient {
     /// deadline the client would wait indefinitely, effectively giving an
     /// attacker unlimited time to crack the secret and inject a forged
     /// response.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if authentication fails, the peer is unavailable, or the gRPC call fails.
     pub async fn pair_nodes(
         &mut self,
         registration: &NodeRegistration,
@@ -173,6 +192,10 @@ impl HubClient {
     /// Use this only during pre-activation flows (bootstrap, activation) when
     /// the node is not yet in the roster and cannot verify it.
     /// For activated nodes, use `get_and_verify_roster` instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if authentication fails or the gRPC call fails.
     pub async fn get_unverified_roster(
         &mut self,
         registration: &NodeRegistration,
@@ -188,6 +211,10 @@ impl HubClient {
     ///
     /// This is the standard method for activated nodes. It fetches the roster
     /// and verifies the signature chain before returning.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the gRPC call fails or roster signature verification fails.
     pub async fn get_and_verify_roster(
         &mut self,
         registration: &NodeRegistration,
@@ -200,6 +227,10 @@ impl HubClient {
 
     /// Submit a roster update. The hub will obtain the endorser's cosignature
     /// and return the fully signed roster.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if authentication fails, the gRPC call fails, or the response is malformed.
     pub async fn update_roster(
         &mut self,
         registration: &NodeRegistration,
@@ -221,6 +252,10 @@ impl HubClient {
     /// Start serving: open a bidirectional stream for handling incoming requests.
     ///
     /// Returns a handle for sending responses and a stream of incoming requests.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if authentication fails or the gRPC stream cannot be established.
     pub async fn start_serving(
         &mut self,
         registration: &NodeRegistration,
@@ -243,6 +278,10 @@ impl HubClient {
     /// Get STUN/TURN server configuration for P2P connections.
     ///
     /// Returns the server addresses and optional TURN credentials.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if authentication fails or the gRPC call fails.
     pub async fn get_stun_turn_config(
         &mut self,
         registration: &NodeRegistration,
@@ -257,6 +296,10 @@ impl HubClient {
     /// Start a P2P connection to another node.
     ///
     /// The hub forwards this request to the target node and returns their response.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if authentication fails, the peer is unreachable, or the gRPC call fails.
     pub async fn start_connection(
         &mut self,
         registration: &NodeRegistration,
@@ -272,6 +315,10 @@ impl HubClient {
     /// Deregister this node from its connectivity group.
     ///
     /// This soft-deletes the node from the hub's database.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if authentication fails or the gRPC call fails.
     pub async fn deregister_node(
         &mut self,
         registration: &NodeRegistration,

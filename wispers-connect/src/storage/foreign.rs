@@ -40,6 +40,11 @@ pub struct ForeignNodeStateStore {
 }
 
 impl ForeignNodeStateStore {
+    /// Create a new `ForeignNodeStateStore` with the given callbacks.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if any required callback is missing.
     pub fn new(callbacks: WispersNodeStorageCallbacks) -> Result<Self, StorageError> {
         if callbacks.load_root_key.is_none() {
             return Err(StorageError::MissingCallback("load_root_key"));
@@ -106,25 +111,21 @@ impl ForeignNodeStateStore {
                     self.callbacks.ctx,
                     buffer.as_mut_ptr(),
                     buffer.len(),
-                    &mut required,
+                    &raw mut required,
                 )
             };
 
             match status {
                 WispersStatus::Success => {
                     buffer.truncate(required);
-                    match deserialize_registration_opt(&buffer) {
-                        Ok(reg) => return Ok(reg),
-                        Err(_) => {
-                            // Old format (bincode) — discard and let the caller
-                            // treat it as missing so restoreOrInit re-registers.
-                            log::warn!(
-                                "Registration decode failed (format migration), treating as empty"
-                            );
-                            let _ = self.call_delete_registration();
-                            return Ok(None);
-                        }
+                    if let Ok(reg) = deserialize_registration_opt(&buffer) {
+                        return Ok(reg);
                     }
+                    // Old format (bincode) — discard and let the caller
+                    // treat it as missing so restoreOrInit re-registers.
+                    log::warn!("Registration decode failed (format migration), treating as empty");
+                    let _ = self.call_delete_registration();
+                    return Ok(None);
                 }
                 WispersStatus::NotFound => return Ok(None),
                 WispersStatus::BufferTooSmall => {
@@ -166,9 +167,8 @@ unsafe impl Sync for ForeignNodeStateStore {}
 
 impl NodeStateStore for ForeignNodeStateStore {
     fn load(&self) -> Result<Option<PersistedNodeState>, StorageError> {
-        let root_key = match self.call_load_root_key()? {
-            Some(bytes) => bytes,
-            None => return Ok(None),
+        let Some(root_key) = self.call_load_root_key()? else {
+            return Ok(None);
         };
 
         let registration = self.call_load_registration()?;

@@ -35,6 +35,11 @@ pub struct SigningKeyPair {
 
 impl SigningKeyPair {
     /// Derive a signing keypair from the root key using HKDF.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the HKDF expand step fails, which cannot happen for a 32-byte output length.
+    #[must_use]
     pub fn derive_from_root_key(root_key: &[u8; 32]) -> Self {
         let hk = Hkdf::<Sha256>::new(Some(b"wispers-connect-v1"), root_key);
         let mut signing_seed = [0u8; 32];
@@ -45,7 +50,12 @@ impl SigningKeyPair {
         Self { signing_key }
     }
 
-    /// Get the public key in SPKI (X.509 SubjectPublicKeyInfo) DER format.
+    /// Get the public key in SPKI (X.509 `SubjectPublicKeyInfo`) DER format.
+    ///
+    /// # Panics
+    ///
+    /// Panics if DER encoding fails, which cannot happen for a valid Ed25519 key.
+    #[must_use]
     pub fn public_key_spki(&self) -> Vec<u8> {
         self.signing_key
             .verifying_key()
@@ -55,11 +65,13 @@ impl SigningKeyPair {
     }
 
     /// Get the raw public key bytes.
+    #[must_use] 
     pub fn public_key_bytes(&self) -> [u8; 32] {
         self.signing_key.verifying_key().to_bytes()
     }
 
     /// Sign a message.
+    #[must_use] 
     pub fn sign(&self, message: &[u8]) -> Vec<u8> {
         self.signing_key.sign(message).to_bytes().to_vec()
     }
@@ -76,6 +88,7 @@ pub struct X25519KeyPair {
 
 impl X25519KeyPair {
     /// Generate an ephemeral X25519 keypair from random bytes.
+    #[must_use] 
     pub fn generate_ephemeral() -> Self {
         let mut seed = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut seed);
@@ -88,12 +101,14 @@ impl X25519KeyPair {
     }
 
     /// Get the public key as raw bytes.
+    #[must_use] 
     pub fn public_key(&self) -> [u8; 32] {
         X25519PublicKey::from(&self.secret()).to_bytes()
     }
 
     /// Perform Diffie-Hellman key exchange with a peer's public key.
     /// Returns the shared secret.
+    #[must_use] 
     pub fn diffie_hellman(&self, peer_public: &[u8; 32]) -> [u8; 32] {
         let peer_public = X25519PublicKey::from(*peer_public);
         self.secret().diffie_hellman(&peer_public).to_bytes()
@@ -101,6 +116,7 @@ impl X25519KeyPair {
 }
 
 /// Verify a signature using a public key in SPKI DER format.
+#[must_use] 
 pub fn verify_signature_spki(spki: &[u8], message: &[u8], signature: &[u8]) -> bool {
     let Ok(verifying_key) = VerifyingKey::from_public_key_der(spki) else {
         return false;
@@ -121,6 +137,7 @@ pub struct PairingSecret {
 
 impl PairingSecret {
     /// Generate a new random pairing secret.
+    #[must_use] 
     pub fn generate() -> Self {
         let mut bytes = [0u8; PAIRING_SECRET_LEN];
         rand::thread_rng().fill_bytes(&mut bytes);
@@ -128,17 +145,23 @@ impl PairingSecret {
     }
 
     /// Parse a pairing secret from base36 encoding.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the string is not valid base36 or has the wrong length.
     pub fn from_base36(s: &str) -> Result<Self, PairingSecretError> {
         let bytes = decode_base36(s)?;
         Ok(Self { bytes })
     }
 
     /// Get the base36 encoding (`PAIRING_SECRET_BASE36_LEN` lowercase characters).
+    #[must_use] 
     pub fn to_base36(&self) -> String {
         encode_base36(&self.bytes)
     }
 
     /// Get the raw bytes.
+    #[must_use] 
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }
@@ -154,6 +177,11 @@ impl PairingSecret {
     }
 
     /// Compute HMAC for a pairing message payload.
+    ///
+    /// # Panics
+    ///
+    /// Panics if HMAC key construction fails, which cannot happen for any key size.
+    #[must_use]
     pub fn compute_mac(&self, payload: &[u8]) -> Vec<u8> {
         let key = self.derive_mac_key();
         let mut mac = HmacSha256::new_from_slice(&key).expect("HMAC can take any key size");
@@ -164,6 +192,7 @@ impl PairingSecret {
     }
 
     /// Verify HMAC for a pairing message payload.
+    #[must_use] 
     pub fn verify_mac(&self, payload: &[u8], tag: &[u8]) -> bool {
         let expected = self.compute_mac(payload);
         constant_time_eq(&expected, tag)
@@ -191,7 +220,7 @@ fn encode_base36(bytes: &[u8]) -> String {
         s.len() <= PAIRING_SECRET_BASE36_LEN,
         "7 bytes must fit in {PAIRING_SECRET_BASE36_LEN} base36 digits"
     );
-    format!("{:0>width$}", s, width = PAIRING_SECRET_BASE36_LEN)
+    format!("{s:0>PAIRING_SECRET_BASE36_LEN$}")
 }
 
 /// Decode `PAIRING_SECRET_BASE36_LEN` base36 characters to bytes.
@@ -227,6 +256,7 @@ pub struct PairingCode {
 
 impl PairingCode {
     /// Create a new pairing code.
+    #[must_use] 
     pub fn new(node_number: i32, secret: PairingSecret) -> Self {
         Self {
             node_number,
@@ -235,11 +265,17 @@ impl PairingCode {
     }
 
     /// Format as "node_number-base36secret" for display.
+    #[must_use] 
     pub fn format(&self) -> String {
         format!("{}-{}", self.node_number, self.secret.to_base36())
     }
 
     /// Parse from "node_number-base36secret" format.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the format is invalid, the node number is not a valid integer,
+    /// or the secret is not valid base36.
     pub fn parse(s: &str) -> Result<Self, PairingCodeError> {
         let parts: Vec<&str> = s.split('-').collect();
         if parts.len() != 2 {
@@ -271,6 +307,7 @@ pub enum PairingCodeError {
 //-- Nonces ----------------------------------------------------------------------------------------
 
 /// Generate a random nonce for pairing.
+#[must_use] 
 pub fn generate_nonce() -> Vec<u8> {
     let mut nonce = vec![0u8; NONCE_LEN];
     rand::thread_rng().fill_bytes(&mut nonce);

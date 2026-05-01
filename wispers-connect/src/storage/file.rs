@@ -64,12 +64,9 @@ impl NodeStateStore for FileNodeStateStore {
         let registration_path = self.registration_path();
         let registration = if registration_path.exists() {
             let bytes = fs::read(&registration_path)?;
-            match deserialize_registration(&bytes) {
-                Ok(reg) => Some(reg),
-                Err(_) => {
-                    log::warn!("Registration decode failed, treating as empty");
-                    None
-                }
+            if let Ok(reg) = deserialize_registration(&bytes) { Some(reg) } else {
+                log::warn!("Registration decode failed, treating as empty");
+                None
             }
         } else {
             // Migrate from legacy JSON format: delete it and let the node re-register.
