@@ -17,7 +17,9 @@
 
         # Core dependencies needed for the Rust library
         coreDeps = with pkgs; [
-          rust-bin.stable.latest.default
+          (rust-bin.stable.latest.default.override {
+            extensions = [ "rust-src" "rust-analyzer" ];
+          })
           cmake
           protobuf
           libclang
