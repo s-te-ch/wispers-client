@@ -267,9 +267,9 @@ struct ConnectionInner<T> {
     transport: T,
     /// Our role (client or server).
     role: QuicRole,
-    /// Local address (for recv_info).
+    /// Local address (for `recv_info`).
     local_addr: SocketAddr,
-    /// Peer address (for recv_info).
+    /// Peer address (for `recv_info`).
     peer_addr: SocketAddr,
     /// Notified when connection state changes (data available, established, etc.).
     state_notify: Notify,
@@ -312,8 +312,7 @@ impl<T: IceTransport> ConnectionInner<T> {
             to: self.local_addr,
         };
         match conn.recv(&mut packet, recv_info) {
-            Ok(_) => Ok(()),
-            Err(quiche::Error::Done) => Ok(()),
+            Ok(_) | Err(quiche::Error::Done) => Ok(()),
             Err(e) => Err(QuicError::Quic(e)),
         }
     }
@@ -571,8 +570,7 @@ impl<T: IceTransport + 'static> Connection<T> {
         {
             let mut conn = self.inner.conn.lock().await;
             match conn.stream_send(stream_id, &[], false) {
-                Ok(_) => {}
-                Err(quiche::Error::Done) => {}
+                Ok(_) | Err(quiche::Error::Done) => {}
                 Err(e) => return Err(QuicError::Quic(e)),
             }
         }
@@ -582,7 +580,7 @@ impl<T: IceTransport + 'static> Connection<T> {
 
         Ok(Stream {
             inner: Arc::clone(&self.inner),
-            stream_id,
+            id: stream_id,
             recv_fin: AtomicBool::new(false),
         })
     }
@@ -604,7 +602,7 @@ impl<T: IceTransport + 'static> Connection<T> {
                         accepted.insert(stream_id);
                         return Ok(Stream {
                             inner: Arc::clone(&self.inner),
-                            stream_id,
+                            id: stream_id,
                             recv_fin: AtomicBool::new(false),
                         });
                     }
@@ -673,7 +671,7 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
                     }
                 }
             }
-            _ = tokio::time::sleep(timeout_duration) => {
+            () = tokio::time::sleep(timeout_duration) => {
                 // Timeout - call on_timeout
                 inner.handle_timeout().await;
                 // Notify in case handshake progressed
@@ -696,7 +694,7 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
 /// without stalling the connection.
 pub struct Stream<T: IceTransport + 'static> {
     inner: Arc<ConnectionInner<T>>,
-    stream_id: u64,
+    id: u64,
     /// Set to true once `stream_recv` returns fin, so subsequent reads
     /// return 0 without touching quiche (the stream may already be collected).
     recv_fin: AtomicBool,
@@ -705,7 +703,7 @@ pub struct Stream<T: IceTransport + 'static> {
 impl<T: IceTransport + 'static> Stream<T> {
     /// Get the stream ID.
     pub fn id(&self) -> u64 {
-        self.stream_id
+        self.id
     }
 
     /// Write data to the stream.
@@ -715,7 +713,7 @@ impl<T: IceTransport + 'static> Stream<T> {
     pub async fn write(&self, data: &[u8]) -> Result<usize, QuicError> {
         let written = {
             let mut conn = self.inner.conn.lock().await;
-            match conn.stream_send(self.stream_id, data, false) {
+            match conn.stream_send(self.id, data, false) {
                 Ok(n) => n,
                 Err(quiche::Error::Done) => 0,
                 Err(e) => return Err(QuicError::Quic(e)),
@@ -736,7 +734,7 @@ impl<T: IceTransport + 'static> Stream<T> {
         while offset < data.len() {
             let written = {
                 let mut conn = self.inner.conn.lock().await;
-                match conn.stream_send(self.stream_id, &data[offset..], false) {
+                match conn.stream_send(self.id, &data[offset..], false) {
                     Ok(n) => n,
                     Err(quiche::Error::Done) => 0,
                     Err(e) => return Err(QuicError::Quic(e)),
@@ -769,7 +767,7 @@ impl<T: IceTransport + 'static> Stream<T> {
             // Try to read from the stream
             {
                 let mut conn = self.inner.conn.lock().await;
-                match conn.stream_recv(self.stream_id, buf) {
+                match conn.stream_recv(self.id, buf) {
                     Ok((len, fin)) => {
                         if fin {
                             self.recv_fin.store(true, Ordering::Release);
@@ -778,7 +776,7 @@ impl<T: IceTransport + 'static> Stream<T> {
                     }
                     Err(quiche::Error::Done) => {
                         // No data available yet
-                        if conn.stream_finished(self.stream_id) {
+                        if conn.stream_finished(self.id) {
                             self.recv_fin.store(true, Ordering::Release);
                             return Ok(0); // Stream finished
                         }
@@ -786,7 +784,7 @@ impl<T: IceTransport + 'static> Stream<T> {
                     Err(e) => {
                         log::error!(
                             "[wispers QUIC] stream {} recv error: {:?} (conn closed={}, draining={})",
-                            self.stream_id,
+                            self.id,
                             e,
                             conn.is_closed(),
                             conn.is_draining()
@@ -796,10 +794,7 @@ impl<T: IceTransport + 'static> Stream<T> {
                 }
 
                 if conn.is_closed() {
-                    log::error!(
-                        "[wispers QUIC] stream {} read: connection closed",
-                        self.stream_id
-                    );
+                    log::error!("[wispers QUIC] stream {} read: connection closed", self.id);
                     return Err(QuicError::ConnectionClosed);
                 }
             }
@@ -813,9 +808,8 @@ impl<T: IceTransport + 'static> Stream<T> {
     pub async fn finish(&self) -> Result<(), QuicError> {
         {
             let mut conn = self.inner.conn.lock().await;
-            match conn.stream_send(self.stream_id, &[], true) {
-                Ok(_) => {}
-                Err(quiche::Error::Done) => {}
+            match conn.stream_send(self.id, &[], true) {
+                Ok(_) | Err(quiche::Error::Done) => {}
                 Err(e) => return Err(QuicError::Quic(e)),
             }
         }
@@ -828,15 +822,15 @@ impl<T: IceTransport + 'static> Stream<T> {
         {
             let mut conn = self.inner.conn.lock().await;
             // Shutdown both directions
-            let _ = conn.stream_shutdown(self.stream_id, quiche::Shutdown::Read, 0);
-            let _ = conn.stream_shutdown(self.stream_id, quiche::Shutdown::Write, 0);
+            let _ = conn.stream_shutdown(self.id, quiche::Shutdown::Read, 0);
+            let _ = conn.stream_shutdown(self.id, quiche::Shutdown::Write, 0);
         }
         self.inner.flush_send().await?;
         Ok(())
     }
 }
 
-/// Trait for ICE transports (abstracts IceCaller and IceAnswerer).
+/// Trait for ICE transports (abstracts `IceCaller` and `IceAnswerer`).
 pub trait IceTransport: Send + Sync {
     /// Send a packet over the ICE connection.
     fn send(&self, data: &[u8]) -> Result<(), IceError>;
@@ -1046,8 +1040,8 @@ mod tests {
     ///   client: write → finish → read
     ///
     /// The client sends FIN *before* attempting to read the server's response.
-    /// If quiche garbage-collects the stream between finish() and read(), the
-    /// read will fail with InvalidStreamState.
+    /// If quiche garbage-collects the stream between `finish()` and `read()`, the
+    /// read will fail with `InvalidStreamState`.
     #[tokio::test]
     async fn test_finish_before_read() {
         let (client, server) = loopback_pair().await;
@@ -1092,7 +1086,7 @@ mod tests {
     }
 
     /// Same as above but with multiple concurrent streams, which is closer
-    /// to the WebView scenario (4 parallel HTTP requests).
+    /// to the `WebView` scenario (4 parallel HTTP requests).
     #[tokio::test]
     async fn test_finish_before_read_concurrent() {
         let (client, server) = loopback_pair().await;
@@ -1131,7 +1125,7 @@ mod tests {
             let client = Arc::clone(&client);
             handles.push(tokio::spawn(async move {
                 let stream = client.open_stream().await.unwrap();
-                let payload = format!("request {}", i);
+                let payload = format!("request {i}");
                 stream.write_all(payload.as_bytes()).await.unwrap();
 
                 // Finish BEFORE reading
@@ -1143,14 +1137,14 @@ mod tests {
                     let n = stream
                         .read(&mut buf)
                         .await
-                        .unwrap_or_else(|_| panic!("stream {} read failed", i));
+                        .unwrap_or_else(|_| panic!("stream {i} read failed"));
                     if n == 0 {
                         break;
                     }
                     response.extend_from_slice(&buf[..n]);
                 }
 
-                assert_eq!(response, payload.as_bytes(), "stream {} mismatch", i);
+                assert_eq!(response, payload.as_bytes(), "stream {i} mismatch");
             }));
         }
 

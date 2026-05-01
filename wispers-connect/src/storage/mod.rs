@@ -60,10 +60,25 @@ impl From<std::io::Error> for StorageError {
 /// Implementations are responsible for their own namespacing/isolation.
 /// The library treats each store instance as storing exactly one node's state.
 pub trait NodeStateStore: Send + Sync {
+    /// Load the persisted node state.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the underlying storage fails to read.
     fn load(&self) -> Result<Option<PersistedNodeState>, StorageError>;
 
+    /// Save the node state.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the underlying storage fails to write.
     fn save(&self, state: &PersistedNodeState) -> Result<(), StorageError>;
 
+    /// Delete all persisted node state.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the underlying storage fails to delete.
     fn delete(&self) -> Result<(), StorageError>;
 }
 

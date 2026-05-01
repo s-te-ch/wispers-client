@@ -27,11 +27,11 @@ pub async fn ping(
 
     let our_node = node.node_number().unwrap();
     if target_node == our_node {
-        anyhow::bail!("Cannot ping yourself (node {}).", our_node);
+        anyhow::bail!("Cannot ping yourself (node {our_node}).");
     }
 
     let transport = if use_quic { "QUIC" } else { "UDP" };
-    println!("Pinging node {} via {}...", target_node, transport);
+    println!("Pinging node {target_node} via {transport}...");
 
     let start = std::time::Instant::now();
 
@@ -49,7 +49,7 @@ async fn ping_udp(node: &Node, target_node: i32, start: std::time::Instant) -> R
         .context("failed to connect")?;
 
     let connect_time = start.elapsed();
-    println!("  Connected in {:?}", connect_time);
+    println!("  Connected in {connect_time:?}");
 
     conn.send(b"ping").context("failed to send ping")?;
 
@@ -62,7 +62,7 @@ async fn ping_udp(node: &Node, target_node: i32, start: std::time::Instant) -> R
     let rtt = pong_start.elapsed();
 
     if response == b"pong" {
-        println!("  Pong received in {:?}", rtt);
+        println!("  Pong received in {rtt:?}");
         println!("Ping successful! Total time: {:?}", start.elapsed());
     } else {
         println!(
@@ -81,12 +81,12 @@ async fn ping_quic(node: &Node, target_node: i32, start: std::time::Instant) -> 
         .context("failed to connect")?;
 
     let connect_time = start.elapsed();
-    println!("  Connected in {:?}", connect_time);
+    println!("  Connected in {connect_time:?}");
 
     let stream_start = std::time::Instant::now();
     let stream = conn.open_stream().await.context("failed to open stream")?;
     let stream_time = stream_start.elapsed();
-    println!("  Stream opened in {:?}", stream_time);
+    println!("  Stream opened in {stream_time:?}");
 
     stream
         .write_all(b"PING\n")
@@ -105,7 +105,7 @@ async fn ping_quic(node: &Node, target_node: i32, start: std::time::Instant) -> 
     let response = &buf[..n];
 
     if response == b"PONG\n" {
-        println!("  Pong received in {:?}", rtt);
+        println!("  Pong received in {rtt:?}");
         println!("Ping successful! Total time: {:?}", start.elapsed());
     } else {
         println!(
@@ -146,21 +146,20 @@ pub async fn forward(
 
     let our_node = node.node_number().unwrap();
     if target_node == our_node {
-        anyhow::bail!("Cannot forward to yourself (node {}).", our_node);
+        anyhow::bail!("Cannot forward to yourself (node {our_node}).");
     }
 
     println!(
-        "Forwarding localhost:{} -> node {}:localhost:{}",
-        local_port, target_node, remote_port
+        "Forwarding localhost:{local_port} -> node {target_node}:localhost:{remote_port}"
     );
 
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", local_port))
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{local_port}"))
         .await
-        .context(format!("failed to bind to port {}", local_port))?;
+        .context(format!("failed to bind to port {local_port}"))?;
 
-    println!("Listening on 127.0.0.1:{}", local_port);
+    println!("Listening on 127.0.0.1:{local_port}");
 
-    print!("Connecting to node {}...", target_node);
+    print!("Connecting to node {target_node}...");
     std::io::Write::flush(&mut std::io::stdout())?;
 
     let quic_conn = node
@@ -180,18 +179,18 @@ pub async fn forward(
                 let (tcp_stream, peer_addr) = result.context("failed to accept connection")?;
 
                 let count = connection_count.fetch_add(1, Ordering::Relaxed) + 1;
-                println!("[{}] Accepted connection from {}", count, peer_addr);
+                println!("[{count}] Accepted connection from {peer_addr}");
 
                 let quic_conn = Arc::clone(&quic_conn);
                 tokio::spawn(async move {
-                    if let Err(e) = handle_forward_connection(tcp_stream, quic_conn, remote_port).await {
-                        eprintln!("[{}] Forward error: {}", count, e);
+                    if let Err(e) = Box::pin(handle_forward_connection(tcp_stream, quic_conn, remote_port)).await {
+                        eprintln!("[{count}] Forward error: {e}");
                     }
                 });
             }
             _ = tokio::signal::ctrl_c() => {
                 let total = connection_count.load(Ordering::Relaxed);
-                println!("\nStopping. Total connections forwarded: {}", total);
+                println!("\nStopping. Total connections forwarded: {total}");
                 break;
             }
         }
@@ -210,7 +209,7 @@ async fn handle_forward_connection(
         .await
         .context("failed to open QUIC stream")?;
 
-    let cmd = format!("FORWARD {}\n", remote_port);
+    let cmd = format!("FORWARD {remote_port}\n");
     stream
         .write_all(cmd.as_bytes())
         .await
@@ -227,7 +226,7 @@ async fn handle_forward_connection(
 
     if response == "OK" {
         let stream_id = stream.id();
-        println!("  Stream {} forwarding to port {}", stream_id, remote_port);
+        println!("  Stream {stream_id} forwarding to port {remote_port}");
 
         let stream = Arc::new(stream);
         let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
@@ -240,13 +239,12 @@ async fn handle_forward_connection(
             let mut buf = [0u8; 8192];
             loop {
                 match tcp_read.read(&mut buf).await {
-                    Ok(0) => break,
+                    Ok(0) | Err(_) => break,
                     Ok(n) => {
                         if stream_for_write.write_all(&buf[..n]).await.is_err() {
                             break;
                         }
                     }
-                    Err(_) => break,
                 }
             }
             let _ = stream_for_write.finish().await;
@@ -257,24 +255,23 @@ async fn handle_forward_connection(
             let mut buf = [0u8; 8192];
             loop {
                 match stream_for_read.read(&mut buf).await {
-                    Ok(0) => break,
+                    Ok(0) | Err(_) => break,
                     Ok(n) => {
                         if tcp_write.write_all(&buf[..n]).await.is_err() {
                             break;
                         }
                     }
-                    Err(_) => break,
                 }
             }
             let _ = tcp_write.shutdown().await;
         };
 
         tokio::join!(tcp_to_quic, quic_to_tcp);
-        println!("  Stream {} closed", stream_id);
+        println!("  Stream {stream_id} closed");
         Ok(())
     } else if let Some(msg) = response.strip_prefix("ERROR ") {
-        anyhow::bail!("Remote error: {}", msg);
+        anyhow::bail!("Remote error: {msg}");
     } else {
-        anyhow::bail!("Unexpected response: {}", response);
+        anyhow::bail!("Unexpected response: {response}");
     }
 }

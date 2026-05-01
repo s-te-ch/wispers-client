@@ -2,9 +2,9 @@
 //! Minimal fake hub for integration testing.
 //!
 //! Implements only the RPCs needed for P2P connection establishment:
-//! - GetStunTurnConfig
-//! - StartServing
-//! - StartConnection
+//! - `GetStunTurnConfig`
+//! - `StartServing`
+//! - `StartConnection`
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -35,10 +35,10 @@ struct PendingConnection {
 
 /// State shared between the hub service methods.
 struct HubState {
-    /// Nodes currently serving: node_number -> channel to send requests
+    /// Nodes currently serving: `node_number` -> channel to send requests
     serving_nodes: HashMap<i32, mpsc::Sender<ServingRequest>>,
 
-    /// Pending connection requests: request_id -> pending connection
+    /// Pending connection requests: `request_id` -> pending connection
     pending_connections: HashMap<i64, PendingConnection>,
 
     /// Next request ID

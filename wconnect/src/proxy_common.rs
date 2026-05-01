@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 use wispers_connect::{Node, QuicConnection, QuicStream};
 
 /// Default idle timeout for pooled connections (60 seconds).
-pub const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+pub const IDLE_TIMEOUT: Duration = Duration::from_mins(1);
 
 /// Interval for checking and cleaning up idle connections.
 pub const CLEANUP_INTERVAL: Duration = Duration::from_secs(15);
@@ -38,10 +38,10 @@ pub enum ProxyError {
 impl fmt::Display for ProxyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ProxyError::BadRequest(msg) => write!(f, "{}", msg),
-            ProxyError::Forbidden(msg) => write!(f, "{}", msg),
-            ProxyError::BadGateway(msg) => write!(f, "{}", msg),
-            ProxyError::GatewayTimeout(msg) => write!(f, "{}", msg),
+            ProxyError::BadRequest(msg)
+            | ProxyError::Forbidden(msg)
+            | ProxyError::BadGateway(msg)
+            | ProxyError::GatewayTimeout(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -91,13 +91,13 @@ impl ConnectionPool {
             let mut pool = self.connections.lock().await;
             if let Some(pooled) = pool.get_mut(&target_node) {
                 pooled.last_used = Instant::now();
-                println!("  Reusing existing QUIC connection to node {}", target_node);
+                println!("  Reusing existing QUIC connection to node {target_node}");
                 return Ok(Arc::clone(&pooled.conn));
             }
         }
 
         // Create a new connection
-        println!("  Creating new QUIC connection to node {}", target_node);
+        println!("  Creating new QUIC connection to node {target_node}");
         let conn = node.connect_quic(target_node).await?;
         let conn = Arc::new(conn);
 
@@ -125,14 +125,14 @@ impl ConnectionPool {
         pool.retain(|node, pooled| {
             let keep = now.duration_since(pooled.last_used) < IDLE_TIMEOUT;
             if !keep {
-                println!("  Closing idle connection to node {}", node);
+                println!("  Closing idle connection to node {node}");
             }
             keep
         });
 
         let removed = before - pool.len();
         if removed > 0 {
-            println!("  Cleaned up {} idle connection(s)", removed);
+            println!("  Cleaned up {removed} idle connection(s)");
         }
     }
 }
@@ -153,26 +153,21 @@ pub struct WispersHost {
 /// or `Err(Some(ProxyError))` if it's malformed.
 pub fn parse_wispers_host(host: &str) -> Result<WispersHost, Option<ProxyError>> {
     // Check if it's a wispers.link hostname
-    let node_str = match host.strip_suffix(".wispers.link") {
-        Some(s) => s,
-        None => {
-            // Not a wispers.link hostname - could be egress traffic
-            return Err(None);
-        }
+    let Some(node_str) = host.strip_suffix(".wispers.link") else {
+        // Not a wispers.link hostname - could be egress traffic
+        return Err(None);
     };
 
     // Parse node number
     let node_number: i32 = node_str.parse().map_err(|_| {
         Some(ProxyError::BadRequest(format!(
-            "invalid node number in hostname: {}",
-            node_str
+            "invalid node number in hostname: {node_str}"
         )))
     })?;
 
     if node_number <= 0 {
         return Err(Some(ProxyError::BadRequest(format!(
-            "node number must be positive, got: {}",
-            node_number
+            "node number must be positive, got: {node_number}"
         ))));
     }
 
@@ -188,28 +183,28 @@ pub async fn open_stream_with_command(
     let quic_stream = quic_conn
         .open_stream()
         .await
-        .map_err(|e| format!("failed to open stream: {}", e))?;
+        .map_err(|e| format!("failed to open stream: {e}"))?;
 
     quic_stream
         .write_all(command.as_bytes())
         .await
-        .map_err(|e| format!("failed to send command: {}", e))?;
+        .map_err(|e| format!("failed to send command: {e}"))?;
 
     let mut response_buf = [0u8; 256];
     let n = quic_stream
         .read(&mut response_buf)
         .await
-        .map_err(|e| format!("failed to read response: {}", e))?;
+        .map_err(|e| format!("failed to read response: {e}"))?;
 
     let response = String::from_utf8_lossy(&response_buf[..n]);
     let response = response.trim();
 
     if let Some(msg) = response.strip_prefix("ERROR ") {
-        return Err(format!("remote error: {}", msg));
+        return Err(format!("remote error: {msg}"));
     }
 
     if response != "OK" {
-        return Err(format!("unexpected response: {}", response));
+        return Err(format!("unexpected response: {response}"));
     }
 
     Ok(quic_stream)
@@ -259,11 +254,11 @@ mod tests {
 
     #[test]
     fn test_proxy_error_status_codes() {
-        assert_eq!(ProxyError::BadRequest("".to_string()).status_code(), 400);
-        assert_eq!(ProxyError::Forbidden("".to_string()).status_code(), 403);
-        assert_eq!(ProxyError::BadGateway("".to_string()).status_code(), 502);
+        assert_eq!(ProxyError::BadRequest(String::new()).status_code(), 400);
+        assert_eq!(ProxyError::Forbidden(String::new()).status_code(), 403);
+        assert_eq!(ProxyError::BadGateway(String::new()).status_code(), 502);
         assert_eq!(
-            ProxyError::GatewayTimeout("".to_string()).status_code(),
+            ProxyError::GatewayTimeout(String::new()).status_code(),
             504
         );
     }

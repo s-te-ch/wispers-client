@@ -170,7 +170,7 @@ fn stop_daemon(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     let path = daemon::ipc_path(&cg_id, node_number);
 
     let mut stream = UnixStream::connect(&path)
-        .with_context(|| format!("daemon not running (socket {:?})", path))?;
+        .with_context(|| format!("daemon not running (socket {})", path.display()))?;
 
     writeln!(stream, r#"{{"cmd":"shutdown"}}"#)?;
     stream.flush()?;
@@ -240,11 +240,11 @@ fn daemonize_serve(_hub_override: Option<&str>, profile: &str) -> Result<()> {
         .join("logs");
     fs::create_dir_all(&log_dir).context("failed to create log directory")?;
 
-    let log_path = log_dir.join(format!("{}-{}.log", cg_id, node_number));
+    let log_path = log_dir.join(format!("{cg_id}-{node_number}.log"));
     let log_file = File::create(&log_path)
-        .with_context(|| format!("failed to create log file {:?}", log_path))?;
+        .with_context(|| format!("failed to create log file {}", log_path.display()))?;
 
-    println!("Daemonizing, logging to {:?}", log_path);
+    println!("Daemonizing, logging to {}", log_path.display());
 
     let daemonize = Daemonize::new()
         .stdout(log_file.try_clone()?)
@@ -387,7 +387,7 @@ async fn register(hub_override: Option<&str>, profile: &str, token: &str) -> Res
         );
     }
 
-    println!("Registering with token {}...", token);
+    println!("Registering with token {token}...");
 
     node.register(token).await.context("registration failed")?;
 
@@ -429,7 +429,7 @@ async fn activate(hub_override: Option<&str>, profile: &str, activation_code: &s
         );
     }
 
-    println!("Activating with activation code {}...", activation_code);
+    println!("Activating with activation code {activation_code}...");
     node.activate(activation_code)
         .await
         .context("activation failed")?;
@@ -473,9 +473,9 @@ async fn get_activation_code(hub_override: Option<&str>, profile: &str) -> Resul
             println!("{}", p.activation_code);
         }
         daemon::Response::Error { error, .. } => {
-            anyhow::bail!("{}", error);
+            anyhow::bail!("{error}");
         }
-        _ => {
+        daemon::Response::Success { .. } => {
             anyhow::bail!("unexpected response from daemon");
         }
     }
@@ -563,6 +563,7 @@ fn format_last_seen(millis: i64) -> String {
     if millis == 0 {
         return "never connected".to_string();
     }
+    #[allow(clippy::cast_possible_truncation)]
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

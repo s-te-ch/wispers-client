@@ -9,6 +9,7 @@ pub struct InMemoryNodeStateStore {
 }
 
 impl InMemoryNodeStateStore {
+    #[must_use] 
     pub fn new() -> Self {
         Self::default()
     }

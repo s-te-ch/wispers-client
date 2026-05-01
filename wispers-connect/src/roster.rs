@@ -128,6 +128,15 @@ pub enum RosterVerificationError {
 /// # Returns
 /// A map of node numbers to their verified public keys on success (active
 /// nodes only).
+///
+/// # Errors
+///
+/// Returns `Err` if the roster structure is invalid, signature verification fails,
+/// or the verifier node is not found or revoked.
+///
+/// # Panics
+///
+/// Panics if `verifier_public_key_spki` is not a valid SPKI-encoded Ed25519 public key.
 pub fn verify_roster(
     roster: &Roster,
     verifier_node_number: i32,
@@ -148,7 +157,7 @@ pub fn verify_roster(
     let mut working_roster = Roster::default();
     let mut keys: HashMap<i32, VerifyingKey> = HashMap::new();
     for (i, addendum) in roster.addenda.iter().enumerate() {
-        let expected_version = (i + 1) as i64;
+        let expected_version = i64::try_from(i + 1).expect("addendum index fits i64");
         let kind = addendum
             .kind
             .as_ref()
@@ -185,23 +194,19 @@ pub fn verify_roster(
     // they claim. Membership in `keys` is the active-set test; we fall
     // back to scanning `working_roster.nodes` only to distinguish "never
     // in the roster" from "revoked".
-    let verifier_key_in_state = match keys.get(&verifier_node_number) {
-        Some(k) => k,
-        None => {
-            if working_roster
-                .nodes
-                .iter()
-                .any(|n| n.node_number == verifier_node_number)
-            {
-                return Err(RosterVerificationError::VerifierRevoked(
-                    verifier_node_number,
-                ));
-            } else {
-                return Err(RosterVerificationError::VerifierNotInRoster(
-                    verifier_node_number,
-                ));
-            }
+    let Some(verifier_key_in_state) = keys.get(&verifier_node_number) else {
+        if working_roster
+            .nodes
+            .iter()
+            .any(|n| n.node_number == verifier_node_number)
+        {
+            return Err(RosterVerificationError::VerifierRevoked(
+                verifier_node_number,
+            ));
         }
+        return Err(RosterVerificationError::VerifierNotInRoster(
+            verifier_node_number,
+        ));
     };
     if verifier_key_in_state != &expected_verifier_key {
         return Err(RosterVerificationError::VerifierKeyMismatch(
@@ -223,7 +228,7 @@ fn verify_roster_structure(roster: &Roster) -> Result<(), RosterVerificationErro
         return Err(RosterVerificationError::InvalidVersion(roster.version));
     }
 
-    let expected_addenda = roster.version as usize;
+    let expected_addenda = usize::try_from(roster.version).expect("roster version fits usize");
     if roster.addenda.len() != expected_addenda {
         return Err(RosterVerificationError::AddendaCountMismatch {
             version: roster.version,
@@ -364,9 +369,9 @@ fn apply_and_verify_activation(
     // Compute the signing hash and verify both signatures against it.
     let signing_hash = compute_signing_hash(working_roster);
     verify_signature(&new_node_key, &signing_hash, &activation.new_node_signature)
-        .map_err(|_| RosterVerificationError::InvalidNewNodeSignature(expected_version))?;
+        .map_err(|()| RosterVerificationError::InvalidNewNodeSignature(expected_version))?;
     verify_signature(&endorser_key, &signing_hash, &activation.endorser_signature)
-        .map_err(|_| RosterVerificationError::InvalidEndorserSignature(expected_version))?;
+        .map_err(|()| RosterVerificationError::InvalidEndorserSignature(expected_version))?;
 
     // Now that they're verified, copy the input signatures into the addendum.
     set_new_node_signature(working_roster, activation.new_node_signature.clone());
@@ -438,7 +443,7 @@ fn apply_and_verify_revocation(
     // Compute the signing hash and verify the revoker's signature.
     let signing_hash = compute_signing_hash(working_roster);
     verify_signature(&revoker_key, &signing_hash, &revocation.revoker_signature)
-        .map_err(|_| RosterVerificationError::InvalidRevokerSignature(expected_version))?;
+        .map_err(|()| RosterVerificationError::InvalidRevokerSignature(expected_version))?;
 
     // Now that it's verified, copy the revoker's signature into the addendum.
     set_revoker_signature(working_roster, revocation.revoker_signature.clone());
@@ -477,6 +482,7 @@ const SIGNING_HASH_DOMAIN: &[u8] = b"wispers-connect/roster-signing/v1\0";
 /// being equivalent to "field absent" on the wire (which it is for
 /// non-`optional` proto3 `bytes`). The `compute_signing_hash_*` tests
 /// verify this empirically.
+#[must_use]
 pub fn compute_signing_hash(roster: &Roster) -> Vec<u8> {
     debug_assert!(
         latest_addendum_signatures_are_empty(roster),
@@ -531,7 +537,8 @@ pub fn clear_latest_addendum_signatures(roster: &mut Roster) {
 // verification.
 
 /// Build an activation payload without signatures, for use with either
-/// create_bootstrap_roster or add_activation_to_roster.
+/// `create_bootstrap_roster` or `add_activation_to_roster`.
+#[must_use]
 pub fn build_activation_payload(
     base_roster: &Roster,
     new_node_number: i32,
@@ -550,9 +557,10 @@ pub fn build_activation_payload(
 
 /// Create a bootstrap roster (version 1) with two founding nodes.
 ///
-/// During bootstrap, both nodes are added simultaneously. The new_node signs
-/// the roster; the endorser_signature is left empty to be filled by the hub
+/// During bootstrap, both nodes are added simultaneously. The `new_node` signs
+/// the roster; the `endorser_signature` is left empty to be filled by the hub
 /// after obtaining the endorser's signature.
+#[must_use]
 pub fn create_bootstrap_roster(
     payload: roster::activation::Payload,
     new_node_pubkey_spki: &[u8],
@@ -617,15 +625,16 @@ pub fn add_activation_to_roster(
 }
 
 /// Build a revocation payload (intent only — no signature, no hash).
+#[must_use]
 pub fn build_revocation_payload(
     base_roster: &Roster,
-    revoked_node_number: i32,
-    revoker_node_number: i32,
+    target_node: i32,
+    revoker: i32,
 ) -> roster::revocation::Payload {
     roster::revocation::Payload {
         version: base_roster.version + 1,
-        revoked_node_number,
-        revoker_node_number,
+        revoked_node_number: target_node,
+        revoker_node_number: revoker,
     }
 }
 
@@ -661,7 +670,11 @@ pub fn add_revocation_to_roster(roster: &mut Roster, payload: roster::revocation
 }
 
 /// Set the new node's signature on the latest addendum (which must be an
-/// activation). Panics if the latest addendum is missing or of the wrong kind.
+/// activation).
+///
+/// # Panics
+///
+/// Panics if the roster has no addenda, the addendum has no kind, or it is not an activation.
 pub fn set_new_node_signature(roster: &mut Roster, signature: Vec<u8>) {
     let last = roster.addenda.last_mut().expect("roster has no addenda");
     match last.kind.as_mut().expect("addendum has no kind") {
@@ -673,7 +686,11 @@ pub fn set_new_node_signature(roster: &mut Roster, signature: Vec<u8>) {
 }
 
 /// Set the endorser's signature on the latest addendum (which must be an
-/// activation). Panics if the latest addendum is missing or of the wrong kind.
+/// activation).
+///
+/// # Panics
+///
+/// Panics if the roster has no addenda, the addendum has no kind, or it is not an activation.
 pub fn set_endorser_signature(roster: &mut Roster, signature: Vec<u8>) {
     let last = roster.addenda.last_mut().expect("roster has no addenda");
     match last.kind.as_mut().expect("addendum has no kind") {
@@ -685,7 +702,11 @@ pub fn set_endorser_signature(roster: &mut Roster, signature: Vec<u8>) {
 }
 
 /// Set the revoker's signature on the latest addendum (which must be a
-/// revocation). Panics if the latest addendum is missing or of the wrong kind.
+/// revocation).
+///
+/// # Panics
+///
+/// Panics if the roster has no addenda, the addendum has no kind, or it is not a revocation.
 pub fn set_revoker_signature(roster: &mut Roster, signature: Vec<u8>) {
     let last = roster.addenda.last_mut().expect("roster has no addenda");
     match last.kind.as_mut().expect("addendum has no kind") {
@@ -759,7 +780,7 @@ mod tests {
             roster,
             new_node_number,
             endorser_node_number,
-            format!("nonce_{}", new_node_number).into_bytes(),
+            format!("nonce_{new_node_number}").into_bytes(),
             format!("endorser_nonce_{}", roster.version + 1).into_bytes(),
         );
         add_activation_to_roster(roster, payload, &spki(new_key));
@@ -769,13 +790,8 @@ mod tests {
     }
 
     /// Revoke a node from the roster.
-    fn revoke_node(
-        roster: &mut Roster,
-        revoked_node_number: i32,
-        revoker_key: &SigningKey,
-        revoker_node_number: i32,
-    ) {
-        let payload = build_revocation_payload(roster, revoked_node_number, revoker_node_number);
+    fn revoke_node(roster: &mut Roster, target_node: i32, revoker_key: &SigningKey, revoker: i32) {
+        let payload = build_revocation_payload(roster, target_node, revoker);
         add_revocation_to_roster(roster, payload);
         let signing_hash = compute_signing_hash(roster);
         set_revoker_signature(roster, sign(revoker_key, &signing_hash));
@@ -831,8 +847,7 @@ mod tests {
         let result = verify_roster(&roster, 1, &spki(&key1));
         assert!(
             matches!(result, Err(RosterVerificationError::ReconstructionMismatch)),
-            "expected ReconstructionMismatch, got {:?}",
-            result
+            "expected ReconstructionMismatch, got {result:?}"
         );
     }
 
@@ -917,13 +932,9 @@ mod tests {
         // All nodes should be able to verify
         for (node_num, key) in [(1, &key1), (2, &key2), (3, &key3), (4, &key4)] {
             let result = verify_roster(&roster, node_num, &spki(key));
-            assert!(
-                result.is_ok(),
-                "Node {} should verify successfully",
-                node_num
-            );
-            let keys = result.unwrap();
-            assert_eq!(keys.len(), 4);
+            assert!(result.is_ok(), "Node {node_num} should verify successfully");
+            let verified_keys = result.unwrap();
+            assert_eq!(verified_keys.len(), 4);
         }
     }
 
@@ -1073,8 +1084,7 @@ mod tests {
         assert!(
             matches!(err, RosterVerificationError::InvalidNewNodeSignature(2))
                 || matches!(err, RosterVerificationError::InvalidEndorserSignature(2)),
-            "expected signature error, got: {:?}",
-            err
+            "expected signature error, got: {err:?}"
         );
     }
 
@@ -1172,11 +1182,11 @@ mod tests {
         assert!(result.is_ok());
 
         // Nodes 2 and 3 should be in the active keys, not node 1
-        let keys = result.unwrap();
-        assert_eq!(keys.len(), 2);
-        assert!(keys.contains_key(&2));
-        assert!(keys.contains_key(&3));
-        assert!(!keys.contains_key(&1)); // Node 1 was revoked
+        let verified_keys = result.unwrap();
+        assert_eq!(verified_keys.len(), 2);
+        assert!(verified_keys.contains_key(&2));
+        assert!(verified_keys.contains_key(&3));
+        assert!(!verified_keys.contains_key(&1)); // Node 1 was revoked
     }
 
     #[test]
@@ -1321,7 +1331,7 @@ mod tests {
         // Verify from each active node's perspective
         for &active_node in &[0, 2, 3, 4, 5] {
             let result = verify_roster(&roster, active_node, &spki(&keys[active_node as usize]));
-            assert!(result.is_ok(), "Node {} should verify", active_node);
+            assert!(result.is_ok(), "Node {active_node} should verify");
 
             let verified_keys = result.unwrap();
             assert_eq!(verified_keys.len(), 5); // 6 nodes - 1 revoked = 5 active
@@ -1578,8 +1588,7 @@ mod tests {
                 result,
                 Err(RosterVerificationError::InvalidNewNodeSignature(1))
             ),
-            "expected InvalidNewNodeSignature(1), got {:?}",
-            result
+            "expected InvalidNewNodeSignature(1), got {result:?}"
         );
     }
 
@@ -1618,17 +1627,16 @@ mod tests {
         let result = verify_roster(&fake_roster, 2, &spki(&real_new_node_key));
         assert!(
             matches!(result, Err(RosterVerificationError::VerifierKeyMismatch(2))),
-            "expected VerifierKeyMismatch(2), got {:?}",
-            result
+            "expected VerifierKeyMismatch(2), got {result:?}"
         );
     }
 
     /// Subtler variant: hub returns a roster where the new node's entry
-    /// has the REAL new node key (so VerifierKeyMismatch doesn't fire) but
+    /// has the REAL new node key (so `VerifierKeyMismatch` doesn't fire) but
     /// the endorser entry is the hub's fake key. The hub computes a valid
     /// signing hash over its fake roster. But the hub doesn't have the
     /// real new node's signing key, so it can't produce a valid
-    /// new_node_signature.
+    /// `new_node_signature`.
     #[test]
     fn test_c1_hub_cannot_forge_new_node_signature_for_swap() {
         let fake_endorser_key = generate_key();
@@ -1664,8 +1672,7 @@ mod tests {
                 result,
                 Err(RosterVerificationError::InvalidNewNodeSignature(1))
             ),
-            "expected InvalidNewNodeSignature(1), got {:?}",
-            result
+            "expected InvalidNewNodeSignature(1), got {result:?}"
         );
     }
 
@@ -1704,8 +1711,7 @@ mod tests {
         let result = verify_roster(&roster, 1, &spki(&key1));
         assert!(
             matches!(result, Err(RosterVerificationError::ReconstructionMismatch)),
-            "expected ReconstructionMismatch, got {:?}",
-            result
+            "expected ReconstructionMismatch, got {result:?}"
         );
     }
 
@@ -1724,8 +1730,7 @@ mod tests {
         let result = verify_roster(&roster, 1, &spki(&key1));
         assert!(
             matches!(result, Err(RosterVerificationError::ReconstructionMismatch)),
-            "expected ReconstructionMismatch, got {:?}",
-            result
+            "expected ReconstructionMismatch, got {result:?}"
         );
     }
 }

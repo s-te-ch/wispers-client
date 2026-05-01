@@ -71,7 +71,7 @@ pub extern "C" fn wispers_udp_connection_free(handle: *mut WispersUdpConnectionH
 
 /// Connect to a peer node using UDP transport.
 ///
-/// Returns INVALID_STATE if the node is not in Activated state.
+/// Returns `INVALID_STATE` if the node is not in Activated state.
 /// The node handle is NOT consumed.
 /// On success, callback receives the UDP connection handle.
 #[unsafe(no_mangle)]
@@ -85,9 +85,8 @@ pub extern "C" fn wispers_node_connect_udp_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);
@@ -159,9 +158,8 @@ pub extern "C" fn wispers_udp_connection_recv_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     // We need to keep the connection alive while receiving.
@@ -289,7 +287,7 @@ pub extern "C" fn wispers_quic_stream_free(handle: *mut WispersQuicStreamHandle)
 
 /// Connect to a peer node using QUIC transport.
 ///
-/// Returns INVALID_STATE if the node is not in Activated state.
+/// Returns `INVALID_STATE` if the node is not in Activated state.
 /// The node handle is NOT consumed.
 /// On success, callback receives the QUIC connection handle.
 #[unsafe(no_mangle)]
@@ -303,9 +301,8 @@ pub extern "C" fn wispers_node_connect_quic_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);
@@ -353,9 +350,8 @@ pub extern "C" fn wispers_quic_connection_open_stream_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);
@@ -403,9 +399,8 @@ pub extern "C" fn wispers_quic_connection_accept_stream_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);
@@ -453,9 +448,8 @@ pub extern "C" fn wispers_quic_connection_close_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);
@@ -502,9 +496,8 @@ pub extern "C" fn wispers_quic_stream_write_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     // Copy data before returning so caller can free their buffer
@@ -521,7 +514,7 @@ pub extern "C" fn wispers_quic_stream_write_async(
                 callback(ctx.ptr(), WispersStatus::Success, ptr::null());
             },
             Err(e) => {
-                log::error!("[wispers FFI] quic_stream_write error: {:?}", e);
+                log::error!("[wispers FFI] quic_stream_write error: {e:?}");
                 let detail = CString::new(e.to_string()).unwrap_or_default();
                 unsafe {
                     callback(ctx.ptr(), WispersStatus::ConnectionFailed, detail.as_ptr());
@@ -538,7 +531,7 @@ pub extern "C" fn wispers_quic_stream_write_async(
 /// The stream handle is NOT consumed.
 /// On success, callback receives the data buffer. The buffer is only valid
 /// during the callback invocation.
-/// max_len specifies the maximum number of bytes to read.
+/// `max_len` specifies the maximum number of bytes to read.
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_quic_stream_read_async(
     handle: *mut WispersQuicStreamHandle,
@@ -550,9 +543,8 @@ pub extern "C" fn wispers_quic_stream_read_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);
@@ -574,7 +566,7 @@ pub extern "C" fn wispers_quic_stream_read_async(
                 );
             },
             Err(e) => {
-                log::error!("[wispers FFI] quic_stream_read error: {:?}", e);
+                log::error!("[wispers FFI] quic_stream_read error: {e:?}");
                 let detail = CString::new(e.to_string()).unwrap_or_default();
                 unsafe {
                     callback(
@@ -607,9 +599,8 @@ pub extern "C" fn wispers_quic_stream_finish_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);
@@ -624,7 +615,7 @@ pub extern "C" fn wispers_quic_stream_finish_async(
                 callback(ctx.ptr(), WispersStatus::Success, ptr::null());
             },
             Err(e) => {
-                log::error!("[wispers FFI] quic_stream_finish error: {:?}", e);
+                log::error!("[wispers FFI] quic_stream_finish error: {e:?}");
                 let detail = CString::new(e.to_string()).unwrap_or_default();
                 unsafe {
                     callback(ctx.ptr(), WispersStatus::ConnectionFailed, detail.as_ptr());
@@ -650,9 +641,8 @@ pub extern "C" fn wispers_quic_stream_shutdown_async(
         return WispersStatus::NullPointer;
     }
 
-    let callback = match callback {
-        Some(cb) => cb,
-        None => return WispersStatus::MissingCallback,
+    let Some(callback) = callback else {
+        return WispersStatus::MissingCallback;
     };
 
     let ctx = CallbackContext(ctx);

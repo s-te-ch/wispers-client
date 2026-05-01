@@ -32,14 +32,14 @@ impl AllowedPorts {
         }
 
         let mut ports = HashSet::new();
-        for part in value.split(',') {
-            let part = part.trim();
-            if part.is_empty() {
+        for segment in value.split(',') {
+            let segment = segment.trim();
+            if segment.is_empty() {
                 continue;
             }
-            let port: u16 = part
+            let port: u16 = segment
                 .parse()
-                .with_context(|| format!("invalid port number: {}", part))?;
+                .with_context(|| format!("invalid port number: {segment}"))?;
             ports.insert(port);
         }
 
@@ -59,6 +59,7 @@ impl AllowedPorts {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn serve(
     hub_override: Option<&str>,
     profile: &str,
@@ -84,10 +85,10 @@ pub async fn serve(
     let allowed_ports = Arc::new(allowed_ports);
 
     println!(
-        "Serving node {} in group {} (socket: {:?})",
+        "Serving node {} in group {} (socket: {})",
         node_number,
         cg_id,
-        daemon.path()
+        daemon.path().display()
     );
     if let Some(ref ports) = *allowed_ports {
         match ports {
@@ -95,7 +96,7 @@ pub async fn serve(
             AllowedPorts::Whitelist(set) => {
                 let mut ports: Vec<_> = set.iter().collect();
                 ports.sort();
-                println!("  Port forwarding: allowed ports {:?}", ports);
+                println!("  Port forwarding: allowed ports {ports:?}");
             }
         }
     } else {
@@ -153,7 +154,7 @@ pub async fn serve(
                         return Err(e);
                     }
                     Err(e) => {
-                        return Err(anyhow::anyhow!("Connect task panicked: {}", e));
+                        return Err(anyhow::anyhow!("Connect task panicked: {e}"));
                     }
                 }
             }
@@ -166,10 +167,10 @@ pub async fn serve(
                         break;
                     }
                     Ok(Err(e)) => {
-                        return Err(anyhow::anyhow!("Session error: {}", e));
+                        return Err(anyhow::anyhow!("Session error: {e}"));
                     }
                     Err(e) => {
-                        return Err(anyhow::anyhow!("Session task panicked: {}", e));
+                        return Err(anyhow::anyhow!("Session task panicked: {e}"));
                     }
                 }
             }
@@ -187,7 +188,7 @@ pub async fn serve(
                         tokio::spawn(handle_udp_connection(conn));
                     }
                     Err(e) => {
-                        eprintln!("UDP connection failed: {}", e);
+                        eprintln!("UDP connection failed: {e}");
                     }
                 }
             }
@@ -206,7 +207,7 @@ pub async fn serve(
                         tokio::spawn(handle_quic_connection(conn, allowed_ports, allow_egress));
                     }
                     Err(e) => {
-                        eprintln!("QUIC connection handshake failed: {}", e);
+                        eprintln!("QUIC connection handshake failed: {e}");
                     }
                 }
             }
@@ -221,7 +222,7 @@ pub async fn serve(
                         });
                     }
                     Err(e) => {
-                        eprintln!("Failed to accept daemon connection: {}", e);
+                        eprintln!("Failed to accept daemon connection: {e}");
                     }
                 }
             }
@@ -235,17 +236,16 @@ pub async fn serve(
 async fn handle_udp_connection(conn: UdpConnection) {
     let peer = conn.peer_node_number;
     println!(
-        "  UDP connected to node {} (connection already established)",
-        peer
+        "  UDP connected to node {peer} (connection already established)"
     );
 
     loop {
         match conn.recv().await {
             Ok(data) => {
                 if data == b"ping" {
-                    println!("  Received ping from node {}, sending pong", peer);
+                    println!("  Received ping from node {peer}, sending pong");
                     if let Err(e) = conn.send(b"pong") {
-                        eprintln!("  Failed to send pong to node {}: {}", peer, e);
+                        eprintln!("  Failed to send pong to node {peer}: {e}");
                         break;
                     }
                 } else {
@@ -253,7 +253,7 @@ async fn handle_udp_connection(conn: UdpConnection) {
                 }
             }
             Err(e) => {
-                println!("  UDP connection to node {} closed: {}", peer, e);
+                println!("  UDP connection to node {peer} closed: {e}");
                 break;
             }
         }
@@ -268,15 +268,14 @@ async fn handle_quic_connection(
 ) {
     let peer = conn.peer_node_number;
     println!(
-        "  QUIC connected to node {} (connection already established)",
-        peer
+        "  QUIC connected to node {peer} (connection already established)"
     );
 
     loop {
         match conn.accept_stream().await {
             Ok(stream) => {
                 let stream_id = stream.id();
-                println!("  Accepted stream {} from node {}", stream_id, peer);
+                println!("  Accepted stream {stream_id} from node {peer}");
                 let allowed_ports = Arc::clone(&allowed_ports);
                 tokio::spawn(handle_quic_stream(
                     stream,
@@ -287,7 +286,7 @@ async fn handle_quic_connection(
                 ));
             }
             Err(e) => {
-                println!("  QUIC connection to node {} closed: {}", peer, e);
+                println!("  QUIC connection to node {peer} closed: {e}");
                 break;
             }
         }
@@ -305,12 +304,12 @@ async fn handle_quic_stream(
     let mut buf = [0u8; 1024];
     let n = match stream.read(&mut buf).await {
         Ok(0) => {
-            println!("  Stream {} closed by peer before command", stream_id);
+            println!("  Stream {stream_id} closed by peer before command");
             return;
         }
         Ok(n) => n,
         Err(e) => {
-            eprintln!("  Stream {} read error: {}", stream_id, e);
+            eprintln!("  Stream {stream_id} read error: {e}");
             return;
         }
     };
@@ -325,29 +324,26 @@ async fn handle_quic_stream(
 
     match line {
         b"PING" => {
-            println!("  Received PING on stream {}, sending PONG", stream_id);
+            println!("  Received PING on stream {stream_id}, sending PONG");
             if let Err(e) = stream.write_all(b"PONG\n").await {
-                eprintln!("  Failed to send PONG: {}", e);
+                eprintln!("  Failed to send PONG: {e}");
             }
             let _ = stream.finish().await;
         }
         cmd if cmd.starts_with(b"FORWARD ") => {
             let port_str = String::from_utf8_lossy(&cmd[8..]);
-            match port_str.trim().parse::<u16>() {
-                Ok(port) => {
-                    println!("  Received FORWARD {} on stream {}", port, stream_id);
-                    handle_forward_stream(stream, port, &allowed_ports).await;
-                }
-                Err(_) => {
-                    let _ = stream.write_all(b"ERROR invalid port\n").await;
-                    let _ = stream.finish().await;
-                }
+            if let Ok(port) = port_str.trim().parse::<u16>() {
+                println!("  Received FORWARD {port} on stream {stream_id}");
+                Box::pin(handle_forward_stream(stream, port, allowed_ports.as_ref().as_ref())).await;
+            } else {
+                let _ = stream.write_all(b"ERROR invalid port\n").await;
+                let _ = stream.finish().await;
             }
         }
         cmd if cmd.starts_with(b"CONNECT ") => {
             let target = String::from_utf8_lossy(&cmd[8..]).trim().to_string();
-            println!("  Received CONNECT {} on stream {}", target, stream_id);
-            handle_connect_stream(stream, &target, allow_egress).await;
+            println!("  Received CONNECT {target} on stream {stream_id}");
+            Box::pin(handle_connect_stream(stream, &target, allow_egress)).await;
         }
         _ => {
             println!(
@@ -365,7 +361,7 @@ async fn handle_quic_stream(
 async fn handle_forward_stream(
     stream: wispers_connect::QuicStream,
     port: u16,
-    allowed_ports: &Option<AllowedPorts>,
+    allowed_ports: Option<&AllowedPorts>,
 ) {
     // Check if port forwarding is allowed
     let allowed = match allowed_ports {
@@ -374,7 +370,7 @@ async fn handle_forward_stream(
     };
 
     if !allowed {
-        println!("  FORWARD to port {} denied (not in allowlist)", port);
+        println!("  FORWARD to port {port} denied (not in allowlist)");
         let _ = stream.write_all(b"ERROR port not allowed\n").await;
         let _ = stream.finish().await;
         return;
@@ -383,16 +379,16 @@ async fn handle_forward_stream(
     let stream = Arc::new(stream);
 
     // Connect to localhost:port
-    let tcp = match TcpStream::connect(format!("127.0.0.1:{}", port)).await {
+    let tcp = match TcpStream::connect(format!("127.0.0.1:{port}")).await {
         Ok(tcp) => {
             if let Err(e) = stream.write_all(b"OK\n").await {
-                eprintln!("  Failed to send OK: {}", e);
+                eprintln!("  Failed to send OK: {e}");
                 return;
             }
             tcp
         }
         Err(e) => {
-            let msg = format!("ERROR {}\n", e);
+            let msg = format!("ERROR {e}\n");
             let _ = stream.write_all(msg.as_bytes()).await;
             let _ = stream.finish().await;
             return;
@@ -412,12 +408,12 @@ async fn handle_forward_stream(
                 Ok(0) => break,
                 Ok(n) => {
                     if let Err(e) = tcp_write.write_all(&buf[..n]).await {
-                        eprintln!("  TCP write error: {}", e);
+                        eprintln!("  TCP write error: {e}");
                         break;
                     }
                 }
                 Err(e) => {
-                    eprintln!("  QUIC read error: {}", e);
+                    eprintln!("  QUIC read error: {e}");
                     break;
                 }
             }
@@ -433,12 +429,12 @@ async fn handle_forward_stream(
                 Ok(0) => break,
                 Ok(n) => {
                     if let Err(e) = stream_write.write_all(&buf[..n]).await {
-                        eprintln!("  QUIC write error: {}", e);
+                        eprintln!("  QUIC write error: {e}");
                         break;
                     }
                 }
                 Err(e) => {
-                    eprintln!("  TCP read error: {}", e);
+                    eprintln!("  TCP read error: {e}");
                     break;
                 }
             }
@@ -457,21 +453,18 @@ async fn handle_connect_stream(
 ) {
     // Check if egress is allowed
     if !allow_egress {
-        println!("  CONNECT to {} denied (egress not enabled)", target);
+        println!("  CONNECT to {target} denied (egress not enabled)");
         let _ = stream.write_all(b"ERROR egress not allowed\n").await;
         let _ = stream.finish().await;
         return;
     }
 
     // Parse host:port
-    let (host, port) = match parse_host_port(target) {
-        Some(hp) => hp,
-        None => {
-            println!("  CONNECT invalid target: {}", target);
-            let _ = stream.write_all(b"ERROR invalid target format\n").await;
-            let _ = stream.finish().await;
-            return;
-        }
+    let Some((host, port)) = parse_host_port(target) else {
+        println!("  CONNECT invalid target: {target}");
+        let _ = stream.write_all(b"ERROR invalid target format\n").await;
+        let _ = stream.finish().await;
+        return;
     };
 
     let stream = Arc::new(stream);
@@ -480,13 +473,13 @@ async fn handle_connect_stream(
     let tcp = match TcpStream::connect((host.as_str(), port)).await {
         Ok(tcp) => {
             if let Err(e) = stream.write_all(b"OK\n").await {
-                eprintln!("  Failed to send OK: {}", e);
+                eprintln!("  Failed to send OK: {e}");
                 return;
             }
             tcp
         }
         Err(e) => {
-            let msg = format!("ERROR {}\n", e);
+            let msg = format!("ERROR {e}\n");
             let _ = stream.write_all(msg.as_bytes()).await;
             let _ = stream.finish().await;
             return;
@@ -506,12 +499,12 @@ async fn handle_connect_stream(
                 Ok(0) => break,
                 Ok(n) => {
                     if let Err(e) = tcp_write.write_all(&buf[..n]).await {
-                        eprintln!("  TCP write error: {}", e);
+                        eprintln!("  TCP write error: {e}");
                         break;
                     }
                 }
                 Err(e) => {
-                    eprintln!("  QUIC read error: {}", e);
+                    eprintln!("  QUIC read error: {e}");
                     break;
                 }
             }
@@ -527,12 +520,12 @@ async fn handle_connect_stream(
                 Ok(0) => break,
                 Ok(n) => {
                     if let Err(e) = stream_write.write_all(&buf[..n]).await {
-                        eprintln!("  QUIC write error: {}", e);
+                        eprintln!("  QUIC write error: {e}");
                         break;
                     }
                 }
                 Err(e) => {
-                    eprintln!("  TCP read error: {}", e);
+                    eprintln!("  TCP read error: {e}");
                     break;
                 }
             }

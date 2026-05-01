@@ -31,7 +31,7 @@ pub enum IceError {
 
 pub type Result<T> = std::result::Result<T, IceError>;
 
-/// Convert hub's StunTurnConfig to juice's IceServersConfig.
+/// Convert hub's `StunTurnConfig` to juice's `IceServersConfig`.
 fn build_ice_servers_config(config: &StunTurnConfig) -> Result<IceServersConfig> {
     // Parse STUN server (format: "host:port" or just "host")
     let (stun_host, stun_port) = parse_host_port(&config.stun_server, 3478)?;
