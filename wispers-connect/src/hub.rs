@@ -5,6 +5,7 @@
 use crate::types::{AuthToken, ConnectivityGroupId, NodeRegistration};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use std::time::Duration;
 use tonic::metadata::MetadataValue;
 use tonic::transport::{Channel, ClientTlsConfig};
 
@@ -101,6 +102,13 @@ impl HubClient {
             let tls = ClientTlsConfig::new().with_native_roots();
             endpoint = endpoint.tls_config(tls)?;
         }
+
+        // HTTP/2 keepalive. On failure, the serving loop's existing reconnect
+        // logic kicks in.
+        endpoint = endpoint
+            .http2_keep_alive_interval(Duration::from_secs(30))
+            .keep_alive_timeout(Duration::from_secs(10))
+            .keep_alive_while_idle(true);
 
         let channel = endpoint.connect().await?;
         Ok(Self {
