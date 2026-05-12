@@ -134,7 +134,9 @@ impl ConnectionPool {
                 }
             }
         }
-        Err(OpenStreamError::Stream(last_stream_err.expect("loop ran at least once")))
+        Err(OpenStreamError::Stream(
+            last_stream_err.expect("loop ran at least once"),
+        ))
     }
 
     /// Clean up idle connections.
@@ -148,7 +150,7 @@ impl ConnectionPool {
                 return true;
             }
             if entry.cell.get().is_none() {
-                return true;  // Still initialising.
+                return true; // Still initialising.
             }
             debug!(target_node = node, "Closing idle connection");
             false
