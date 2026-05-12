@@ -195,19 +195,30 @@ impl fmt::Display for NodeState {
     }
 }
 
+/// The internal state of a node.
+enum InnerState {
+    /// Node needs to register with the hub.
+    Pending,
+    /// Node is registered but not yet activated.
+    Registered(NodeRegistration),
+    /// Node is activated and ready for P2P connections.
+    Activated {
+        registration: NodeRegistration,
+        roster: std::sync::RwLock<proto::roster::Roster>,
+    },
+}
+
 /// A unified node type that can be in any state (Pending, Registered, Activated).
 ///
 /// Operations check the current state at runtime and return `InvalidState` errors
 /// if called in the wrong state. Use `state()` to check the current state.
 pub struct Node {
+    inner: InnerState,
     persisted: PersistedNodeState,
     store: SharedStore,
     config: SharedConfig,
     // Derived from root key at construction time
     signing_key: SigningKeyPair,
-    // Present after activation. RwLock so that connect methods (&self) can
-    // transparently refetch from the hub when a peer isn't in the cached roster.
-    roster: RwLock<Option<proto::roster::Roster>>,
 }
 
 impl Node {
@@ -220,10 +231,10 @@ impl Node {
         let root_key = persisted.root_key.as_bytes();
         Self {
             signing_key: SigningKeyPair::derive_from_root_key(root_key),
+            inner: InnerState::Pending,
             persisted,
             store,
             config,
-            roster: RwLock::new(None),
         }
     }
 
@@ -233,16 +244,17 @@ impl Node {
         store: SharedStore,
         config: SharedConfig,
     ) -> Result<Self, NodeStateError> {
-        if persisted.registration.is_none() {
-            return Err(NodeStateError::NotRegistered);
-        }
+        let registration = persisted
+            .registration
+            .clone()
+            .ok_or(NodeStateError::NotRegistered)?;
         let root_key = persisted.root_key.as_bytes();
         Ok(Self {
             signing_key: SigningKeyPair::derive_from_root_key(root_key),
+            inner: InnerState::Registered(registration),
             persisted,
             store,
             config,
-            roster: RwLock::new(None),
         })
     }
 
@@ -253,28 +265,29 @@ impl Node {
         config: SharedConfig,
         roster: proto::roster::Roster,
     ) -> Self {
+        let registration = persisted
+            .registration
+            .clone()
+            .expect("activated node must have registration");
         let root_key = persisted.root_key.as_bytes();
         Self {
             signing_key: SigningKeyPair::derive_from_root_key(root_key),
+            inner: InnerState::Activated {
+                registration,
+                roster: RwLock::new(roster),
+            },
             persisted,
             store,
             config,
-            roster: RwLock::new(Some(roster)),
         }
     }
 
     /// Get the current state of this node.
-    ///
-    /// - `Pending` if not registered
-    /// - `Registered` if registered but not in the roster
-    /// - `Activated` if registered and in the roster
     pub fn state(&self) -> NodeState {
-        if self.roster.read().unwrap().is_some() {
-            NodeState::Activated
-        } else if self.persisted.registration.is_some() {
-            NodeState::Registered
-        } else {
-            NodeState::Pending
+        match &self.inner {
+            InnerState::Pending => NodeState::Pending,
+            InnerState::Registered(_) => NodeState::Registered,
+            InnerState::Activated { .. } => NodeState::Activated,
         }
     }
 
@@ -290,28 +303,26 @@ impl Node {
 
     /// Get the registration info. Returns None if not registered.
     pub(crate) fn registration(&self) -> Option<&NodeRegistration> {
-        self.persisted.registration.as_ref()
+        match &self.inner {
+            InnerState::Pending => None,
+            InnerState::Registered(reg) => Some(reg),
+            InnerState::Activated { registration, .. } => Some(registration),
+        }
     }
 
     /// Get the node's number. Returns None if not registered.
     pub fn node_number(&self) -> Option<i32> {
-        self.persisted.registration.as_ref().map(|r| r.node_number)
+        self.registration().map(|r| r.node_number)
     }
 
     /// Get the connectivity group ID. Returns None if not registered.
     pub fn connectivity_group_id(&self) -> Option<&ConnectivityGroupId> {
-        self.persisted
-            .registration
-            .as_ref()
-            .map(|r| &r.connectivity_group_id)
+        self.registration().map(|r| &r.connectivity_group_id)
     }
 
     /// Get the attestation JWT. Returns None if not registered.
     pub fn attestation_jwt(&self) -> Option<&str> {
-        self.persisted
-            .registration
-            .as_ref()
-            .map(|r| r.attestation_jwt.as_str())
+        self.registration().map(|r| r.attestation_jwt.as_str())
     }
 
     /// Get the root key bytes (internal use only).
@@ -325,7 +336,7 @@ impl Node {
     // -------------------------------------------------------------------------
 
     fn require_pending(&self) -> Result<(), NodeStateError> {
-        if self.state() != NodeState::Pending {
+        if !matches!(self.inner, InnerState::Pending) {
             return Err(NodeStateError::InvalidState {
                 current: self.state(),
                 required: "Pending",
@@ -335,28 +346,31 @@ impl Node {
     }
 
     fn require_registered(&self) -> Result<&NodeRegistration, NodeStateError> {
-        if self.state() != NodeState::Registered {
-            return Err(NodeStateError::InvalidState {
+        match &self.inner {
+            InnerState::Registered(reg) => Ok(reg),
+            _ => Err(NodeStateError::InvalidState {
                 current: self.state(),
                 required: "Registered",
-            });
+            }),
         }
-        Ok(self.persisted.registration.as_ref().expect("checked above"))
     }
 
     fn require_at_least_registered(&self) -> Result<&NodeRegistration, NodeStateError> {
-        match self.state() {
-            NodeState::Pending => Err(NodeStateError::InvalidState {
+        match &self.inner {
+            InnerState::Registered(reg)
+            | InnerState::Activated {
+                registration: reg, ..
+            } => Ok(reg),
+            InnerState::Pending => Err(NodeStateError::InvalidState {
                 current: NodeState::Pending,
                 required: "Registered or Activated",
             }),
-            _ => Ok(self.persisted.registration.as_ref().expect("not pending")),
         }
     }
 
     #[allow(dead_code)]
     fn require_activated(&self) -> Result<(), NodeStateError> {
-        if self.state() != NodeState::Activated {
+        if !matches!(self.inner, InnerState::Activated { .. }) {
             return Err(NodeStateError::InvalidState {
                 current: self.state(),
                 required: "Activated",
@@ -384,14 +398,12 @@ impl Node {
     ) -> Result<(), NodeStateError> {
         self.require_pending()?;
 
-        if self.persisted.is_registered() {
-            return Err(NodeStateError::AlreadyRegistered);
-        }
-
-        self.persisted.set_registration(registration);
+        self.persisted.set_registration(registration.clone());
         self.store
             .save(&self.persisted)
             .map_err(NodeStateError::store)?;
+
+        self.inner = InnerState::Registered(registration);
         Ok(())
     }
 
@@ -412,10 +424,12 @@ impl Node {
             .await
             .map_err(NodeStateError::hub)?;
 
-        self.persisted.set_registration(registration);
+        self.persisted.set_registration(registration.clone());
         self.store
             .save(&self.persisted)
             .map_err(NodeStateError::store)?;
+
+        self.inner = InnerState::Registered(registration);
         Ok(())
     }
 
@@ -566,9 +580,6 @@ impl Node {
     ///
     /// Requires: Registered state.
     /// Transitions to: Activated state.
-    ///
-    /// The activation code format is "node_number-secret" where secret is
-    /// `PAIRING_SECRET_BASE36_LEN` base36 characters.
     pub async fn activate(&mut self, activation_code: &str) -> Result<(), NodeStateError> {
         use crate::hub::HubClient;
 
@@ -685,7 +696,10 @@ impl Node {
         .map_err(NodeStateError::RosterVerificationFailed)?;
 
         // Update to activated state (keys already derived at construction)
-        *self.roster.write().unwrap() = Some(cosigned_roster);
+        self.inner = InnerState::Activated {
+            registration,
+            roster: RwLock::new(cosigned_roster),
+        };
 
         Ok(())
     }
@@ -701,9 +715,16 @@ impl Node {
         client: &mut crate::hub::HubClient,
         peer_node_number: i32,
     ) -> Result<proto::roster::Node, crate::p2p::P2pError> {
+        let (registration, roster_lock) = match &self.inner {
+            InnerState::Activated {
+                registration,
+                roster,
+            } => (registration, roster),
+            _ => return Err(crate::p2p::P2pError::NotActivated),
+        };
+
         {
-            let roster = self.roster.read().unwrap();
-            let roster = roster.as_ref().expect("activated");
+            let roster = roster_lock.read().unwrap();
             if let Some(node) = roster
                 .nodes
                 .iter()
@@ -717,7 +738,6 @@ impl Node {
             "Peer node {} not in cached roster, refetching from hub",
             peer_node_number
         );
-        let registration = self.persisted.registration.as_ref().expect("activated");
         let fresh_roster = client
             .get_and_verify_roster(registration, &self.signing_key.public_key_spki())
             .await?;
@@ -729,7 +749,7 @@ impl Node {
             .cloned()
             .ok_or(crate::p2p::P2pError::SignatureVerificationFailed)?;
 
-        *self.roster.write().unwrap() = Some(fresh_roster);
+        *roster_lock.write().unwrap() = fresh_roster;
         Ok(peer_node)
     }
 
@@ -930,8 +950,13 @@ impl Node {
                     set_revoker_signature,
                 };
 
-                let registration = self.persisted.registration.as_ref().expect("activated");
-                let mut new_roster = self.roster.read().unwrap().clone().expect("activated");
+                let (registration, mut new_roster) = match &self.inner {
+                    InnerState::Activated {
+                        registration,
+                        roster,
+                    } => (registration.clone(), roster.read().unwrap().clone()),
+                    _ => unreachable!(),
+                };
 
                 // Check: prevent revoking the last active node
                 let active_count = active_nodes(&new_roster).count();
@@ -955,10 +980,10 @@ impl Node {
                 set_revoker_signature(&mut new_roster, signature);
 
                 // If unauthenticated, node was already removed server-side — skip to local cleanup.
-                match client.update_roster(registration, new_roster).await {
+                match client.update_roster(&registration, new_roster).await {
                     Ok(_) => {
                         // Step 2: Deregister from hub
-                        match client.deregister_node(registration).await {
+                        match client.deregister_node(&registration).await {
                             Ok(()) => {}
                             Err(e) if e.is_unauthenticated() || e.is_not_found() => {}
                             Err(e) => return Err(NodeStateError::hub(e)),
@@ -977,7 +1002,7 @@ impl Node {
         // root_key + signing_key are intentionally left intact so a subsequent
         // register() reuses the same cryptographic identity.
         self.persisted.registration = None;
-        *self.roster.write().unwrap() = None;
+        self.inner = InnerState::Pending;
 
         Ok(())
     }
@@ -997,16 +1022,19 @@ impl Node {
 
         let mut persisted = PersistedNodeState::new();
         persisted.root_key = crate::types::RootKey::from_bytes(root_key);
-        persisted.registration = Some(registration);
+        persisted.registration = Some(registration.clone());
 
         Self {
             signing_key: SigningKeyPair::derive_from_root_key(&root_key),
+            inner: InnerState::Activated {
+                registration,
+                roster: RwLock::new(roster),
+            },
             persisted,
             store: Arc::new(InMemoryNodeStateStore::new()),
             config: Arc::new(std::sync::RwLock::new(RuntimeConfig::new_with_addr(
                 hub_addr,
             ))),
-            roster: RwLock::new(Some(roster)),
         }
     }
 }
