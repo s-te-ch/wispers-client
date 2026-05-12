@@ -31,11 +31,13 @@ jobs:
             target: x86_64-apple-darwin
             archive: tar.gz
             binary_suffix: ""
-          - os: ubuntu-latest
+          # Pinned to 22.04 (glibc 2.35) for binary compatibility with older
+          # distros; ubuntu-latest is currently 24.04 (glibc 2.39).
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
             binary_suffix: ""
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             archive: tar.gz
             binary_suffix: ""
