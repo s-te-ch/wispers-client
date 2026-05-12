@@ -11,8 +11,7 @@ use tokio::net::{TcpListener, TcpStream};
 use wispers_connect::{Node, NodeState};
 
 use crate::proxy_common::{
-    CLEANUP_INTERVAL, ConnectionPool, ProxyError, REQUEST_TIMEOUT, open_stream_with_command,
-    parse_wispers_host,
+    CLEANUP_INTERVAL, ConnectionPool, ProxyError, REQUEST_TIMEOUT, parse_wispers_host, send_command,
 };
 
 // SOCKS5 constants
@@ -319,39 +318,30 @@ async fn forward_to_node(
     target_node: i32,
     port: u16,
 ) -> Result<()> {
-    // Get or create QUIC connection to target node
-    let quic_conn =
-        match tokio::time::timeout(REQUEST_TIMEOUT, pool.get_or_connect(node, target_node)).await {
-            Ok(Ok(conn)) => conn,
+    let quic_stream =
+        match tokio::time::timeout(REQUEST_TIMEOUT, pool.open_stream(node, target_node)).await {
+            Ok(Ok(s)) => s,
             Ok(Err(e)) => {
-                println!("  Failed to connect to node {}: {}", target_node, e);
+                println!("  Failed to open stream to node {}: {}", target_node, e);
                 send_reply(stream, REP_HOST_UNREACHABLE).await;
-                return Err(anyhow::anyhow!("failed to connect to node: {}", e));
+                return Err(anyhow::anyhow!("{}", e));
             }
             Err(_) => {
-                println!("  Timeout connecting to node {}", target_node);
+                println!("  Timeout opening stream to node {}", target_node);
                 send_reply(stream, REP_TTL_EXPIRED).await;
-                return Err(anyhow::anyhow!("connection timeout"));
+                return Err(anyhow::anyhow!("open_stream timeout"));
             }
         };
 
-    // Open stream and send FORWARD command
     let command = format!("FORWARD {}\n", port);
-    let quic_stream = match open_stream_with_command(&quic_conn, &command).await {
-        Ok(s) => s,
-        Err(e) => {
-            println!("  FORWARD failed: {}", e);
-            send_reply(stream, REP_CONNECTION_REFUSED).await;
-            return Err(anyhow::anyhow!("{}", e));
-        }
-    };
+    if let Err(e) = send_command(&quic_stream, &command).await {
+        println!("  FORWARD failed: {}", e);
+        send_reply(stream, REP_CONNECTION_REFUSED).await;
+        return Err(anyhow::anyhow!("{}", e));
+    }
 
-    // Send success reply to client
     send_reply(stream, REP_SUCCESS).await;
-
-    // Bidirectional relay
     relay(stream, quic_stream).await;
-
     Ok(())
 }
 
@@ -364,39 +354,33 @@ async fn egress_to_node(
     host: &str,
     port: u16,
 ) -> Result<()> {
-    // Get or create QUIC connection to egress node
-    let quic_conn =
-        match tokio::time::timeout(REQUEST_TIMEOUT, pool.get_or_connect(node, egress_node)).await {
-            Ok(Ok(conn)) => conn,
+    let quic_stream =
+        match tokio::time::timeout(REQUEST_TIMEOUT, pool.open_stream(node, egress_node)).await {
+            Ok(Ok(s)) => s,
             Ok(Err(e)) => {
-                println!("  Failed to connect to egress node {}: {}", egress_node, e);
+                println!(
+                    "  Failed to open stream to egress node {}: {}",
+                    egress_node, e
+                );
                 send_reply(stream, REP_HOST_UNREACHABLE).await;
-                return Err(anyhow::anyhow!("failed to connect to egress node: {}", e));
+                return Err(anyhow::anyhow!("{}", e));
             }
             Err(_) => {
-                println!("  Timeout connecting to egress node {}", egress_node);
+                println!("  Timeout opening stream to egress node {}", egress_node);
                 send_reply(stream, REP_TTL_EXPIRED).await;
-                return Err(anyhow::anyhow!("connection timeout"));
+                return Err(anyhow::anyhow!("open_stream timeout"));
             }
         };
 
-    // Open stream and send CONNECT command
     let command = format!("CONNECT {}:{}\n", host, port);
-    let quic_stream = match open_stream_with_command(&quic_conn, &command).await {
-        Ok(s) => s,
-        Err(e) => {
-            println!("  CONNECT failed: {}", e);
-            send_reply(stream, REP_CONNECTION_REFUSED).await;
-            return Err(anyhow::anyhow!("{}", e));
-        }
-    };
+    if let Err(e) = send_command(&quic_stream, &command).await {
+        println!("  CONNECT failed: {}", e);
+        send_reply(stream, REP_CONNECTION_REFUSED).await;
+        return Err(anyhow::anyhow!("{}", e));
+    }
 
-    // Send success reply to client
     send_reply(stream, REP_SUCCESS).await;
-
-    // Bidirectional relay
     relay(stream, quic_stream).await;
-
     Ok(())
 }
 

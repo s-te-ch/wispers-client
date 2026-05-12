@@ -8,11 +8,10 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use wispers_connect::{Node, NodeState, QuicConnection};
+use wispers_connect::{Node, NodeState, QuicStream};
 
 use crate::proxy_common::{
-    CLEANUP_INTERVAL, ConnectionPool, ProxyError, REQUEST_TIMEOUT, open_stream_with_command,
-    parse_wispers_host,
+    CLEANUP_INTERVAL, ConnectionPool, ProxyError, REQUEST_TIMEOUT, parse_wispers_host, send_command,
 };
 
 /// Run the HTTP proxy server.
@@ -162,13 +161,21 @@ async fn handle_client_connection(
         request_count += 1;
         let keep_alive = request.keep_alive;
 
-        // Get target node based on destination
-        let (target_node, routing_via_egress) = match &request.target.destination {
-            Destination::WispersNode { node_number, .. } => (*node_number, false),
-            Destination::Internet { .. } => (egress_node.unwrap(), true),
+        // Compute the target node and the wire-protocol command from the
+        // parsed destination. The command (FORWARD/CONNECT) is the only thing
+        // that differs between wispers-node and internet-egress routing.
+        let (target_node, command, routing_via_egress) = match &request.target.destination {
+            Destination::WispersNode { node_number, port } => {
+                (*node_number, format!("FORWARD {}\n", port), false)
+            }
+            Destination::Internet { host, port } => (
+                egress_node.unwrap(),
+                format!("CONNECT {}:{}\n", host, port),
+                true,
+            ),
         };
 
-        // Log the request
+        // Log the request.
         match (&request.target.destination, &request.target.mode) {
             (Destination::WispersNode { node_number, port }, ProxyMode::HttpRequest { path }) => {
                 println!(
@@ -190,62 +197,47 @@ async fn handle_client_connection(
             }
         }
 
-        // Get or create QUIC connection to target node (with timeout)
-        let quic_conn =
-            match tokio::time::timeout(REQUEST_TIMEOUT, pool.get_or_connect(&node, target_node))
-                .await
+        // Open a QUIC stream to the target node.
+        let quic_stream =
+            match tokio::time::timeout(REQUEST_TIMEOUT, pool.open_stream(&node, target_node)).await
             {
-                Ok(Ok(conn)) => conn,
+                Ok(Ok(s)) => s,
                 Ok(Err(e)) => {
                     let msg = if routing_via_egress {
-                        format!("failed to connect to egress node: {}", e)
+                        format!("failed to open stream to egress node: {}", e)
                     } else {
-                        format!("failed to connect to node: {}", e)
+                        format!("failed to open stream to node: {}", e)
                     };
-                    let err = ProxyError::BadGateway(msg);
-                    send_proxy_error(&mut stream, &err).await?;
+                    send_proxy_error(&mut stream, &ProxyError::BadGateway(msg)).await?;
                     break;
                 }
                 Err(_) => {
                     let msg = if routing_via_egress {
-                        "connection to egress node timed out"
+                        "open_stream to egress node timed out"
                     } else {
-                        "connection to node timed out"
+                        "open_stream to node timed out"
                     };
-                    let err = ProxyError::GatewayTimeout(msg.to_string());
-                    send_proxy_error(&mut stream, &err).await?;
+                    send_proxy_error(&mut stream, &ProxyError::GatewayTimeout(msg.to_string()))
+                        .await?;
                     break;
                 }
             };
 
-        // Handle based on mode
+        // Send the FORWARD/CONNECT command and wait for the OK ack.
+        if let Err(e) = send_command(&quic_stream, &command).await {
+            send_proxy_error(&mut stream, &ProxyError::BadGateway(format!("{}", e))).await?;
+            break;
+        }
+
+        // Dispatch to the mode-specific handler. Both handlers now operate
+        // on the open stream regardless of wispers-node vs. egress routing.
         match &request.target.mode {
             ProxyMode::HttpRequest { path } => {
-                let result = match &request.target.destination {
-                    Destination::WispersNode { port, .. } => {
-                        // Use FORWARD for wispers nodes
-                        tokio::time::timeout(
-                            REQUEST_TIMEOUT,
-                            handle_wispers_request(&mut stream, &quic_conn, &request, *port, path),
-                        )
-                        .await
-                    }
-                    Destination::Internet { host, port } => {
-                        // Use CONNECT for internet egress
-                        tokio::time::timeout(
-                            REQUEST_TIMEOUT,
-                            handle_egress_request(
-                                &mut stream,
-                                &quic_conn,
-                                &request,
-                                host,
-                                *port,
-                                path,
-                            ),
-                        )
-                        .await
-                    }
-                };
+                let result = tokio::time::timeout(
+                    REQUEST_TIMEOUT,
+                    handle_http_request(&mut stream, quic_stream, &request, path),
+                )
+                .await;
 
                 match result {
                     Ok(Ok(())) => {}
@@ -261,24 +253,9 @@ async fn handle_client_connection(
                 }
             }
             ProxyMode::Tunnel => {
-                let result = match &request.target.destination {
-                    Destination::WispersNode { port, .. } => {
-                        // Use FORWARD for wispers nodes tunnel
-                        tokio::time::timeout(
-                            REQUEST_TIMEOUT,
-                            handle_wispers_tunnel(&mut stream, &quic_conn, *port),
-                        )
-                        .await
-                    }
-                    Destination::Internet { host, port } => {
-                        // Use CONNECT for internet tunnel
-                        tokio::time::timeout(
-                            REQUEST_TIMEOUT,
-                            handle_egress_tunnel(&mut stream, &quic_conn, host, *port),
-                        )
-                        .await
-                    }
-                };
+                let result =
+                    tokio::time::timeout(REQUEST_TIMEOUT, handle_tunnel(&mut stream, quic_stream))
+                        .await;
 
                 match result {
                     Ok(Ok(())) => {}
@@ -357,42 +334,28 @@ async fn read_request_bytes(stream: &mut TcpStream) -> Result<ReadResult, ProxyE
     }
 }
 
-/// Forward an HTTP request to a wispers node using FORWARD command.
-async fn handle_wispers_request(
+/// Relay an HTTP request and response over an opened QUIC stream.
+async fn handle_http_request(
     client_stream: &mut TcpStream,
-    quic_conn: &QuicConnection,
+    quic_stream: QuicStream,
     request: &ParsedRequest,
-    port: u16,
     path: &str,
 ) -> Result<()> {
-    let command = format!("FORWARD {}\n", port);
-    let quic_stream = match open_stream_with_command(quic_conn, &command).await {
-        Ok(s) => s,
-        Err(msg) => {
-            send_error(client_stream, 502, &msg).await?;
-            return Ok(());
-        }
-    };
-
-    // Build and send the HTTP request to the remote server
     let http_request = build_http_request(request, path);
     quic_stream
         .write_all(http_request.as_bytes())
         .await
         .context("failed to send HTTP request")?;
 
-    // Relay the response back to the client
     let mut buf = [0u8; 8192];
     loop {
         let n = quic_stream
             .read(&mut buf)
             .await
             .context("failed to read from remote")?;
-
         if n == 0 {
             break;
         }
-
         client_stream
             .write_all(&buf[..n])
             .await
@@ -402,81 +365,20 @@ async fn handle_wispers_request(
     Ok(())
 }
 
-/// Forward an HTTP request via egress using CONNECT command.
-async fn handle_egress_request(
-    client_stream: &mut TcpStream,
-    quic_conn: &QuicConnection,
-    request: &ParsedRequest,
-    host: &str,
-    port: u16,
-    path: &str,
-) -> Result<()> {
-    let command = format!("CONNECT {}:{}\n", host, port);
-    let quic_stream = match open_stream_with_command(quic_conn, &command).await {
-        Ok(s) => s,
-        Err(msg) => {
-            send_error(client_stream, 502, &msg).await?;
-            return Ok(());
-        }
-    };
-
-    // Build and send the HTTP request to the remote server
-    let http_request = build_http_request(request, path);
-    quic_stream
-        .write_all(http_request.as_bytes())
-        .await
-        .context("failed to send HTTP request")?;
-
-    // Relay the response back to the client
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = quic_stream
-            .read(&mut buf)
-            .await
-            .context("failed to read from remote")?;
-
-        if n == 0 {
-            break;
-        }
-
-        client_stream
-            .write_all(&buf[..n])
-            .await
-            .context("failed to write to client")?;
-    }
-
-    Ok(())
-}
-
-/// Handle HTTP CONNECT tunnel to a wispers node using FORWARD command.
-async fn handle_wispers_tunnel(
-    client_stream: &mut TcpStream,
-    quic_conn: &QuicConnection,
-    port: u16,
-) -> Result<()> {
-    let command = format!("FORWARD {}\n", port);
-    let quic_stream = match open_stream_with_command(quic_conn, &command).await {
-        Ok(s) => s,
-        Err(msg) => {
-            send_error(client_stream, 502, &msg).await?;
-            return Ok(());
-        }
-    };
-
-    // Send 200 Connection Established to client
+/// Bidirectional relay between the client TCP socket and an opened QUIC stream
+/// (used for HTTPS CONNECT tunnels).
+async fn handle_tunnel(client_stream: &mut TcpStream, quic_stream: QuicStream) -> Result<()> {
     client_stream
         .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
         .await
         .context("failed to send 200 response")?;
 
-    // Bidirectional relay
     let quic_stream = Arc::new(quic_stream);
     let (mut tcp_read, mut tcp_write) = client_stream.split();
 
     let quic_read = Arc::clone(&quic_stream);
     let quic_write = Arc::clone(&quic_stream);
 
-    // TCP -> QUIC
     let tcp_to_quic = async move {
         let mut buf = [0u8; 8192];
         loop {
@@ -493,75 +395,6 @@ async fn handle_wispers_tunnel(
         let _ = quic_write.finish().await;
     };
 
-    // QUIC -> TCP
-    let quic_to_tcp = async move {
-        let mut buf = [0u8; 8192];
-        loop {
-            match quic_read.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    if tcp_write.write_all(&buf[..n]).await.is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        let _ = tcp_write.shutdown().await;
-    };
-
-    tokio::join!(tcp_to_quic, quic_to_tcp);
-
-    Ok(())
-}
-
-/// Handle HTTP CONNECT tunnel for HTTPS traffic via egress.
-async fn handle_egress_tunnel(
-    client_stream: &mut TcpStream,
-    quic_conn: &QuicConnection,
-    host: &str,
-    port: u16,
-) -> Result<()> {
-    let command = format!("CONNECT {}:{}\n", host, port);
-    let quic_stream = match open_stream_with_command(quic_conn, &command).await {
-        Ok(s) => s,
-        Err(msg) => {
-            send_error(client_stream, 502, &msg).await?;
-            return Ok(());
-        }
-    };
-
-    // Send 200 Connection Established to client
-    client_stream
-        .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-        .await
-        .context("failed to send 200 response")?;
-
-    // Bidirectional relay
-    let quic_stream = Arc::new(quic_stream);
-    let (mut tcp_read, mut tcp_write) = client_stream.split();
-
-    let quic_read = Arc::clone(&quic_stream);
-    let quic_write = Arc::clone(&quic_stream);
-
-    // TCP -> QUIC
-    let tcp_to_quic = async move {
-        let mut buf = [0u8; 8192];
-        loop {
-            match tcp_read.read(&mut buf).await {
-                Ok(0) => break,
-                Ok(n) => {
-                    if quic_write.write_all(&buf[..n]).await.is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        let _ = quic_write.finish().await;
-    };
-
-    // QUIC -> TCP
     let quic_to_tcp = async move {
         let mut buf = [0u8; 8192];
         loop {
