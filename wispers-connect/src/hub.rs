@@ -3,9 +3,9 @@
 //! This module provides the gRPC client for communicating with the Wispers Connect Hub.
 
 use crate::types::{AuthToken, ConnectivityGroupId, NodeRegistration};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use std::time::Duration;
 use tonic::metadata::MetadataValue;
 use tonic::transport::{Channel, ClientTlsConfig};
 
