@@ -29,9 +29,14 @@ fn build_libjuice() -> BuildResult<()> {
     let libjuice_dir = manifest_dir.join("third_party/libjuice");
     let header = libjuice_dir.join("include/juice/juice.h");
 
-    if !libjuice_dir.exists() {
+    // Check for a file inside the submodule rather than the directory itself.
+    // After `git pull` updates the submodule pointer without a follow-up
+    // `git submodule update`, the directory exists as an empty placeholder
+    // and the cmake step fails far less helpfully ("source directory does not
+    // appear to contain CMakeLists.txt").
+    if !libjuice_dir.join("CMakeLists.txt").is_file() {
         return Err(format!(
-            "libjuice not found at {}. Run: git submodule update --init --recursive",
+            "libjuice submodule appears uninitialized at {}. Run: git submodule update --init --recursive",
             libjuice_dir.display()
         )
         .into());
