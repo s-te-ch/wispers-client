@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 use tracing::{debug, info};
 use wispers_connect::p2p::P2pError;
 use wispers_connect::{Node, QuicConnection, QuicStream};
@@ -60,17 +60,21 @@ impl ProxyError {
     }
 }
 
-/// A pooled QUIC connection with last-used timestamp.
-struct PooledConnection {
-    conn: Arc<QuicConnection>,
+/// A QUIC connection pool entry. with last-used timestamp.
+struct PooledEntry {
+    // Using `OnceCell` makes sure don't connect to the same target multiple
+    // times. While `cell.get_or_try_init` is running for the first caller,
+    // concurrent callers awaiting the same cell share the in-flight
+    // `connect_quic` rather than each kicking off their own.
+    cell: Arc<OnceCell<Arc<QuicConnection>>>,
     last_used: Instant,
 }
 
 /// Pool of QUIC connections to remote nodes.
 #[derive(Clone)]
 pub struct ConnectionPool {
-    /// Connections keyed by node number.
-    connections: Arc<Mutex<HashMap<i32, PooledConnection>>>,
+    /// Entries keyed by target node number.
+    connections: Arc<Mutex<HashMap<i32, PooledEntry>>>,
 }
 
 impl ConnectionPool {
@@ -80,58 +84,57 @@ impl ConnectionPool {
         }
     }
 
-    /// Open a QUIC stream to `target_node`, using a pooled connection if
-    /// possible. If the cached connection's `open_stream` fails (typically
-    /// because the underlying ICE path died), it is evicted and a fresh
-    /// connection is established.
+    /// Open a QUIC stream to `target_node`.
+    ///
+    /// If there's no cached connection (or a previous cached one just died),
+    /// invokes `connect_quic` to create a new one. This is single-flight: only
+    /// the first caller will cause connection establishment, later ones just
+    /// share the in-flight future.
     pub async fn open_stream(
         &self,
         node: &Node,
         target_node: i32,
     ) -> Result<QuicStream, OpenStreamError> {
-        // Try cached.
-        let cached = {
-            let mut pool = self.connections.lock().await;
-            pool.get_mut(&target_node).map(|entry| {
+        // Bounded retry: at most one cached-conn-was-dead retry before giving up.
+        let mut last_stream_err: Option<P2pError> = None;
+        for _ in 0..2 {
+            let cell = {
+                let mut pool = self.connections.lock().await;
+                let entry = pool.entry(target_node).or_insert_with(|| PooledEntry {
+                    cell: Arc::new(OnceCell::new()),
+                    last_used: Instant::now(),
+                });
                 entry.last_used = Instant::now();
-                Arc::clone(&entry.conn)
-            })
-        };
-        if let Some(conn) = cached {
+                Arc::clone(&entry.cell)
+            };
+            let conn = cell
+                .get_or_try_init(|| async {
+                    node.connect_quic(target_node)
+                        .await
+                        .map(Arc::new)
+                        .map_err(OpenStreamError::Connect)
+                })
+                .await?
+                .clone();
             match conn.open_stream().await {
                 Ok(stream) => {
-                    debug!(target_node, "Reusing existing QUIC connection");
                     return Ok(stream);
                 }
-                Err(_) => {
+                Err(e) => {
+                    // If opening a stream fails, the underlying connection has
+                    // broken. Remove it from the pool.
                     let mut pool = self.connections.lock().await;
                     if let Some(entry) = pool.get(&target_node)
-                        && Arc::ptr_eq(&entry.conn, &conn)
+                        && Arc::ptr_eq(&entry.cell, &cell)
                     {
                         info!(target_node, "Evicting dead QUIC connection");
                         pool.remove(&target_node);
                     }
+                    last_stream_err = Some(e);
                 }
             }
         }
-
-        // Fresh connect.
-        info!(target_node, "Creating new QUIC connection");
-        let conn = Arc::new(
-            node.connect_quic(target_node)
-                .await
-                .map_err(OpenStreamError::Connect)?,
-        );
-        let stream = conn.open_stream().await.map_err(OpenStreamError::Stream)?;
-        let mut pool = self.connections.lock().await;
-        pool.insert(
-            target_node,
-            PooledConnection {
-                conn,
-                last_used: Instant::now(),
-            },
-        );
-        Ok(stream)
+        Err(OpenStreamError::Stream(last_stream_err.expect("loop ran at least once")))
     }
 
     /// Clean up idle connections.
@@ -140,12 +143,15 @@ impl ConnectionPool {
         let now = Instant::now();
         let before = pool.len();
 
-        pool.retain(|node, pooled| {
-            let keep = now.duration_since(pooled.last_used) < IDLE_TIMEOUT;
-            if !keep {
-                debug!(target_node = node, "Closing idle connection");
+        pool.retain(|node, entry| {
+            if now.duration_since(entry.last_used) < IDLE_TIMEOUT {
+                return true;
             }
-            keep
+            if entry.cell.get().is_none() {
+                return true;  // Still initialising.
+            }
+            debug!(target_node = node, "Closing idle connection");
+            false
         });
 
         let removed = before - pool.len();
