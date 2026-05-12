@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
+use tracing::{debug, error, info, warn};
 use wispers_connect::p2p::P2pError;
 use wispers_connect::{
     IncomingConnections, NodeState, QuicConnection, ServingHandle, ServingSession, UdpConnection,
@@ -143,7 +144,7 @@ pub async fn serve(
             result = &mut connect_task, if session_task.is_none() => {
                 match result {
                     Ok(Ok((handle, session, incoming))) => {
-                        println!("Connected to hub");
+                        info!("Connected to hub");
                         *handle_state.write().await = Some(handle);
                         session_task = Some(tokio::spawn(async move { session.run().await }));
                         incoming_udp_rx = Some(incoming.udp);
@@ -162,7 +163,7 @@ pub async fn serve(
             result = async { session_task.as_mut().unwrap().await }, if session_task.is_some() => {
                 match result {
                     Ok(Ok(())) => {
-                        println!("Session ended normally");
+                        info!("Session ended normally");
                         break;
                     }
                     Ok(Err(e)) => {
@@ -183,11 +184,11 @@ pub async fn serve(
             } => {
                 match result {
                     Ok(conn) => {
-                        println!("Incoming UDP P2P connection from node {}", conn.peer_node_number);
+                        debug!(peer_node = conn.peer_node_number, "Incoming UDP P2P connection");
                         tokio::spawn(handle_udp_connection(conn));
                     }
                     Err(e) => {
-                        eprintln!("UDP connection failed: {}", e);
+                        warn!(error = %e, "UDP connection failed");
                     }
                 }
             }
@@ -201,12 +202,12 @@ pub async fn serve(
             } => {
                 match result {
                     Ok(conn) => {
-                        println!("Incoming QUIC P2P connection from node {}", conn.peer_node_number);
+                        debug!(peer_node = conn.peer_node_number, "Incoming QUIC P2P connection");
                         let allowed_ports = Arc::clone(&allowed_ports);
                         tokio::spawn(handle_quic_connection(conn, allowed_ports, allow_egress));
                     }
                     Err(e) => {
-                        eprintln!("QUIC connection handshake failed: {}", e);
+                        warn!(error = %e, "QUIC connection handshake failed");
                     }
                 }
             }
@@ -221,7 +222,7 @@ pub async fn serve(
                         });
                     }
                     Err(e) => {
-                        eprintln!("Failed to accept daemon connection: {}", e);
+                        error!(error = %e, "Failed to accept daemon connection");
                     }
                 }
             }
@@ -234,26 +235,23 @@ pub async fn serve(
 /// Handle an incoming UDP P2P connection (respond to pings).
 async fn handle_udp_connection(conn: UdpConnection) {
     let peer = conn.peer_node_number;
-    println!(
-        "  UDP connected to node {} (connection already established)",
-        peer
-    );
+    debug!(peer, "UDP connected (connection already established)");
 
     loop {
         match conn.recv().await {
             Ok(data) => {
                 if data == b"ping" {
-                    println!("  Received ping from node {}, sending pong", peer);
+                    info!(peer, "Received ping, sending pong");
                     if let Err(e) = conn.send(b"pong") {
-                        eprintln!("  Failed to send pong to node {}: {}", peer, e);
+                        warn!(peer, error = %e, "Failed to send pong");
                         break;
                     }
                 } else {
-                    println!("  Received {} bytes from node {}", data.len(), peer);
+                    debug!(peer, bytes = data.len(), "Received data");
                 }
             }
             Err(e) => {
-                println!("  UDP connection to node {} closed: {}", peer, e);
+                debug!(peer, error = %e, "UDP connection closed");
                 break;
             }
         }
@@ -267,16 +265,13 @@ async fn handle_quic_connection(
     allow_egress: bool,
 ) {
     let peer = conn.peer_node_number;
-    println!(
-        "  QUIC connected to node {} (connection already established)",
-        peer
-    );
+    debug!(peer, "QUIC connected (connection already established)");
 
     loop {
         match conn.accept_stream().await {
             Ok(stream) => {
                 let stream_id = stream.id();
-                println!("  Accepted stream {} from node {}", stream_id, peer);
+                debug!(peer, stream_id, "Accepted stream");
                 let allowed_ports = Arc::clone(&allowed_ports);
                 tokio::spawn(handle_quic_stream(
                     stream,
@@ -287,7 +282,7 @@ async fn handle_quic_connection(
                 ));
             }
             Err(e) => {
-                println!("  QUIC connection to node {} closed: {}", peer, e);
+                debug!(peer, error = %e, "QUIC connection closed");
                 break;
             }
         }
@@ -305,12 +300,12 @@ async fn handle_quic_stream(
     let mut buf = [0u8; 1024];
     let n = match stream.read(&mut buf).await {
         Ok(0) => {
-            println!("  Stream {} closed by peer before command", stream_id);
+            debug!(stream_id, "Stream closed by peer before command");
             return;
         }
         Ok(n) => n,
         Err(e) => {
-            eprintln!("  Stream {} read error: {}", stream_id, e);
+            warn!(stream_id, error = %e, "Stream read error");
             return;
         }
     };
@@ -325,9 +320,9 @@ async fn handle_quic_stream(
 
     match line {
         b"PING" => {
-            println!("  Received PING on stream {}, sending PONG", stream_id);
+            info!(stream_id, "Received PING, sending PONG");
             if let Err(e) = stream.write_all(b"PONG\n").await {
-                eprintln!("  Failed to send PONG: {}", e);
+                warn!(stream_id, error = %e, "Failed to send PONG");
             }
             let _ = stream.finish().await;
         }
@@ -335,7 +330,7 @@ async fn handle_quic_stream(
             let port_str = String::from_utf8_lossy(&cmd[8..]);
             match port_str.trim().parse::<u16>() {
                 Ok(port) => {
-                    println!("  Received FORWARD {} on stream {}", port, stream_id);
+                    info!(stream_id, port, "Received FORWARD");
                     handle_forward_stream(stream, port, &allowed_ports).await;
                 }
                 Err(_) => {
@@ -346,14 +341,14 @@ async fn handle_quic_stream(
         }
         cmd if cmd.starts_with(b"CONNECT ") => {
             let target = String::from_utf8_lossy(&cmd[8..]).trim().to_string();
-            println!("  Received CONNECT {} on stream {}", target, stream_id);
+            info!(stream_id, target = %target, "Received CONNECT");
             handle_connect_stream(stream, &target, allow_egress).await;
         }
         _ => {
-            println!(
-                "  Unknown command on stream {}: {:?}",
+            warn!(
                 stream_id,
-                String::from_utf8_lossy(line)
+                cmd = %String::from_utf8_lossy(line),
+                "Unknown command",
             );
             let _ = stream.write_all(b"ERROR unknown command\n").await;
             let _ = stream.finish().await;
@@ -374,7 +369,7 @@ async fn handle_forward_stream(
     };
 
     if !allowed {
-        println!("  FORWARD to port {} denied (not in allowlist)", port);
+        warn!(port, "FORWARD denied: port not in allowlist");
         let _ = stream.write_all(b"ERROR port not allowed\n").await;
         let _ = stream.finish().await;
         return;
@@ -386,7 +381,7 @@ async fn handle_forward_stream(
     let tcp = match TcpStream::connect(format!("127.0.0.1:{}", port)).await {
         Ok(tcp) => {
             if let Err(e) = stream.write_all(b"OK\n").await {
-                eprintln!("  Failed to send OK: {}", e);
+                warn!(error = %e, "Failed to send OK");
                 return;
             }
             tcp
@@ -412,12 +407,12 @@ async fn handle_forward_stream(
                 Ok(0) => break,
                 Ok(n) => {
                     if let Err(e) = tcp_write.write_all(&buf[..n]).await {
-                        eprintln!("  TCP write error: {}", e);
+                        debug!(error = %e, "TCP write error");
                         break;
                     }
                 }
                 Err(e) => {
-                    eprintln!("  QUIC read error: {}", e);
+                    debug!(error = %e, "QUIC read error");
                     break;
                 }
             }
@@ -433,12 +428,12 @@ async fn handle_forward_stream(
                 Ok(0) => break,
                 Ok(n) => {
                     if let Err(e) = stream_write.write_all(&buf[..n]).await {
-                        eprintln!("  QUIC write error: {}", e);
+                        debug!(error = %e, "QUIC write error");
                         break;
                     }
                 }
                 Err(e) => {
-                    eprintln!("  TCP read error: {}", e);
+                    debug!(error = %e, "TCP read error");
                     break;
                 }
             }
@@ -457,7 +452,7 @@ async fn handle_connect_stream(
 ) {
     // Check if egress is allowed
     if !allow_egress {
-        println!("  CONNECT to {} denied (egress not enabled)", target);
+        warn!(target, "CONNECT denied: egress not enabled");
         let _ = stream.write_all(b"ERROR egress not allowed\n").await;
         let _ = stream.finish().await;
         return;
@@ -467,7 +462,7 @@ async fn handle_connect_stream(
     let (host, port) = match parse_host_port(target) {
         Some(hp) => hp,
         None => {
-            println!("  CONNECT invalid target: {}", target);
+            warn!(target, "CONNECT invalid target");
             let _ = stream.write_all(b"ERROR invalid target format\n").await;
             let _ = stream.finish().await;
             return;
@@ -480,7 +475,7 @@ async fn handle_connect_stream(
     let tcp = match TcpStream::connect((host.as_str(), port)).await {
         Ok(tcp) => {
             if let Err(e) = stream.write_all(b"OK\n").await {
-                eprintln!("  Failed to send OK: {}", e);
+                warn!(error = %e, "Failed to send OK");
                 return;
             }
             tcp
@@ -506,12 +501,12 @@ async fn handle_connect_stream(
                 Ok(0) => break,
                 Ok(n) => {
                     if let Err(e) = tcp_write.write_all(&buf[..n]).await {
-                        eprintln!("  TCP write error: {}", e);
+                        debug!(error = %e, "TCP write error");
                         break;
                     }
                 }
                 Err(e) => {
-                    eprintln!("  QUIC read error: {}", e);
+                    debug!(error = %e, "QUIC read error");
                     break;
                 }
             }
@@ -527,12 +522,12 @@ async fn handle_connect_stream(
                 Ok(0) => break,
                 Ok(n) => {
                     if let Err(e) = stream_write.write_all(&buf[..n]).await {
-                        eprintln!("  QUIC write error: {}", e);
+                        debug!(error = %e, "QUIC write error");
                         break;
                     }
                 }
                 Err(e) => {
-                    eprintln!("  TCP read error: {}", e);
+                    debug!(error = %e, "TCP read error");
                     break;
                 }
             }
