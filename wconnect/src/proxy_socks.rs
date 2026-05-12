@@ -10,6 +10,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use wispers_connect::{Node, NodeState};
 
+use tracing::{debug, error, info, warn};
+
 use crate::proxy_common::{
     CLEANUP_INTERVAL, ConnectionPool, ProxyError, REQUEST_TIMEOUT, parse_wispers_host, send_command,
 };
@@ -84,18 +86,18 @@ pub async fn run(
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
-                println!("Accepted connection from {}", addr);
+                debug!(%addr, "Accepted connection");
                 let node = Arc::clone(&node);
                 let pool = pool.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_client_connection(stream, node, pool, egress_node).await
                     {
-                        eprintln!("Connection error: {}", e);
+                        warn!(error = %e, "Connection error");
                     }
                 });
             }
             Err(e) => {
-                eprintln!("Accept error: {}", e);
+                error!(error = %e, "Accept error");
             }
         }
     }
@@ -121,7 +123,7 @@ async fn handle_client_connection(
 
     // Step 1: Handle authentication negotiation
     if let Err(e) = handle_auth(&mut stream).await {
-        eprintln!("  Auth failed: {}", e);
+        debug!(%peer, error = %e, "Auth failed");
         return Ok(());
     }
 
@@ -129,22 +131,22 @@ async fn handle_client_connection(
     let request = match handle_connect_request(&mut stream).await {
         Ok(req) => req,
         Err(e) => {
-            eprintln!("  Connect request failed: {}", e);
+            debug!(%peer, error = %e, "Connect request failed");
             return Ok(());
         }
     };
 
-    println!("  CONNECT {}:{}", request.host, request.port);
+    info!(host = %request.host, port = request.port, "CONNECT");
 
     // Step 3: Route based on destination
     match route_connection(&mut stream, &node, &pool, &request, egress_node).await {
         Ok(()) => {}
         Err(e) => {
-            eprintln!("  Routing failed: {}", e);
+            info!(host = %request.host, error = %e, "Routing failed");
         }
     }
 
-    println!("Connection from {} closed", peer);
+    debug!(%peer, "Connection closed");
     Ok(())
 }
 
@@ -291,11 +293,11 @@ async fn route_connection(
             // Not a wispers.link hostname - try egress if configured
             match egress_node {
                 Some(egress) => {
-                    println!("  Egress via node {}", egress);
+                    debug!(egress_node = egress, "Routing via egress");
                     egress_to_node(stream, node, pool, egress, &request.host, request.port).await
                 }
                 None => {
-                    println!("  Rejected: {} (egress not enabled)", request.host);
+                    warn!(host = %request.host, "Rejected: egress not enabled");
                     send_reply(stream, REP_NOT_ALLOWED).await;
                     Err(anyhow::anyhow!("egress not enabled"))
                 }
@@ -303,7 +305,7 @@ async fn route_connection(
         }
         Err(Some(e)) => {
             // Invalid wispers.link hostname
-            println!("  Rejected: {} ({})", request.host, e);
+            warn!(host = %request.host, error = %e, "Rejected: invalid wispers.link host");
             send_reply(stream, REP_GENERAL_FAILURE).await;
             Err(anyhow::anyhow!("{}", e))
         }
@@ -322,12 +324,12 @@ async fn forward_to_node(
         match tokio::time::timeout(REQUEST_TIMEOUT, pool.open_stream(node, target_node)).await {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
-                println!("  Failed to open stream to node {}: {}", target_node, e);
+                warn!(target_node, error = %e, "Failed to open stream");
                 send_reply(stream, REP_HOST_UNREACHABLE).await;
                 return Err(anyhow::anyhow!("{}", e));
             }
             Err(_) => {
-                println!("  Timeout opening stream to node {}", target_node);
+                warn!(target_node, "Timeout opening stream");
                 send_reply(stream, REP_TTL_EXPIRED).await;
                 return Err(anyhow::anyhow!("open_stream timeout"));
             }
@@ -335,7 +337,7 @@ async fn forward_to_node(
 
     let command = format!("FORWARD {}\n", port);
     if let Err(e) = send_command(&quic_stream, &command).await {
-        println!("  FORWARD failed: {}", e);
+        warn!(target_node, port, error = %e, "FORWARD failed");
         send_reply(stream, REP_CONNECTION_REFUSED).await;
         return Err(anyhow::anyhow!("{}", e));
     }
@@ -358,15 +360,12 @@ async fn egress_to_node(
         match tokio::time::timeout(REQUEST_TIMEOUT, pool.open_stream(node, egress_node)).await {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
-                println!(
-                    "  Failed to open stream to egress node {}: {}",
-                    egress_node, e
-                );
+                warn!(egress_node, error = %e, "Failed to open stream to egress");
                 send_reply(stream, REP_HOST_UNREACHABLE).await;
                 return Err(anyhow::anyhow!("{}", e));
             }
             Err(_) => {
-                println!("  Timeout opening stream to egress node {}", egress_node);
+                warn!(egress_node, "Timeout opening stream to egress");
                 send_reply(stream, REP_TTL_EXPIRED).await;
                 return Err(anyhow::anyhow!("open_stream timeout"));
             }
@@ -374,7 +373,7 @@ async fn egress_to_node(
 
     let command = format!("CONNECT {}:{}\n", host, port);
     if let Err(e) = send_command(&quic_stream, &command).await {
-        println!("  CONNECT failed: {}", e);
+        warn!(egress_node, host, port, error = %e, "CONNECT failed");
         send_reply(stream, REP_CONNECTION_REFUSED).await;
         return Err(anyhow::anyhow!("{}", e));
     }
@@ -400,12 +399,12 @@ async fn relay(tcp_stream: &mut TcpStream, quic_stream: wispers_connect::QuicStr
                 Ok(0) => break,
                 Ok(n) => {
                     if let Err(e) = quic_write.write_all(&buf[..n]).await {
-                        eprintln!("  QUIC write error: {}", e);
+                        debug!(error = %e, "QUIC write error");
                         break;
                     }
                 }
                 Err(e) => {
-                    eprintln!("  TCP read error: {}", e);
+                    debug!(error = %e, "TCP read error");
                     break;
                 }
             }
@@ -421,12 +420,12 @@ async fn relay(tcp_stream: &mut TcpStream, quic_stream: wispers_connect::QuicStr
                 Ok(0) => break,
                 Ok(n) => {
                     if let Err(e) = tcp_write.write_all(&buf[..n]).await {
-                        eprintln!("  TCP write error: {}", e);
+                        debug!(error = %e, "TCP write error");
                         break;
                     }
                 }
                 Err(e) => {
-                    eprintln!("  QUIC read error: {}", e);
+                    debug!(error = %e, "QUIC read error");
                     break;
                 }
             }

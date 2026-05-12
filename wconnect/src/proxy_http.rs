@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tracing::{debug, error, info, warn};
 use wispers_connect::{Node, NodeState, QuicStream};
 
 use crate::proxy_common::{
@@ -65,18 +66,18 @@ pub async fn run(
     loop {
         match listener.accept().await {
             Ok((stream, addr)) => {
-                println!("Accepted connection from {}", addr);
+                debug!(%addr, "Accepted connection");
                 let node = Arc::clone(&node);
                 let pool = pool.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_client_connection(stream, node, pool, egress_node).await
                     {
-                        eprintln!("Connection error: {}", e);
+                        warn!(error = %e, "Connection error");
                     }
                 });
             }
             Err(e) => {
-                eprintln!("Accept error: {}", e);
+                error!(error = %e, "Accept error");
             }
         }
     }
@@ -178,22 +179,32 @@ async fn handle_client_connection(
         // Log the request.
         match (&request.target.destination, &request.target.mode) {
             (Destination::WispersNode { node_number, port }, ProxyMode::HttpRequest { path }) => {
-                println!(
-                    "  {} -> node {}:{}{} (keep-alive: {})",
-                    request.method, node_number, port, path, keep_alive
+                info!(
+                    method = %request.method,
+                    node = node_number, port, path,
+                    keep_alive,
+                    "HTTP request",
                 );
             }
             (Destination::WispersNode { node_number, port }, ProxyMode::Tunnel) => {
-                println!("  CONNECT -> node {}:{}", node_number, port);
+                info!(node = node_number, port, "CONNECT tunnel");
             }
             (Destination::Internet { host, port }, ProxyMode::HttpRequest { path }) => {
-                println!(
-                    "  {} -> {}:{}{} via node {} (keep-alive: {})",
-                    request.method, host, port, path, target_node, keep_alive
+                info!(
+                    method = %request.method,
+                    host, port, path,
+                    egress_node = target_node,
+                    keep_alive,
+                    "HTTP request via egress",
                 );
             }
             (Destination::Internet { host, port }, ProxyMode::Tunnel) => {
-                println!("  CONNECT {}:{} via node {}", host, port, target_node);
+                info!(
+                    host,
+                    port,
+                    egress_node = target_node,
+                    "CONNECT tunnel via egress"
+                );
             }
         }
 
@@ -242,7 +253,7 @@ async fn handle_client_connection(
                 match result {
                     Ok(Ok(())) => {}
                     Ok(Err(e)) => {
-                        eprintln!("  Request error: {}", e);
+                        warn!(error = %e, "Request error");
                         break;
                     }
                     Err(_) => {
@@ -260,7 +271,7 @@ async fn handle_client_connection(
                 match result {
                     Ok(Ok(())) => {}
                     Ok(Err(e)) => {
-                        eprintln!("  Tunnel error: {}", e);
+                        debug!(error = %e, "Tunnel ended with error");
                     }
                     Err(_) => {
                         let err = ProxyError::GatewayTimeout("tunnel setup timed out".to_string());
@@ -280,12 +291,7 @@ async fn handle_client_connection(
         // Otherwise, loop back to handle the next request
     }
 
-    println!(
-        "Connection from {} closed ({} request{})",
-        peer,
-        request_count,
-        if request_count == 1 { "" } else { "s" }
-    );
+    debug!(%peer, request_count, "Connection closed");
     Ok(())
 }
 

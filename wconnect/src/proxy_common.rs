@@ -11,6 +11,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+use tracing::{debug, info};
 use wispers_connect::p2p::P2pError;
 use wispers_connect::{Node, QuicConnection, QuicStream};
 
@@ -99,7 +100,7 @@ impl ConnectionPool {
         if let Some(conn) = cached {
             match conn.open_stream().await {
                 Ok(stream) => {
-                    println!("  Reusing existing QUIC connection to node {}", target_node);
+                    debug!(target_node, "Reusing existing QUIC connection");
                     return Ok(stream);
                 }
                 Err(_) => {
@@ -107,7 +108,7 @@ impl ConnectionPool {
                     if let Some(entry) = pool.get(&target_node)
                         && Arc::ptr_eq(&entry.conn, &conn)
                     {
-                        println!("  Evicting dead QUIC connection to node {}", target_node);
+                        info!(target_node, "Evicting dead QUIC connection");
                         pool.remove(&target_node);
                     }
                 }
@@ -115,7 +116,7 @@ impl ConnectionPool {
         }
 
         // Fresh connect.
-        println!("  Creating new QUIC connection to node {}", target_node);
+        info!(target_node, "Creating new QUIC connection");
         let conn = Arc::new(
             node.connect_quic(target_node)
                 .await
@@ -142,14 +143,14 @@ impl ConnectionPool {
         pool.retain(|node, pooled| {
             let keep = now.duration_since(pooled.last_used) < IDLE_TIMEOUT;
             if !keep {
-                println!("  Closing idle connection to node {}", node);
+                debug!(target_node = node, "Closing idle connection");
             }
             keep
         });
 
         let removed = before - pool.len();
         if removed > 0 {
-            println!("  Cleaned up {} idle connection(s)", removed);
+            debug!(count = removed, "Cleaned up idle connection(s)");
         }
     }
 }
