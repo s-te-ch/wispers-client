@@ -11,6 +11,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+use wispers_connect::p2p::P2pError;
 use wispers_connect::{Node, QuicConnection, QuicStream};
 
 /// Default idle timeout for pooled connections (60 seconds).
@@ -78,42 +79,58 @@ impl ConnectionPool {
         }
     }
 
-    /// Get an existing connection or create a new one.
-    ///
-    /// Returns an Arc to the connection so multiple requests can share it.
-    pub async fn get_or_connect(
+    /// Open a QUIC stream to `target_node`, using a pooled connection if
+    /// possible. If the cached connection's `open_stream` fails (typically
+    /// because the underlying ICE path died), it is evicted and a fresh
+    /// connection is established.
+    pub async fn open_stream(
         &self,
         node: &Node,
         target_node: i32,
-    ) -> Result<Arc<QuicConnection>, wispers_connect::p2p::P2pError> {
-        // Check if we have an existing connection
-        {
+    ) -> Result<QuicStream, OpenStreamError> {
+        // Try cached.
+        let cached = {
             let mut pool = self.connections.lock().await;
-            if let Some(pooled) = pool.get_mut(&target_node) {
-                pooled.last_used = Instant::now();
-                println!("  Reusing existing QUIC connection to node {}", target_node);
-                return Ok(Arc::clone(&pooled.conn));
+            pool.get_mut(&target_node).map(|entry| {
+                entry.last_used = Instant::now();
+                Arc::clone(&entry.conn)
+            })
+        };
+        if let Some(conn) = cached {
+            match conn.open_stream().await {
+                Ok(stream) => {
+                    println!("  Reusing existing QUIC connection to node {}", target_node);
+                    return Ok(stream);
+                }
+                Err(_) => {
+                    let mut pool = self.connections.lock().await;
+                    if let Some(entry) = pool.get(&target_node)
+                        && Arc::ptr_eq(&entry.conn, &conn)
+                    {
+                        println!("  Evicting dead QUIC connection to node {}", target_node);
+                        pool.remove(&target_node);
+                    }
+                }
             }
         }
 
-        // Create a new connection
+        // Fresh connect.
         println!("  Creating new QUIC connection to node {}", target_node);
-        let conn = node.connect_quic(target_node).await?;
-        let conn = Arc::new(conn);
-
-        // Store in pool
-        {
-            let mut pool = self.connections.lock().await;
-            pool.insert(
-                target_node,
-                PooledConnection {
-                    conn: Arc::clone(&conn),
-                    last_used: Instant::now(),
-                },
-            );
-        }
-
-        Ok(conn)
+        let conn = Arc::new(
+            node.connect_quic(target_node)
+                .await
+                .map_err(OpenStreamError::Connect)?,
+        );
+        let stream = conn.open_stream().await.map_err(OpenStreamError::Stream)?;
+        let mut pool = self.connections.lock().await;
+        pool.insert(
+            target_node,
+            PooledConnection {
+                conn,
+                last_used: Instant::now(),
+            },
+        );
+        Ok(stream)
     }
 
     /// Clean up idle connections.
@@ -179,40 +196,69 @@ pub fn parse_wispers_host(host: &str) -> Result<WispersHost, Option<ProxyError>>
     Ok(WispersHost { node_number })
 }
 
-/// Open a QUIC stream and send a wire protocol command.
-/// Returns the stream ready for use if the command succeeds, or an error message.
-pub async fn open_stream_with_command(
-    quic_conn: &QuicConnection,
-    command: &str,
-) -> Result<QuicStream, String> {
-    let quic_stream = quic_conn
-        .open_stream()
-        .await
-        .map_err(|e| format!("failed to open stream: {}", e))?;
+/// Failure modes for `ConnectionPool::open_stream`.
+#[derive(Debug)]
+pub enum OpenStreamError {
+    /// Establishing a fresh connection to the peer failed (ICE/hub/auth).
+    Connect(P2pError),
+    /// The peer is reachable but `open_stream` on a fresh connection failed.
+    Stream(P2pError),
+}
 
-    quic_stream
+impl fmt::Display for OpenStreamError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Connect(e) => write!(f, "failed to connect to peer: {}", e),
+            Self::Stream(e) => write!(f, "failed to open stream: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for OpenStreamError {}
+
+/// Failure modes for `send_command`.
+#[derive(Debug)]
+pub enum CommandError {
+    /// The stream's write or read failed — the connection is probably dead.
+    Io(P2pError),
+    /// The server replied with an `ERROR <msg>` line.
+    Rejected(String),
+    /// The server's reply was neither `OK` nor `ERROR ...`.
+    Protocol(String),
+}
+
+impl fmt::Display for CommandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(e) => write!(f, "stream I/O failed: {}", e),
+            Self::Rejected(msg) => write!(f, "remote rejected: {}", msg),
+            Self::Protocol(msg) => write!(f, "unexpected response: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for CommandError {}
+
+/// Send a wire-protocol command on a stream and parse the `OK` / `ERROR <msg>`
+/// response.
+pub async fn send_command(stream: &QuicStream, command: &str) -> Result<(), CommandError> {
+    stream
         .write_all(command.as_bytes())
         .await
-        .map_err(|e| format!("failed to send command: {}", e))?;
+        .map_err(CommandError::Io)?;
 
-    let mut response_buf = [0u8; 256];
-    let n = quic_stream
-        .read(&mut response_buf)
-        .await
-        .map_err(|e| format!("failed to read response: {}", e))?;
-
-    let response = String::from_utf8_lossy(&response_buf[..n]);
+    let mut buf = [0u8; 256];
+    let n = stream.read(&mut buf).await.map_err(CommandError::Io)?;
+    let response = String::from_utf8_lossy(&buf[..n]);
     let response = response.trim();
 
     if let Some(msg) = response.strip_prefix("ERROR ") {
-        return Err(format!("remote error: {}", msg));
+        return Err(CommandError::Rejected(msg.to_string()));
     }
-
     if response != "OK" {
-        return Err(format!("unexpected response: {}", response));
+        return Err(CommandError::Protocol(response.to_string()));
     }
-
-    Ok(quic_stream)
+    Ok(())
 }
 
 #[cfg(test)]
