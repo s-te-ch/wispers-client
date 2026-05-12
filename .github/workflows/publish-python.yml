@@ -20,9 +20,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Pinned to 22.04 (glibc 2.35) for binary compatibility with older
+          # distros; ubuntu-latest is currently 24.04 (glibc 2.39). Also
+          # applies to the aarch64 cross-compile, since the host runner's
+          # apt-installed cross-toolchain dictates the target's glibc.
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
             cross: true
           - os: macos-latest

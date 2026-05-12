@@ -29,10 +29,12 @@ jobs:
           - os: macos-latest
             target: x86_64-apple-darwin
             platform: darwin_amd64
-          - os: ubuntu-latest
+          # Pinned to 22.04 (glibc 2.35) for binary compatibility with older
+          # distros; ubuntu-latest is currently 24.04 (glibc 2.39).
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             platform: linux_amd64
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             platform: linux_arm64
           - os: windows-latest
