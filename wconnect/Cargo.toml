@@ -33,6 +33,7 @@ wispers-connect = { path = "../wispers-connect", version = "0.8.2" }
 
 [target.'cfg(unix)'.dependencies]
 daemonize = "0.5"
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 rand = "0.9"

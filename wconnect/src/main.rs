@@ -111,6 +111,15 @@ enum Command {
 }
 
 fn main() -> Result<()> {
+    // Restrict default file mode to user-only. None of files wconnect writes
+    // have an obvious reason to be group- or world-readable. This is marked
+    // unsafe because it changes global state, but doing so as the first thing
+    // is safe.
+    #[cfg(unix)]
+    unsafe {
+        libc::umask(0o077);
+    }
+
     // Initialize logging. Defaults to `info`; override with RUST_LOG.
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -256,6 +265,9 @@ fn daemonize_serve(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     println!("Daemonizing, logging to {:?}", log_path);
 
     let daemonize = Daemonize::new()
+        // The crate defaults to 0o027 post-fork, which would loosen the
+        // 0o077 we set in main(). Keep it tight.
+        .umask(0o077)
         .stdout(log_file.try_clone()?)
         .stderr(log_file);
 
