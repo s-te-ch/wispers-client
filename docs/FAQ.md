@@ -4,38 +4,6 @@
 
 ## How does Wispers Connect compare to...
 
-### Tailscale and tsnet
-
-Like Wispers, [Tailscale](https://tailscale.com) uses NAT-traversal to establish
-secure connections between computers without the hassle involved in setting up a
-classical VPN. Tailscale's main focus is providing a WireGuard-based VPN, but it
-also includes [tsnet](https://tailscale.com/docs/features/tsnet), a library
-that's quite similar to Wispers Connect. It lets you write a Go server that
-shows up as an individual node on your tailnet, even if the computer the server
-runs on does not run Tailscale.
-
-What Wispers gives you that Tailscale and tsnet don't:
-
-**Sovereignty and trust** — When using Tailscale, you are forced to trust their
-DERP servers not to eavesdrop on your network traffic or impersonate a computer
-on your network. As a US-incorporated company, Tailscale is subject to the CLOUD
-Act and can be compelled to do exactly that. Wispers is operated by a Swiss
-company and, more importantly, the Wispers Hub cryptographically cannot read
-your data or impersonate a node, even if compelled to try.
-
-**Multi-language support** — tsnet is Go-only. Wispers Connect is available for
-a growing number of languages.
-
-**Mobile support** — You can use Tailscale on Android and iOS through their
-mobile client, but like all mobile VPN clients it tends to clash with battery
-saving mechanisms on these platforms. Wispers Connect runs natively inside your
-app with no VPN tunnel, so there's nothing to clash with.
-
-**No network switching** — Tailscale requires you to switch between tailnets —
-you can only be connected to one at a time. Wispers networks are
-application-scoped, so each of your apps can be on its own network without you
-ever having to think about it.
-
 ### ZeroTier and libzt
 
 Like Wispers, [ZeroTier](https://zerotier.com) creates overlay networks using
@@ -46,7 +14,7 @@ embeddable library similar to Wispers Connect.
 
 What Wispers gives you that ZeroTier and libzt don't:
 
-**Sovereignty and trust** — ZeroTier is also a US company, subject to the CLOUD
+**Sovereignty and trust** — ZeroTier is a US company, subject to the CLOUD
 Act. You can self-host the network controller, but since version 1.16 this
 requires building from source under a commercial license. Even then, you still
 need to trust ZeroTier's relay infrastructure unless you also self-host root
@@ -63,8 +31,52 @@ with the same battery-life trade-offs as any mobile VPN client. On iOS, you can
 only join one ZeroTier network at a time. Wispers Connect runs inside your app
 with no VPN tunnel.
 
-**No network switching** — Same as with Tailscale: ZeroTier networks are
-device-scoped. Wispers networks are application-scoped.
+**No network switching** — ZeroTier networks are device-scoped — you can only
+be connected to one at a time. Wispers networks are application-scoped, so each
+of your apps can be on its own network without you ever having to think about
+it.
+
+### Tailscale and tsnet
+
+Like Wispers, [Tailscale](https://tailscale.com) uses NAT-traversal to establish
+secure connections between computers without the hassle involved in setting up a
+classical VPN. Tailscale's main focus is providing a WireGuard-based VPN, but it
+also includes [tsnet](https://tailscale.com/docs/features/tsnet), a library
+that's quite similar to Wispers Connect. It lets you write a Go server that
+shows up as an individual node on your tailnet, even if the computer the server
+runs on does not run Tailscale.
+
+What Wispers gives you that Tailscale and tsnet don't:
+
+**Sovereignty and trust** — When using Tailscale, you are forced to trust their
+coordination server not to eavesdrop on your network traffic or impersonate a
+computer on your network. Tailscale is located in Canada, but its
+US-incorporated subsidiary Tailscale US Inc. is subject to the CLOUD Act and can
+be compelled to do exactly that. Wispers is operated by a Swiss company and,
+more importantly, the Wispers Hub cryptographically cannot read your data or
+impersonate a node, even if compelled to try.
+
+**Multi-language support** — tsnet is Go-only. Wispers Connect is available for
+a growing number of languages.
+
+**Mobile support** — You can use Tailscale on Android and iOS through their
+mobile client, but like all mobile VPN clients it tends to clash with battery
+saving mechanisms on these platforms. Wispers Connect runs natively inside your
+app with no VPN tunnel, so there's nothing to clash with.
+
+**No network switching** — Same as with ZeroTier: Tailscale requires you to
+switch between tailnets. Wispers networks are application-scoped.
+
+_Update 2026-05-26:_
+- The `tsnet` library now has a Rust version in
+  [preview](https://tailscale.com/blog/tailscale-rs-rust-tsnet-library-preview),
+  which should make it much easier to wrap the library in other languages
+- The [tailnet-lock](https://tailscale.com/docs/features/tailnet-lock) feature
+  significantly improves the trust issue. Trusted nodes can endorse new nodes,
+  preventing the coordination server from injecting malicious new nodes.
+  However, unlike Wispers, this still uses a trust-on-first-use model for
+  bootstrapping, which only protects against cases when Tailscale was to be
+  subverted _after_ Lock was activated.
 
 ### OpenZiti
 
