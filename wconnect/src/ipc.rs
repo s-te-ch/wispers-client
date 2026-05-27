@@ -1,6 +1,6 @@
-//! Local daemon server for wconnect CLI.
+//! Local IPC server for the wconnect CLI to talk to a running server.
 //!
-//! The daemon listens on a Unix Domain Socket (Unix) or TCP localhost (Windows)
+//! The IPC server listens on a Unix Domain Socket (Unix) or TCP localhost (Windows)
 //! and accepts JSON-lines commands that are translated to ServingHandle method calls.
 
 use anyhow::{Context, Result};
@@ -44,7 +44,7 @@ pub fn ipc_path(connectivity_group_id: &str, node_number: i32) -> PathBuf {
     return dir.join(format!("{}-{}.port", connectivity_group_id, node_number));
 }
 
-/// Request from CLI to daemon.
+/// Request from CLI to server.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Request {
@@ -53,7 +53,7 @@ pub enum Request {
     Shutdown,
 }
 
-/// Response from daemon to CLI.
+/// Response from server to CLI.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Response {
@@ -102,8 +102,8 @@ impl Response {
     }
 }
 
-/// Daemon server that listens for CLI commands.
-pub struct DaemonServer {
+/// IPC server that listens for CLI commands.
+pub struct Server {
     #[cfg(unix)]
     listener: UnixListener,
     #[cfg(windows)]
@@ -116,10 +116,10 @@ pub struct DaemonServer {
     node_number: i32,
 }
 
-impl DaemonServer {
-    /// Bind to the daemon socket (Unix) or a localhost TCP port (Windows).
+impl Server {
+    /// Bind to the IPC socket (Unix) or a localhost TCP port (Windows).
     ///
-    /// Removes stale socket/port-file if it exists and no daemon is running.
+    /// Removes stale socket/port-file if it exists and no server is running.
     #[cfg(unix)]
     pub async fn bind(connectivity_group_id: &str, node_number: i32) -> Result<Self> {
         let path = ipc_path(connectivity_group_id, node_number);
@@ -135,7 +135,7 @@ impl DaemonServer {
         if path.exists() {
             match UnixStream::connect(&path).await {
                 Ok(_) => {
-                    anyhow::bail!("daemon already running at {:?}", path);
+                    anyhow::bail!("server already running at {:?}", path);
                 }
                 Err(_) => {
                     // Stale socket, remove it
@@ -159,7 +159,7 @@ impl DaemonServer {
     ///
     /// The `.port` file contains `port:password`. Clients must send the password
     /// as the first line before any request, preventing other local users from
-    /// talking to the daemon.
+    /// talking to the server.
     #[cfg(windows)]
     pub async fn bind(connectivity_group_id: &str, node_number: i32) -> Result<Self> {
         use rand::Rng;
@@ -179,7 +179,7 @@ impl DaemonServer {
                 && let Some((port, _)) = parse_port_file(&contents)
                 && TcpStream::connect(("127.0.0.1", port)).await.is_ok()
             {
-                anyhow::bail!("daemon already running on port {}", port);
+                anyhow::bail!("server already running on port {}", port);
             }
             tokio::fs::remove_file(&path)
                 .await
@@ -243,7 +243,7 @@ impl DaemonServer {
     }
 }
 
-impl Drop for DaemonServer {
+impl Drop for Server {
     fn drop(&mut self) {
         // Best-effort cleanup
         let _ = std::fs::remove_file(self.path());
@@ -416,19 +416,19 @@ fn parse_port_file(contents: &str) -> Option<(u16, &str)> {
     Some((port, password))
 }
 
-/// Client for connecting to the daemon.
-pub struct DaemonClient {
+/// Client for connecting to the server.
+pub struct Client {
     reader: BufReader<ReadHalf>,
     writer: WriteHalf,
 }
 
-impl DaemonClient {
-    /// Connect to the daemon for a specific node (via Unix socket).
+impl Client {
+    /// Connect to the server for a specific node (via Unix socket).
     #[cfg(unix)]
     pub async fn connect(connectivity_group_id: &str, node_number: i32) -> Result<Self> {
         let path = ipc_path(connectivity_group_id, node_number);
         let stream = UnixStream::connect(&path).await.with_context(|| {
-            format!("failed to connect to daemon at {:?} (is it running?)", path)
+            format!("failed to connect to server at {:?} (is it running?)", path)
         })?;
         let (reader, writer) = stream.into_split();
         Ok(Self {
@@ -437,7 +437,7 @@ impl DaemonClient {
         })
     }
 
-    /// Connect to the daemon for a specific node (via TCP localhost).
+    /// Connect to the server for a specific node (via TCP localhost).
     ///
     /// Reads the port and password from the `.port` file, connects, and
     /// sends the password as the first line for authentication.
@@ -446,11 +446,11 @@ impl DaemonClient {
         let path = ipc_path(connectivity_group_id, node_number);
         let contents = tokio::fs::read_to_string(&path)
             .await
-            .with_context(|| format!("daemon not running (no port file {:?})", path))?;
-        let (port, password) = parse_port_file(&contents).context("invalid daemon port file")?;
+            .with_context(|| format!("server not running (no port file {:?})", path))?;
+        let (port, password) = parse_port_file(&contents).context("invalid server port file")?;
         let stream = TcpStream::connect(("127.0.0.1", port))
             .await
-            .with_context(|| format!("daemon not running (port {})", port))?;
+            .with_context(|| format!("server not running (port {})", port))?;
         let (reader, mut writer) = stream.into_split();
         // Send IPC password
         writer.write_all(password.as_bytes()).await?;

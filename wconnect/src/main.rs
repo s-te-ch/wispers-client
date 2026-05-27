@@ -1,4 +1,4 @@
-mod daemon;
+mod ipc;
 mod p2p;
 mod proxy_common;
 mod proxy_http;
@@ -37,7 +37,7 @@ enum Command {
         /// The activation code from the endorser (format: "node_number-secret")
         activation_code: String,
     },
-    /// Get an activation code to endorse a new node (requires running daemon)
+    /// Get an activation code to endorse a new node (requires running server)
     GetActivationCode,
     /// Clear stored credentials and state
     Logout,
@@ -51,7 +51,7 @@ enum Command {
         #[arg(short = 'd', long)]
         daemon: bool,
 
-        /// Stop a running daemon
+        /// Stop a running server
         #[arg(long)]
         stop: bool,
 
@@ -152,8 +152,8 @@ fn main() -> Result<()> {
     // serve --stop and serve --daemon need to be handled before starting tokio.
     match &cli.command {
         Command::Serve { stop: true, .. } => {
-            // Stop the daemon and exit
-            return stop_daemon(hub_override.as_deref(), &profile);
+            // Stop the server and exit
+            return stop_server(hub_override.as_deref(), &profile);
         }
         Command::Serve { daemon: true, .. } => {
             // Daemonize the process, then continue to start tokio
@@ -176,19 +176,19 @@ fn main() -> Result<()> {
         ))
 }
 
-//-- Daemon Control Functions --------------------------------------------------
+//-- Server Control Functions --------------------------------------------------
 
-/// Stop a running daemon by sending shutdown command via IPC.
+/// Stop a running server by sending shutdown command via IPC.
 #[cfg(unix)]
-fn stop_daemon(_hub_override: Option<&str>, profile: &str) -> Result<()> {
+fn stop_server(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
 
     let (cg_id, node_number) = read_registration_sync(profile)?;
-    let path = daemon::ipc_path(&cg_id, node_number);
+    let path = ipc::ipc_path(&cg_id, node_number);
 
     let mut stream = UnixStream::connect(&path)
-        .with_context(|| format!("daemon not running (socket {:?})", path))?;
+        .with_context(|| format!("server not running (socket {:?})", path))?;
 
     writeln!(stream, r#"{{"cmd":"shutdown"}}"#)?;
     stream.flush()?;
@@ -198,33 +198,33 @@ fn stop_daemon(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     reader.read_line(&mut response)?;
 
     if response.contains("\"ok\":true") {
-        println!("Daemon stopped.");
+        println!("Server stopped.");
         Ok(())
     } else {
-        anyhow::bail!("Failed to stop daemon: {}", response.trim());
+        anyhow::bail!("Failed to stop server: {}", response.trim());
     }
 }
 
-/// Stop a running daemon by sending shutdown command via TCP.
+/// Stop a running server by sending shutdown command via TCP.
 #[cfg(windows)]
-fn stop_daemon(_hub_override: Option<&str>, profile: &str) -> Result<()> {
+fn stop_server(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpStream;
 
     let (cg_id, node_number) = read_registration_sync(profile)?;
-    let path = daemon::ipc_path(&cg_id, node_number);
+    let path = ipc::ipc_path(&cg_id, node_number);
 
     let contents = std::fs::read_to_string(&path)
-        .with_context(|| format!("daemon not running (no port file {:?})", path))?;
+        .with_context(|| format!("server not running (no port file {:?})", path))?;
     let contents = contents.trim();
-    let colon = contents.find(':').context("invalid daemon port file")?;
+    let colon = contents.find(':').context("invalid server port file")?;
     let port: u16 = contents[..colon]
         .parse()
-        .context("invalid daemon port file")?;
+        .context("invalid server port file")?;
     let password = &contents[colon + 1..];
 
     let mut stream = TcpStream::connect(("127.0.0.1", port))
-        .with_context(|| format!("daemon not running (port {})", port))?;
+        .with_context(|| format!("server not running (port {})", port))?;
 
     // Send IPC password first
     writeln!(stream, "{}", password)?;
@@ -236,10 +236,10 @@ fn stop_daemon(_hub_override: Option<&str>, profile: &str) -> Result<()> {
     reader.read_line(&mut response)?;
 
     if response.contains("\"ok\":true") {
-        println!("Daemon stopped.");
+        println!("Server stopped.");
         Ok(())
     } else {
-        anyhow::bail!("Failed to stop daemon: {}", response.trim());
+        anyhow::bail!("Failed to stop server: {}", response.trim());
     }
 }
 
@@ -475,29 +475,29 @@ async fn get_activation_code(hub_override: Option<&str>, profile: &str) -> Resul
     let cg_id = node.connectivity_group_id().unwrap().to_string();
     let node_number = node.node_number().unwrap();
 
-    // Connect to daemon
-    let mut client = daemon::DaemonClient::connect(&cg_id, node_number)
+    // Connect to server
+    let mut client = ipc::Client::connect(&cg_id, node_number)
         .await
-        .context("Daemon not running. Start it with 'wconnect serve' first.")?;
+        .context("Server not running. Start it with 'wconnect serve' first.")?;
 
     // Request activation code
     let response = client
-        .request(&daemon::Request::GetActivationCode)
+        .request(&ipc::Request::GetActivationCode)
         .await
-        .context("failed to communicate with daemon")?;
+        .context("failed to communicate with server")?;
 
     match response {
-        daemon::Response::Success {
-            data: daemon::ResponseData::ActivationCode(p),
+        ipc::Response::Success {
+            data: ipc::ResponseData::ActivationCode(p),
             ..
         } => {
             println!("{}", p.activation_code);
         }
-        daemon::Response::Error { error, .. } => {
+        ipc::Response::Error { error, .. } => {
             anyhow::bail!("{}", error);
         }
         _ => {
-            anyhow::bail!("unexpected response from daemon");
+            anyhow::bail!("unexpected response from server");
         }
     }
 
@@ -616,27 +616,27 @@ async fn status(hub_override: Option<&str>, profile: &str) -> Result<()> {
             println!("{label}:");
             println!("  Connectivity group: {cg_id}");
             println!("  Node number: {node_num}");
-            print_daemon_status(&cg_id.to_string(), node_num).await;
+            print_server_status(&cg_id.to_string(), node_num).await;
         }
     }
     Ok(())
 }
 
-async fn print_daemon_status(cg_id: &str, node_number: i32) {
-    let Ok(mut client) = daemon::DaemonClient::connect(cg_id, node_number).await else {
-        println!("  Daemon: not running");
+async fn print_server_status(cg_id: &str, node_number: i32) {
+    let Ok(mut client) = ipc::Client::connect(cg_id, node_number).await else {
+        println!("  Server: not running");
         return;
     };
-    let resp = client.request(&daemon::Request::Status).await;
-    let Ok(daemon::Response::Success {
-        data: daemon::ResponseData::Status(s),
+    let resp = client.request(&ipc::Request::Status).await;
+    let Ok(ipc::Response::Success {
+        data: ipc::ResponseData::Status(s),
         ..
     }) = resp
     else {
-        println!("  Daemon: running (status unavailable)");
+        println!("  Server: running (status unavailable)");
         return;
     };
-    println!("  Daemon: running (connected: {})", s.connected);
+    println!("  Server: running (connected: {})", s.connected);
     if let Some(endorsing) = s.endorsing {
         if endorsing.codes_outstanding > 0 {
             println!(

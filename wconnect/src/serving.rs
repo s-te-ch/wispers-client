@@ -12,7 +12,7 @@ use wispers_connect::{
     IncomingConnections, NodeState, QuicConnection, ServingHandle, ServingSession, UdpConnection,
 };
 
-use crate::daemon;
+use crate::ipc;
 
 /// Port forwarding allowlist configuration.
 #[derive(Clone, Debug)]
@@ -76,10 +76,10 @@ pub async fn serve(
     let cg_id = node.connectivity_group_id().unwrap().to_string();
     let node_number = node.node_number().unwrap();
 
-    // Start UDS daemon server first (so it's available while connecting to hub)
-    let daemon = daemon::DaemonServer::bind(&cg_id, node_number)
+    // Start IPC server first (so it's available while connecting to hub)
+    let ipc_server = ipc::Server::bind(&cg_id, node_number)
         .await
-        .context("failed to start daemon")?;
+        .context("failed to start IPC server")?;
 
     // Share allowed_ports with spawned tasks
     let allowed_ports = Arc::new(allowed_ports);
@@ -88,7 +88,7 @@ pub async fn serve(
         "Serving node {} in group {} (socket: {:?})",
         node_number,
         cg_id,
-        daemon.path()
+        ipc_server.path()
     );
     if let Some(ref ports) = *allowed_ports {
         match ports {
@@ -137,7 +137,7 @@ pub async fn serve(
         tokio::sync::mpsc::Receiver<Result<QuicConnection, P2pError>>,
     > = None;
 
-    // Accept daemon client connections, handle hub connection completing
+    // Accept IPC client connections, handle hub connection completing
     loop {
         tokio::select! {
             // Hub connection completed
@@ -212,17 +212,17 @@ pub async fn serve(
                 }
             }
 
-            // New daemon client connection
-            result = daemon.accept() => {
+            // New IPC client connection
+            result = ipc_server.accept() => {
                 match result {
                     Ok(stream) => {
                         let client_handle_state = handle_state.clone();
                         tokio::spawn(async move {
-                            daemon::handle_client_with_optional_handle(stream, client_handle_state).await;
+                            ipc::handle_client_with_optional_handle(stream, client_handle_state).await;
                         });
                     }
                     Err(e) => {
-                        error!(error = %e, "Failed to accept daemon connection");
+                        error!(error = %e, "Failed to accept IPC connection");
                     }
                 }
             }

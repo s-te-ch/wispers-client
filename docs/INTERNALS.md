@@ -143,11 +143,14 @@ flowchart BT
 Any application that embeds the library uses this split — `wconnect` is
 just one example.
 
-## wconnect daemon mode
+## wconnect IPC
 
-When running `wconnect serve -d`, the process daemonizes and listens on a
-Unix socket at `~/.wconnect/sockets/{cg_id}-{node}.sock`. Other `wconnect`
-invocations detect the daemon and communicate via this socket.
+Every `wconnect serve` invocation (foreground or with `-d` to daemonize)
+exposes a local IPC endpoint so other `wconnect` invocations on the same
+machine can talk to it. On Unix it's a Unix socket at
+`~/.wconnect/sockets/{cg_id}-{node}.sock`; on Windows it's a localhost
+TCP port whose number and auth password are written to
+`~/.wconnect/sockets/{cg_id}-{node}.port`.
 
 Commands are newline-delimited JSON:
 
@@ -162,9 +165,9 @@ Commands are newline-delimited JSON:
 {"ok": false, "error": "not connected to hub yet"}
 ```
 
-CLI commands that use the daemon:
-- `wconnect status` — shows daemon status if running
-- `wconnect get-activation-code` — asks daemon to generate code
+CLI commands that use the IPC channel:
+- `wconnect status` — shows server status if running
+- `wconnect get-activation-code` — asks the server to generate a code
 - `wconnect serve --stop` — sends shutdown command
 
 ## Activation flow (code path)
