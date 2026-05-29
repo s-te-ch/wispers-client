@@ -15,7 +15,7 @@ Usage:
 
 Global flags:
     --hub ADDR        Override hub address
-    --storage DIR     Storage directory (default: platform config dir + wconnect/default/)
+    --storage DIR     Storage directory (default: platform config dir + wispers-connect-examples/python/)
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def main() -> None:
         description="wispers-connect example (compatible with wconnect, ffi_demo, wconnect-go)",
     )
     parser.add_argument("--hub", help="Override hub address")
-    parser.add_argument("--storage", help="Storage directory (default: platform config dir + wconnect/default/)")
+    parser.add_argument("--storage", help="Storage directory (default: platform config dir + wispers-connect-examples/python/)")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -338,9 +338,9 @@ def init_node(args: argparse.Namespace) -> tuple[NodeStorage, Node, NodeState]:
 
 def default_storage_dir() -> Path:
     if platform.system() == "Darwin":
-        return Path.home() / "Library" / "Application Support" / "wconnect" / "default"
+        return Path.home() / "Library" / "Application Support" / "wispers-connect-examples" / "python"
     xdg = os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))
-    return Path(xdg) / "wconnect" / "default"
+    return Path(xdg) / "wispers-connect-examples" / "python"
 
 
 # =============================================================================

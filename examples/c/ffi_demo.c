@@ -1124,14 +1124,14 @@ static void mkdir_p(const char *path) {
 static void default_storage_path(char *out, size_t n) {
 #ifdef __APPLE__
     const char *home = getenv("HOME");
-    snprintf(out, n, "%s/Library/Application Support/wconnect/default", home ? home : "/tmp");
+    snprintf(out, n, "%s/Library/Application Support/wispers-connect-examples/c", home ? home : "/tmp");
 #else
     const char *xdg = getenv("XDG_CONFIG_HOME");
     if (xdg && xdg[0]) {
-        snprintf(out, n, "%s/wconnect/default", xdg);
+        snprintf(out, n, "%s/wispers-connect-examples/c", xdg);
     } else {
         const char *home = getenv("HOME");
-        snprintf(out, n, "%s/.config/wconnect/default", home ? home : "/tmp");
+        snprintf(out, n, "%s/.config/wispers-connect-examples/c", home ? home : "/tmp");
     }
 #endif
 }
