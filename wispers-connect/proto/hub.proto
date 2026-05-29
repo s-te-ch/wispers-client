@@ -29,6 +29,9 @@ service Hub {
   // Returns the cryptographic roster of the node's connectivity group.
   rpc GetRoster(RosterRequest) returns (roster.Roster) {}
 
+  // Returns metadata for the node's connectivity group.
+  rpc GetGroupMetadata(GroupMetadataRequest) returns (GroupMetadata) {}
+
   // Opens a persistent, bidirectional connection for the node to serve incoming
   // requests.  The hub forwards requests through this stream; the node sends
   // responses back.
@@ -116,6 +119,15 @@ message Node {
 
 message RosterRequest {
   // Empty - connectivity_group_id is derived from authenticated caller
+}
+
+message GroupMetadataRequest {
+  // Empty - connectivity_group_id is derived from authenticated caller
+}
+
+message GroupMetadata {
+  string id = 1;
+  string name = 2;
 }
 
 //-- Serving -------------------------------------------------------------------
