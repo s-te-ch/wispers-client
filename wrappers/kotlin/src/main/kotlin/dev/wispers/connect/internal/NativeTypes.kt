@@ -24,58 +24,6 @@ object NativeTypes {
     }
 
     /**
-     * Node info returned in node list.
-     * Name string is owned and freed by wispers_node_list_free().
-     */
-    @Structure.FieldOrder("nodeNumber", "name", "metadata", "isSelf", "activationStatus", "lastSeenAtMillis", "isOnline")
-    open class WispersNode : Structure {
-        @JvmField var nodeNumber: Int = 0
-        @JvmField var name: Pointer? = null
-        @JvmField var metadata: Pointer? = null
-        @JvmField var isSelf: Byte = 0      // C bool is 1 byte; JNA Boolean maps to int (4 bytes)
-        @JvmField var activationStatus: Int = 0
-        @JvmField var lastSeenAtMillis: Long = 0
-        @JvmField var isOnline: Byte = 0    // C bool is 1 byte
-
-        constructor() : super()
-        constructor(p: Pointer) : super(p)
-
-        class ByReference : WispersNode(), Structure.ByReference
-        class ByValue : WispersNode(), Structure.ByValue
-    }
-
-    /**
-     * List of nodes. Free with wispers_node_list_free().
-     */
-    @Structure.FieldOrder("nodes", "count")
-    open class WispersNodeList : Structure {
-        @JvmField var nodes: Pointer? = null
-        @JvmField var count: Long = 0  // size_t
-
-        constructor() : super()
-        constructor(p: Pointer) : super(p)
-
-        class ByReference : WispersNodeList(), Structure.ByReference
-        class ByValue : WispersNodeList(), Structure.ByValue
-    }
-
-    /**
-     * Group info. Free with wispers_group_info_free().
-     */
-    @Structure.FieldOrder("state", "nodes", "nodesCount")
-    open class WispersGroupInfo : Structure {
-        @JvmField var state: Int = 0        // WispersGroupState enum
-        @JvmField var nodes: Pointer? = null
-        @JvmField var nodesCount: Long = 0  // size_t
-
-        constructor() : super()
-        constructor(p: Pointer) : super(p)
-
-        class ByReference : WispersGroupInfo(), Structure.ByReference
-        class ByValue : WispersGroupInfo(), Structure.ByValue
-    }
-
-    /**
      * Host-provided storage callbacks.
      */
     @Structure.FieldOrder(

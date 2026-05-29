@@ -567,6 +567,32 @@ static int test_group_info_free_null(void) {
     return 0;
 }
 
+static int test_group_info_accessors_null(void) {
+    TEST("group info & node accessors handle NULL gracefully");
+
+    // All accessors must tolerate NULL and return their documented fallback.
+    if (wispers_group_info_state(NULL) != WISPERS_GROUP_STATE_ALONE)
+        FAIL("state(NULL) != ALONE");
+    if (wispers_group_info_nodes_count(NULL) != 0)
+        FAIL("nodes_count(NULL) != 0");
+    if (wispers_group_info_node_at(NULL, 0) != NULL)
+        FAIL("node_at(NULL) != NULL");
+
+    if (wispers_node_number(NULL) != 0) FAIL("node_number(NULL) != 0");
+    if (wispers_node_name(NULL) != NULL) FAIL("node_name(NULL) != NULL");
+    if (wispers_node_metadata(NULL) != NULL) FAIL("node_metadata(NULL) != NULL");
+    if (wispers_node_is_self(NULL) != false) FAIL("node_is_self(NULL) != false");
+    if (wispers_node_activation_status(NULL) != WISPERS_ACTIVATION_UNKNOWN)
+        FAIL("node_activation_status(NULL) != UNKNOWN");
+    if (wispers_node_last_seen_at_millis(NULL) != 0)
+        FAIL("node_last_seen_at_millis(NULL) != 0");
+    if (wispers_node_is_online(NULL) != false)
+        FAIL("node_is_online(NULL) != false");
+
+    PASS();
+    return 0;
+}
+
 static int test_group_info_null_handle(void) {
     TEST("group_info rejects NULL handle");
 
@@ -1047,6 +1073,7 @@ int main(void) {
     // Phase 6 tests
     printf("\n-- Phase 6: Node Listing --\n");
     failures += test_group_info_free_null();
+    failures += test_group_info_accessors_null();
     failures += test_group_info_null_handle();
     failures += test_group_info_null_callback();
     failures += test_group_info_invalid_state();

@@ -37,26 +37,25 @@ func goWispersGroupInfoCallback(ctx unsafe.Pointer, status C.int, detail *C.char
 		resolvePendingCall(ctx, &Error{Status: Status(status), Detail: C.GoString(detail)})
 		return
 	}
-	// Copy data out of the C struct before resolving.
+	// `gi` is an opaque WispersGroupInfo handle. Walk it via accessors and
+	// copy all data into Go values before freeing.
 	cGI := (*C.WispersGroupInfo)(gi)
-	state := GroupState(cGI.state)
-	count := int(cGI.nodes_count)
+	state := GroupState(C.wispers_group_info_state(cGI))
+	count := int(C.wispers_group_info_nodes_count(cGI))
 	nodes := make([]NodeInfo, count)
-	if count > 0 {
-		cNodes := unsafe.Slice((*C.WispersNode)(unsafe.Pointer(cGI.nodes)), count)
-		for i := 0; i < count; i++ {
-			nodes[i] = NodeInfo{
-				NodeNumber:       int32(cNodes[i].node_number),
-				Name:             C.GoString(cNodes[i].name),
-				Metadata:         C.GoString(cNodes[i].metadata),
-				IsSelf:           bool(cNodes[i].is_self),
-				ActivationStatus: ActivationStatus(cNodes[i].activation_status),
-				LastSeenAtMillis: int64(cNodes[i].last_seen_at_millis),
-				IsOnline:         bool(cNodes[i].is_online),
-			}
+	for i := 0; i < count; i++ {
+		n := C.wispers_group_info_node_at(cGI, C.size_t(i))
+		nodes[i] = NodeInfo{
+			NodeNumber:       int32(C.wispers_node_number(n)),
+			Name:             C.GoString(C.wispers_node_name(n)),
+			Metadata:         C.GoString(C.wispers_node_metadata(n)),
+			IsSelf:           bool(C.wispers_node_is_self(n)),
+			ActivationStatus: ActivationStatus(C.wispers_node_activation_status(n)),
+			LastSeenAtMillis: int64(C.wispers_node_last_seen_at_millis(n)),
+			IsOnline:         bool(C.wispers_node_is_online(n)),
 		}
 	}
-	C.wispers_group_info_free((*C.WispersGroupInfo)(gi))
+	C.wispers_group_info_free(cGI)
 	resolvePendingCall(ctx, groupInfoResult{state: state, nodes: nodes})
 }
 

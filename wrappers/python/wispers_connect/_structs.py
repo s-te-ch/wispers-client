@@ -6,11 +6,9 @@ from ctypes import (
     CFUNCTYPE,
     POINTER,
     Structure,
-    c_bool,
     c_char_p,
     c_int,
     c_int32,
-    c_int64,
     c_size_t,
     c_uint8,
     c_void_p,
@@ -51,25 +49,4 @@ class WispersRegistrationInfo(Structure):
         ("node_number", c_int32),
         ("auth_token", c_char_p),
         ("attestation_jwt", c_char_p),
-    ]
-
-
-class WispersNode(Structure):
-    # Uses c_bool (1 byte) for Rust bool — NOT c_int (4 bytes).
-    _fields_ = [
-        ("node_number", c_int32),
-        ("name", c_char_p),
-        ("metadata", c_char_p),
-        ("is_self", c_bool),
-        ("activation_status", c_int32),
-        ("last_seen_at_millis", c_int64),
-        ("is_online", c_bool),
-    ]
-
-
-class WispersGroupInfo(Structure):
-    _fields_ = [
-        ("state", c_int),
-        ("nodes", POINTER(WispersNode)),
-        ("nodes_count", c_size_t),
     ]

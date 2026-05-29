@@ -309,8 +309,9 @@ static int cmd_serve(void) {
     // Auto-print activation code if group allows endorsing.
     WispersGroupInfo *gi;
     if (blocking_group_info(ctx.node, &gi, 10000) == WISPERS_STATUS_SUCCESS) {
-        if (gi->state == WISPERS_GROUP_STATE_CAN_ENDORSE ||
-            gi->state == WISPERS_GROUP_STATE_BOOTSTRAP) {
+        WispersGroupState gstate = wispers_group_info_state(gi);
+        if (gstate == WISPERS_GROUP_STATE_CAN_ENDORSE ||
+            gstate == WISPERS_GROUP_STATE_BOOTSTRAP) {
             char *code;
             if (blocking_generate_activation_code(serving, &code, 10000)
                     == WISPERS_STATUS_SUCCESS) {
@@ -548,15 +549,17 @@ static void print_group(WispersNodeHandle *node) {
         fprintf(stderr, "  (failed to get group info)\n");
         return;
     }
-    printf("  Group state: %s\n", group_state_str(gi->state));
-    for (size_t i = 0; i < gi->nodes_count; i++) {
-        WispersNode *n = &gi->nodes[i];
+    printf("  Group state: %s\n", group_state_str(wispers_group_info_state(gi)));
+    size_t count = wispers_group_info_nodes_count(gi);
+    for (size_t i = 0; i < count; i++) {
+        const WispersNode *n = wispers_group_info_node_at(gi, i);
+        const char *name = wispers_node_name(n);
         printf("  Node %d: %s — %s%s%s\n",
-               n->node_number,
-               n->name ? n->name : "(unnamed)",
-               activation_status_str(n->activation_status),
-               n->is_self ? " (self)" : "",
-               n->is_online ? " [online]" : "");
+               wispers_node_number(n),
+               name ? name : "(unnamed)",
+               activation_status_str(wispers_node_activation_status(n)),
+               wispers_node_is_self(n) ? " (self)" : "",
+               wispers_node_is_online(n) ? " [online]" : "");
     }
     wispers_group_info_free(gi);
 }
@@ -1121,14 +1124,14 @@ static void mkdir_p(const char *path) {
 static void default_storage_path(char *out, size_t n) {
 #ifdef __APPLE__
     const char *home = getenv("HOME");
-    snprintf(out, n, "%s/Library/Application Support/wconnect/default", home ? home : "/tmp");
+    snprintf(out, n, "%s/Library/Application Support/wispers-connect-examples/c", home ? home : "/tmp");
 #else
     const char *xdg = getenv("XDG_CONFIG_HOME");
     if (xdg && xdg[0]) {
-        snprintf(out, n, "%s/wconnect/default", xdg);
+        snprintf(out, n, "%s/wispers-connect-examples/c", xdg);
     } else {
         const char *home = getenv("HOME");
-        snprintf(out, n, "%s/.config/wconnect/default", home ? home : "/tmp");
+        snprintf(out, n, "%s/.config/wispers-connect-examples/c", home ? home : "/tmp");
     }
 #endif
 }

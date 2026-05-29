@@ -56,6 +56,7 @@ pub struct P2pConfig {
 
 /// Information about the current serving session status.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct StatusInfo {
     pub connected: bool,
     pub connectivity_group_id: ConnectivityGroupId,
@@ -66,6 +67,7 @@ pub struct StatusInfo {
 
 /// Status of active endorsing sessions.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct EndorsingStatus {
     /// Number of activation codes waiting to be used by new nodes.
     pub codes_outstanding: usize,

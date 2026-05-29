@@ -448,13 +448,13 @@ func defaultStorageDir() string {
 	switch runtime.GOOS {
 	case "darwin":
 		home, _ := os.UserHomeDir()
-		return filepath.Join(home, "Library", "Application Support", "wconnect", "default")
+		return filepath.Join(home, "Library", "Application Support", "wispers-connect-examples", "go")
 	default:
 		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-			return filepath.Join(xdg, "wconnect", "default")
+			return filepath.Join(xdg, "wispers-connect-examples", "go")
 		}
 		home, _ := os.UserHomeDir()
-		return filepath.Join(home, ".config", "wconnect", "default")
+		return filepath.Join(home, ".config", "wispers-connect-examples", "go")
 	}
 }
 

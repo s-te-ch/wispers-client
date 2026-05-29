@@ -3,3 +3,5 @@ build/
 local.properties
 app/src/main/jniLibs/
 .idea/
+*.hprof
+hs_err_pid*.log

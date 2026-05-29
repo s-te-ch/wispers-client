@@ -40,6 +40,7 @@ impl Drop for RootKey {
 
 /// Connectivity metadata produced after remote registration.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NodeRegistration {
     pub connectivity_group_id: ConnectivityGroupId,
     pub node_number: i32,
@@ -119,6 +120,7 @@ impl<T: Into<String>> From<T> for ConnectivityGroupId {
 ///
 /// This combines data from the hub (registration) and roster (activation status).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NodeInfo {
     /// The node's number within the connectivity group.
     pub node_number: i32,
@@ -155,6 +157,7 @@ pub enum GroupState {
 
 /// Snapshot of the connectivity group's activation state.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct GroupInfo {
     pub state: GroupState,
     pub nodes: Vec<NodeInfo>,
