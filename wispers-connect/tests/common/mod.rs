@@ -18,10 +18,11 @@ use tonic::{Request, Response, Status, Streaming};
 // Use the proto types from the library
 use prost::Message;
 use wispers_connect::hub::proto::{
-    DeregisterNodeRequest, DeregisterNodeResponse, ListNodesRequest, NodeList, NodeRegistration,
-    NodeRegistrationRequest, PairNodesMessage, RosterRequest, ServingRequest, ServingResponse,
-    StartConnectionRequest, StartConnectionResponse, StunTurnConfig, StunTurnConfigRequest,
-    UpdateRosterRequest, UpdateRosterResponse, Welcome,
+    DeregisterNodeRequest, DeregisterNodeResponse, GroupMetadata, GroupMetadataRequest,
+    ListNodesRequest, NodeList, NodeRegistration, NodeRegistrationRequest, PairNodesMessage,
+    RosterRequest, ServingRequest, ServingResponse, StartConnectionRequest,
+    StartConnectionResponse, StunTurnConfig, StunTurnConfigRequest, UpdateRosterRequest,
+    UpdateRosterResponse, Welcome,
     hub_server::{Hub, HubServer},
     roster, serving_request, serving_response, start_connection_request,
 };
@@ -139,6 +140,13 @@ impl Hub for FakeHub {
         _request: Request<RosterRequest>,
     ) -> Result<Response<roster::Roster>, Status> {
         Ok(Response::new(self.roster.clone()))
+    }
+
+    async fn get_group_metadata(
+        &self,
+        _request: Request<GroupMetadataRequest>,
+    ) -> Result<Response<GroupMetadata>, Status> {
+        Err(Status::unimplemented("not needed for P2P testing"))
     }
 
     type StartServingStream =
