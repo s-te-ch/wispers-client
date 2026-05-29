@@ -42,14 +42,14 @@ public struct NodeInfo: Sendable, Identifiable {
     public let lastSeenAtMillis: Int64
     public let isOnline: Bool
 
-    init(cNode: WispersNode) {
-        self.nodeNumber = cNode.node_number
-        self.name = cNode.name.map { String(cString: $0) } ?? ""
-        self.metadata = cNode.metadata.map { String(cString: $0) } ?? ""
-        self.isSelf = cNode.is_self
-        self.activationStatus = ActivationStatus(cValue: cNode.activation_status)
-        self.lastSeenAtMillis = cNode.last_seen_at_millis
-        self.isOnline = cNode.is_online
+    init(cNode: OpaquePointer) {
+        self.nodeNumber = wispers_node_number(cNode)
+        self.name = wispers_node_name(cNode).map { String(cString: $0) } ?? ""
+        self.metadata = wispers_node_metadata(cNode).map { String(cString: $0) } ?? ""
+        self.isSelf = wispers_node_is_self(cNode)
+        self.activationStatus = ActivationStatus(cValue: wispers_node_activation_status(cNode))
+        self.lastSeenAtMillis = wispers_node_last_seen_at_millis(cNode)
+        self.isOnline = wispers_node_is_online(cNode)
     }
 }
 

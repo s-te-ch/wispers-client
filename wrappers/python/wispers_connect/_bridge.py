@@ -20,7 +20,6 @@ from ._ffi import (
     WispersStartServingCallbackType,
     WispersUdpConnectionCallbackType,
 )
-from ._structs import WispersGroupInfo
 from .exceptions import raise_for_status
 from .types import ActivationStatus, GroupState, NodeInfo, NodeState
 
@@ -101,27 +100,30 @@ def INIT_CB(ctx: int | None, status: int, detail: bytes | None,  # noqa: N802
 
 @WispersGroupInfoCallbackType  # type: ignore[untyped-decorator]
 def GROUP_INFO_CB(ctx: int | None, status: int, detail: bytes | None,  # noqa: N802
-                  gi_ptr: Any) -> None:
+                  gi_ptr: int | None) -> None:
     if status != 0:
         _resolve(ctx, _CallbackError(status, _detail_str(detail)))
         return
-    # Copy node data out of C struct before freeing.
-    gi: WispersGroupInfo = gi_ptr[0]
-    state = GroupState(gi.state)
-    nodes: list[NodeInfo] = []
-    for i in range(gi.nodes_count):
-        cn = gi.nodes[i]
-        nodes.append(NodeInfo(
-            node_number=cn.node_number,
-            name=cn.name.decode("utf-8") if cn.name else "",
-            metadata=cn.metadata.decode("utf-8") if cn.metadata else "",
-            is_self=cn.is_self,
-            activation_status=ActivationStatus(cn.activation_status),
-            last_seen_at_millis=cn.last_seen_at_millis,
-            is_online=cn.is_online,
-        ))
+    # gi_ptr is an opaque WispersGroupInfo handle. Walk it via accessors and
+    # copy all data into Python objects before freeing.
     from ._library import get_lib
-    get_lib().wispers_group_info_free(gi_ptr)
+    lib = get_lib()
+    state = GroupState(lib.wispers_group_info_state(gi_ptr))
+    nodes: list[NodeInfo] = []
+    for i in range(lib.wispers_group_info_nodes_count(gi_ptr)):
+        n = lib.wispers_group_info_node_at(gi_ptr, i)
+        name_bytes = lib.wispers_node_name(n)
+        metadata_bytes = lib.wispers_node_metadata(n)
+        nodes.append(NodeInfo(
+            node_number=lib.wispers_node_number(n),
+            name=name_bytes.decode("utf-8") if name_bytes else "",
+            metadata=metadata_bytes.decode("utf-8") if metadata_bytes else "",
+            is_self=lib.wispers_node_is_self(n),
+            activation_status=ActivationStatus(lib.wispers_node_activation_status(n)),
+            last_seen_at_millis=lib.wispers_node_last_seen_at_millis(n),
+            is_online=lib.wispers_node_is_online(n),
+        ))
+    lib.wispers_group_info_free(gi_ptr)
     _resolve(ctx, (state, tuple(nodes)))
 
 

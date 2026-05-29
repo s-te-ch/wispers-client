@@ -6,16 +6,17 @@ import ctypes
 from ctypes import (
     CFUNCTYPE,
     POINTER,
+    c_bool,
     c_char_p,
     c_int,
     c_int32,
+    c_int64,
     c_size_t,
     c_uint8,
     c_void_p,
 )
 
 from ._structs import (
-    WispersGroupInfo,
     WispersNodeStorageCallbacks,
     WispersRegistrationInfo,
 )
@@ -31,7 +32,7 @@ WispersCallbackType = CFUNCTYPE(None, c_void_p, c_int, c_char_p)
 WispersInitCallbackType = CFUNCTYPE(None, c_void_p, c_int, c_char_p, c_void_p, c_int)
 
 # void (*WispersGroupInfoCallback)(void *ctx, WispersStatus, const char *, WispersGroupInfo *)
-WispersGroupInfoCallbackType = CFUNCTYPE(None, c_void_p, c_int, c_char_p, POINTER(WispersGroupInfo))
+WispersGroupInfoCallbackType = CFUNCTYPE(None, c_void_p, c_int, c_char_p, c_void_p)
 
 # void (*WispersStartServingCallback)(void *ctx, WispersStatus, const char *,
 #     WispersServingHandle *, WispersServingSession *, WispersIncomingConnections *)
@@ -67,8 +68,39 @@ def declare_functions(lib: ctypes.CDLL) -> None:  # noqa: C901
     lib.wispers_string_free.argtypes = [c_void_p]
     lib.wispers_string_free.restype = None
 
-    lib.wispers_group_info_free.argtypes = [POINTER(WispersGroupInfo)]
+    lib.wispers_group_info_free.argtypes = [c_void_p]
     lib.wispers_group_info_free.restype = None
+
+    # -- Group info / node accessors --
+    lib.wispers_group_info_state.argtypes = [c_void_p]
+    lib.wispers_group_info_state.restype = c_int
+
+    lib.wispers_group_info_nodes_count.argtypes = [c_void_p]
+    lib.wispers_group_info_nodes_count.restype = c_size_t
+
+    lib.wispers_group_info_node_at.argtypes = [c_void_p, c_size_t]
+    lib.wispers_group_info_node_at.restype = c_void_p
+
+    lib.wispers_node_number.argtypes = [c_void_p]
+    lib.wispers_node_number.restype = c_int32
+
+    lib.wispers_node_name.argtypes = [c_void_p]
+    lib.wispers_node_name.restype = c_char_p
+
+    lib.wispers_node_metadata.argtypes = [c_void_p]
+    lib.wispers_node_metadata.restype = c_char_p
+
+    lib.wispers_node_is_self.argtypes = [c_void_p]
+    lib.wispers_node_is_self.restype = c_bool
+
+    lib.wispers_node_activation_status.argtypes = [c_void_p]
+    lib.wispers_node_activation_status.restype = c_int32
+
+    lib.wispers_node_last_seen_at_millis.argtypes = [c_void_p]
+    lib.wispers_node_last_seen_at_millis.restype = c_int64
+
+    lib.wispers_node_is_online.argtypes = [c_void_p]
+    lib.wispers_node_is_online.restype = c_bool
 
     lib.wispers_registration_info_free.argtypes = [POINTER(WispersRegistrationInfo)]
     lib.wispers_registration_info_free.restype = None

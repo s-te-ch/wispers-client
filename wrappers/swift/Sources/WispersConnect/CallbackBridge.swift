@@ -113,12 +113,12 @@ let wispersInitCallback: @convention(c) (
     }
 }
 
-/// Group info callback — copies data, frees C memory, resumes with GroupInfo.
+/// Group info callback — copies data via accessors, frees the C handle, resumes with GroupInfo.
 let wispersGroupInfoCallback: @convention(c) (
     UnsafeMutableRawPointer?,
     WispersStatus,
     UnsafePointer<CChar>?,
-    UnsafeMutablePointer<WispersGroupInfo>?
+    OpaquePointer?   // WispersGroupInfo *
 ) -> Void = { ctx, status, detail, infoPtr in
     if let err = errorOrNil(status, detail) {
         CallbackBridge.resume(ctx, throwing: err)
@@ -128,16 +128,16 @@ let wispersGroupInfoCallback: @convention(c) (
         CallbackBridge.resume(ctx, throwing: WispersError.nullPointer("GroupInfo is null"))
         return
     }
-    let cInfo = infoPtr.pointee
+    let state = GroupState(cValue: wispers_group_info_state(infoPtr))
     var nodes: [NodeInfo] = []
-    if let cNodes = cInfo.nodes {
-        for i in 0..<Int(cInfo.nodes_count) {
-            nodes.append(NodeInfo(cNode: cNodes[i]))
+    let count = wispers_group_info_nodes_count(infoPtr)
+    for i in 0..<count {
+        if let nodePtr = wispers_group_info_node_at(infoPtr, i) {
+            nodes.append(NodeInfo(cNode: nodePtr))
         }
     }
-    let info = GroupInfo(state: GroupState(cValue: cInfo.state), nodes: nodes)
     wispers_group_info_free(infoPtr)
-    CallbackBridge.resume(ctx, returning: info)
+    CallbackBridge.resume(ctx, returning: GroupInfo(state: state, nodes: nodes))
 }
 
 /// Start serving callback — resumes with three opaque pointers.

@@ -7,7 +7,7 @@
 use crate::errors::{NodeStateError, WispersStatus};
 use crate::node::{Node, NodeStorage};
 use crate::storage::StorageError;
-use crate::types::{GroupInfo, GroupState, NodeInfo, NodeRegistration};
+use crate::types::{GroupInfo, GroupState, NodeRegistration};
 use std::ffi::{CStr, CString, c_void};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
@@ -182,63 +182,13 @@ pub extern "C" fn wispers_registration_info_free(info: *mut WispersRegistrationI
 }
 
 // =============================================================================
-// Node list
+// Group status
 // =============================================================================
-
-/// Node information returned to C callers.
-#[repr(C)]
-pub struct WispersNode {
-    pub node_number: c_int,
-    pub name: *mut c_char,
-    pub metadata: *mut c_char,
-    /// Whether this is the current node (self).
-    pub is_self: bool,
-    /// Activation status: 0 = unknown, 1 = not activated, 2 = activated.
-    pub activation_status: c_int,
-    pub last_seen_at_millis: i64,
-    /// Whether the node currently has an active connection to the hub.
-    pub is_online: bool,
-}
 
 /// Activation status values for WispersNode.
 pub const WISPERS_ACTIVATION_UNKNOWN: c_int = 0;
 pub const WISPERS_ACTIVATION_NOT_ACTIVATED: c_int = 1;
 pub const WISPERS_ACTIVATION_ACTIVATED: c_int = 2;
-
-/// List of nodes returned to C callers.
-#[repr(C)]
-pub struct WispersNodeList {
-    pub nodes: *mut WispersNode,
-    pub count: usize,
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn wispers_node_list_free(list: *mut WispersNodeList) {
-    if list.is_null() {
-        return;
-    }
-    unsafe {
-        let list = &mut *list;
-        if !list.nodes.is_null() && list.count > 0 {
-            // Reconstruct the Vec to properly free it
-            let nodes = Vec::from_raw_parts(list.nodes, list.count, list.count);
-            for node in nodes {
-                if !node.name.is_null() {
-                    drop(CString::from_raw(node.name));
-                }
-                if !node.metadata.is_null() {
-                    drop(CString::from_raw(node.metadata));
-                }
-            }
-        }
-        list.nodes = ptr::null_mut();
-        list.count = 0;
-    }
-}
-
-// =============================================================================
-// Group status
-// =============================================================================
 
 /// Group state indicator for FFI.
 #[repr(C)]
@@ -263,33 +213,28 @@ impl From<&GroupState> for WispersGroupState {
     }
 }
 
-/// Group info returned to C callers.
-#[repr(C)]
+/// Per-node snapshot exposed to C as an opaque handle.
+pub struct WispersNode {
+    node_number: c_int,
+    name: CString,
+    metadata: CString,
+    is_self: bool,
+    activation_status: c_int,
+    last_seen_at_millis: i64,
+    is_online: bool,
+}
+
+/// Group activation snapshot exposed to C as an opaque handle.
 pub struct WispersGroupInfo {
-    pub state: WispersGroupState,
-    pub nodes: *mut WispersNode,
-    pub nodes_count: usize,
+    state: WispersGroupState,
+    nodes: Vec<WispersNode>,
 }
 
 impl WispersGroupInfo {
-    /// Create from a GroupInfo, allocating C strings.
+    /// Materialize a `GroupInfo` snapshot into the FFI-owned representation.
     pub(crate) fn from_group_info(info: GroupInfo) -> Result<Self, WispersStatus> {
         let state = WispersGroupState::from(&info.state);
-        let count = info.nodes.len();
-
-        if count == 0 {
-            return Ok(Self {
-                state,
-                nodes: ptr::null_mut(),
-                nodes_count: 0,
-            });
-        }
-
-        // Phase 1: build all CString values while they are still Rust-owned.
-        // If any CString::new() fails the `?` propagates the error and the
-        // Vec<(CString, CString, NodeInfo)> is dropped cleanly — no raw-pointer
-        // leaks because we haven't called into_raw() on anything yet.
-        let owned: Vec<(CString, CString, NodeInfo)> = info
+        let nodes = info
             .nodes
             .into_iter()
             .map(|node| {
@@ -297,44 +242,28 @@ impl WispersGroupInfo {
                     CString::new(node.name.as_str()).map_err(|_| WispersStatus::InvalidUtf8)?;
                 let metadata =
                     CString::new(node.metadata.as_str()).map_err(|_| WispersStatus::InvalidUtf8)?;
-                Ok((name, metadata, node))
-            })
-            .collect::<Result<_, WispersStatus>>()?;
-
-        // Phase 2: all strings built successfully — convert to raw pointers.
-        // This loop is infallible, so no leak is possible here.
-        let mut c_nodes: Vec<WispersNode> = owned
-            .into_iter()
-            .map(|(name, metadata, node)| {
                 let activation_status = match node.is_activated {
                     None => WISPERS_ACTIVATION_UNKNOWN,
                     Some(false) => WISPERS_ACTIVATION_NOT_ACTIVATED,
                     Some(true) => WISPERS_ACTIVATION_ACTIVATED,
                 };
-                WispersNode {
+                Ok(WispersNode {
                     node_number: node.node_number,
-                    name: name.into_raw(),
-                    metadata: metadata.into_raw(),
+                    name,
+                    metadata,
                     is_self: node.is_self,
                     activation_status,
                     last_seen_at_millis: node.last_seen_at_millis,
                     is_online: node.is_online,
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, WispersStatus>>()?;
 
-        let nodes_ptr = c_nodes.as_mut_ptr();
-        std::mem::forget(c_nodes);
-
-        Ok(Self {
-            state,
-            nodes: nodes_ptr,
-            nodes_count: count,
-        })
+        Ok(Self { state, nodes })
     }
 }
 
-/// Callback that receives group info.
+/// Callback that receives a group info handle.
 pub type WispersGroupInfoCallback = Option<
     unsafe extern "C" fn(
         ctx: *mut c_void,
@@ -349,26 +278,104 @@ pub extern "C" fn wispers_group_info_free(group_info: *mut WispersGroupInfo) {
     if group_info.is_null() {
         return;
     }
-    // SAFETY: `group_info` was allocated by Rust via `Box::into_raw(Box::new(...))` in
-    // `handle_group_info_result`. We reconstitute the Box here to free both the inner
-    // `nodes` array and the `WispersGroupInfo` allocation itself.
-    // The previous implementation only freed the `nodes` array (via a borrow) and leaked
-    // the `WispersGroupInfo` Box.
-    let gs = unsafe { Box::from_raw(group_info) };
-    if !gs.nodes.is_null() && gs.nodes_count > 0 {
-        // SAFETY: `nodes` was allocated by Rust via `Vec::into_raw_parts`-equivalent
-        // (`as_mut_ptr` + `mem::forget`) with length == capacity == `nodes_count`.
-        let nodes = unsafe { Vec::from_raw_parts(gs.nodes, gs.nodes_count, gs.nodes_count) };
-        for node in nodes {
-            if !node.name.is_null() {
-                unsafe { drop(CString::from_raw(node.name)) };
-            }
-            if !node.metadata.is_null() {
-                unsafe { drop(CString::from_raw(node.metadata)) };
-            }
-        }
+    // SAFETY: allocated via Box::into_raw in handle_group_info_result.
+    drop(unsafe { Box::from_raw(group_info) });
+}
+
+// -----------------------------------------------------------------------------
+// Accessors — group info
+// -----------------------------------------------------------------------------
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_group_info_state(info: *const WispersGroupInfo) -> WispersGroupState {
+    if info.is_null() {
+        return WispersGroupState::Alone;
     }
-    // `gs` (Box<WispersGroupInfo>) is dropped here, freeing the struct itself.
+    unsafe { (*info).state }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_group_info_nodes_count(info: *const WispersGroupInfo) -> usize {
+    if info.is_null() {
+        return 0;
+    }
+    unsafe { (*info).nodes.len() }
+}
+
+/// Returns NULL if `index` is out of bounds.
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_group_info_node_at(
+    info: *const WispersGroupInfo,
+    index: usize,
+) -> *const WispersNode {
+    if info.is_null() {
+        return ptr::null();
+    }
+    let info = unsafe { &*info };
+    info.nodes
+        .get(index)
+        .map(|n| n as *const WispersNode)
+        .unwrap_or(ptr::null())
+}
+
+// -----------------------------------------------------------------------------
+// Accessors — node
+// -----------------------------------------------------------------------------
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_node_number(node: *const WispersNode) -> c_int {
+    if node.is_null() {
+        return 0;
+    }
+    unsafe { (*node).node_number }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_node_name(node: *const WispersNode) -> *const c_char {
+    if node.is_null() {
+        return ptr::null();
+    }
+    unsafe { (*node).name.as_ptr() }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_node_metadata(node: *const WispersNode) -> *const c_char {
+    if node.is_null() {
+        return ptr::null();
+    }
+    unsafe { (*node).metadata.as_ptr() }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_node_is_self(node: *const WispersNode) -> bool {
+    if node.is_null() {
+        return false;
+    }
+    unsafe { (*node).is_self }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_node_activation_status(node: *const WispersNode) -> c_int {
+    if node.is_null() {
+        return WISPERS_ACTIVATION_UNKNOWN;
+    }
+    unsafe { (*node).activation_status }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_node_last_seen_at_millis(node: *const WispersNode) -> i64 {
+    if node.is_null() {
+        return 0;
+    }
+    unsafe { (*node).last_seen_at_millis }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_node_is_online(node: *const WispersNode) -> bool {
+    if node.is_null() {
+        return false;
+    }
+    unsafe { (*node).is_online }
 }
 
 // =============================================================================

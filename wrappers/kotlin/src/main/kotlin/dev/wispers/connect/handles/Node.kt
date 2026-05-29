@@ -122,29 +122,23 @@ class Node internal constructor(
         } as? Pointer ?: return GroupInfo(GroupState.Alone, emptyList())
 
         try {
-            val gs = NativeTypes.WispersGroupInfo(giPtr)
-            gs.read()
-
-            val state = GroupState.fromCode(gs.state)
-            val count = gs.nodesCount.toInt()
-            if (count == 0 || gs.nodes == null) {
+            val state = GroupState.fromCode(lib.wispers_group_info_state(giPtr))
+            val count = lib.wispers_group_info_nodes_count(giPtr).toInt()
+            if (count == 0) {
                 return GroupInfo(state, emptyList())
             }
 
-            val nodeArray = NativeTypes.WispersNode(gs.nodes!!)
-            nodeArray.read()
-            val nodes = nodeArray.toArray(count) as Array<*>
-
-            val nodeInfos = nodes.map { s ->
-                val node = s as NativeTypes.WispersNode
+            val nodeInfos = (0 until count).map { i ->
+                val n = lib.wispers_group_info_node_at(giPtr, i.toLong())
+                val lastSeen = lib.wispers_node_last_seen_at_millis(n)
                 NodeInfo(
-                    nodeNumber = node.nodeNumber,
-                    name = node.name?.getString(0, "UTF-8") ?: "",
-                    metadata = node.metadata?.getString(0, "UTF-8") ?: "",
-                    isSelf = node.isSelf != 0.toByte(),
-                    activationStatus = ActivationStatus.fromCode(node.activationStatus),
-                    lastSeenAtMillis = if (node.lastSeenAtMillis > 0) node.lastSeenAtMillis else null,
-                    isOnline = node.isOnline != 0.toByte()
+                    nodeNumber = lib.wispers_node_number(n),
+                    name = lib.wispers_node_name(n)?.getString(0, "UTF-8") ?: "",
+                    metadata = lib.wispers_node_metadata(n)?.getString(0, "UTF-8") ?: "",
+                    isSelf = lib.wispers_node_is_self(n) != 0.toByte(),
+                    activationStatus = ActivationStatus.fromCode(lib.wispers_node_activation_status(n)),
+                    lastSeenAtMillis = if (lastSeen > 0) lastSeen else null,
+                    isOnline = lib.wispers_node_is_online(n) != 0.toByte()
                 )
             }
 

@@ -54,6 +54,8 @@ typedef struct WispersIncomingConnections WispersIncomingConnections;
 typedef struct WispersUdpConnectionHandle WispersUdpConnectionHandle;
 typedef struct WispersQuicConnectionHandle WispersQuicConnectionHandle;
 typedef struct WispersQuicStreamHandle WispersQuicStreamHandle;
+typedef struct WispersGroupInfo WispersGroupInfo;
+typedef struct WispersNode WispersNode;
 
 // Host-provided storage callbacks. All functions must be non-null when used.
 // The ctx pointer carries all context the host needs, including any namespace
@@ -92,22 +94,7 @@ typedef void (*WispersInitCallback)(
 );
 
 //------------------------------------------------------------------------------
-// Node info
-//------------------------------------------------------------------------------
-
-// Information about a node in the connectivity group.
-typedef struct {
-    int32_t node_number;
-    char *name;                          // Owned, freed by wispers_group_status_free()
-    char *metadata;                      // Owned, freed alongside name
-    bool is_self;                        // Whether this is the current node
-    int32_t activation_status;           // WispersActivationStatus value
-    int64_t last_seen_at_millis;
-    bool is_online;                      // Whether the node is connected to the hub
-} WispersNode;
-
-//------------------------------------------------------------------------------
-// Group status (returned by group_status)
+// Group status (returned by wispers_node_group_info_async)
 //------------------------------------------------------------------------------
 
 // Activation state of the connectivity group.
@@ -119,18 +106,10 @@ typedef enum {
     WISPERS_GROUP_STATE_ALL_ACTIVATED = 4,   // All nodes activated
 } WispersGroupState;
 
-// Snapshot of the connectivity group's activation state.
-// Free with wispers_group_info_free().
-typedef struct {
-    WispersGroupState state;
-    WispersNode *nodes;
-    size_t nodes_count;
-} WispersGroupInfo;
-
-// Free a group info and all contained strings.
+// Free a group info handle. Invalidates any borrowed node/string pointers.
 void wispers_group_info_free(WispersGroupInfo *group_info);
 
-// Callback that receives group info.
+// Callback that receives a group info handle (owned, free with wispers_group_info_free).
 typedef void (*WispersGroupInfoCallback)(
     void *ctx,
     WispersStatus status,
@@ -138,13 +117,19 @@ typedef void (*WispersGroupInfoCallback)(
     WispersGroupInfo *group_info
 );
 
-// Legacy node list types (kept for ABI compatibility).
-typedef struct {
-    WispersNode *nodes;
-    size_t count;
-} WispersNodeList;
+// Group info accessors. The returned node pointer is borrowed from `info`.
+WispersGroupState  wispers_group_info_state(const WispersGroupInfo *info);
+size_t             wispers_group_info_nodes_count(const WispersGroupInfo *info);
+const WispersNode *wispers_group_info_node_at(const WispersGroupInfo *info, size_t index);
 
-void wispers_node_list_free(WispersNodeList *list);
+// Node accessors. Returned strings are borrowed; valid until the parent group info is freed.
+int32_t      wispers_node_number(const WispersNode *node);
+const char  *wispers_node_name(const WispersNode *node);
+const char  *wispers_node_metadata(const WispersNode *node);
+bool         wispers_node_is_self(const WispersNode *node);
+int32_t      wispers_node_activation_status(const WispersNode *node);   // WispersActivationStatus
+int64_t      wispers_node_last_seen_at_millis(const WispersNode *node);
+bool         wispers_node_is_online(const WispersNode *node);
 
 // Callback for start_serving that receives session components.
 // serving_handle and session are always provided on success.

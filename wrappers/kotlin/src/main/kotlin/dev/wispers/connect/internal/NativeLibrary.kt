@@ -350,12 +350,21 @@ interface NativeLibrary : Library {
     fun wispers_registration_info_free(info: NativeTypes.WispersRegistrationInfo?)
 
     /**
-     * Free a group info and all contained strings.
+     * Free a group info handle.
      */
     fun wispers_group_info_free(groupInfo: Pointer?)
 
-    /**
-     * Free a node list and all contained strings.
-     */
-    fun wispers_node_list_free(list: Pointer?)
+    // ---- Group info / node accessors --------------------------------------
+
+    fun wispers_group_info_state(info: Pointer?): Int
+    fun wispers_group_info_nodes_count(info: Pointer?): Long
+    fun wispers_group_info_node_at(info: Pointer?, index: Long): Pointer?
+
+    fun wispers_node_number(node: Pointer?): Int
+    fun wispers_node_name(node: Pointer?): Pointer?
+    fun wispers_node_metadata(node: Pointer?): Pointer?
+    fun wispers_node_is_self(node: Pointer?): Byte
+    fun wispers_node_activation_status(node: Pointer?): Int
+    fun wispers_node_last_seen_at_millis(node: Pointer?): Long
+    fun wispers_node_is_online(node: Pointer?): Byte
 }
