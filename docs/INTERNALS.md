@@ -85,6 +85,28 @@ Wrapper equivalents:
 | `QuicConnection` | `wispersgo.QuicConnection` | `dev.wispers.connect.QuicConnection` | `WispersConnect.QuicConnection` | `wispers_connect.QuicConnection` |
 | `NodeInfo` | `wispersgo.NodeInfo` | `dev.wispers.connect.NodeInfo` | `WispersConnect.NodeInfo` | `wispers_connect.NodeInfo` |
 
+## API design principles
+
+Two principles shape the public API:
+
+1. **The library is a real contract.** Any client can build their own
+   `wconnect` equivalent — the in-tree CLI is one example, not the
+   boundary. Anything `pub` and reachable from `lib.rs` is part of the
+   supported API and worth designing deliberately.
+
+2. **Forward-compatibility via each language's native idiom.** Adding a
+   field to a public snapshot type (`GroupInfo`, `NodeInfo`,
+   `StatusInfo`, `NodeRegistration`, …) must not break consumers.
+   The mechanism differs because the language constraints do:
+   - **Rust:** `#[non_exhaustive]` on the struct.
+   - **C ABI:** opaque handle + accessor functions.
+   - **Wrappers (Python/Swift/Go/Kotlin):** expose the data however is
+     idiomatic for the host language — properties, getters, dataclasses
+     — built on top of the C accessors.
+
+   The goal is forward-compatibility, not surface symmetry. Each
+   language uses its native mechanism.
+
 ## FFI boundary
 
 The Rust library compiles to a `cdylib` shared library
