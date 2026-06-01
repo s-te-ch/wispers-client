@@ -106,7 +106,7 @@ mod storage;
 mod types;
 
 pub use crypto::SigningKeyPair;
-pub use errors::{NodeStateError, WispersStatus};
+pub use errors::NodeStateError;
 pub use hub::HubError;
 pub use node::{Node, NodeState, NodeStorage};
 pub use p2p::{ConnectionState, P2pError, QuicConnection, QuicStream, UdpConnection};
