@@ -93,7 +93,7 @@ mod crypto;
 mod encryption;
 mod errors;
 mod ffi;
-pub mod hub;  // Partially public for testing.
+pub mod hub; // Partially public for testing.
 mod ice;
 mod juice;
 mod node;
