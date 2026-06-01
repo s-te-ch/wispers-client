@@ -7,7 +7,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
-use wispers_connect::p2p::P2pError;
+use wispers_connect::P2pError;
 use wispers_connect::{
     IncomingConnections, NodeState, QuicConnection, ServingHandle, ServingSession, UdpConnection,
 };

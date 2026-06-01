@@ -12,7 +12,7 @@ pub mod in_memory;
 
 pub use codec::{deserialize_registration, serialize_registration};
 pub use file::FileNodeStateStore;
-pub use foreign::{ForeignNodeStateStore, WispersNodeStorageCallbacks};
+pub use foreign::ForeignNodeStateStore;
 pub use in_memory::InMemoryNodeStateStore;
 
 /// Unified error type for all storage implementations.

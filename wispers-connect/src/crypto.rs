@@ -1,8 +1,8 @@
 //! Cryptographic primitives: Ed25519 signing keys, X25519 key exchange,
 //! and pairing codes/secrets used during the activation protocol.
 
-use ed25519_dalek::pkcs8::{DecodePublicKey, EncodePublicKey};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::pkcs8::EncodePublicKey;
+use ed25519_dalek::{Signer, SigningKey};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use num_bigint::BigUint;
@@ -98,17 +98,6 @@ impl X25519KeyPair {
         let peer_public = X25519PublicKey::from(*peer_public);
         self.secret().diffie_hellman(&peer_public).to_bytes()
     }
-}
-
-/// Verify a signature using a public key in SPKI DER format.
-pub fn verify_signature_spki(spki: &[u8], message: &[u8], signature: &[u8]) -> bool {
-    let Ok(verifying_key) = VerifyingKey::from_public_key_der(spki) else {
-        return false;
-    };
-    let Ok(sig) = Signature::from_slice(signature) else {
-        return false;
-    };
-    verifying_key.verify(message, &sig).is_ok()
 }
 
 //-- Pairing secrets -------------------------------------------------------------------------------
@@ -259,6 +248,7 @@ impl PairingCode {
 
 /// Error parsing a pairing code.
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::enum_variant_names)] // "Invalid" prefix is meaningful here
 pub enum PairingCodeError {
     #[error("invalid format: expected 'node_number-secret'")]
     InvalidFormat,
@@ -382,17 +372,6 @@ mod tests {
         let kp1 = SigningKeyPair::derive_from_root_key(&root_key);
         let kp2 = SigningKeyPair::derive_from_root_key(&root_key);
         assert_eq!(kp1.public_key_bytes(), kp2.public_key_bytes());
-    }
-
-    #[test]
-    fn test_signature_roundtrip() {
-        let root_key = [42u8; 32];
-        let kp = SigningKeyPair::derive_from_root_key(&root_key);
-        let message = b"test message";
-        let signature = kp.sign(message);
-        let spki = kp.public_key_spki();
-        assert!(verify_signature_spki(&spki, message, &signature));
-        assert!(!verify_signature_spki(&spki, b"wrong message", &signature));
     }
 
     #[test]

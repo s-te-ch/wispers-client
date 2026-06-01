@@ -96,7 +96,7 @@ Two principles shape the public API:
 
 2. **Forward-compatibility via each language's native idiom.** Adding a
    field to a public snapshot type (`GroupInfo`, `NodeInfo`,
-   `StatusInfo`, `NodeRegistration`, …) must not break consumers.
+   `ServingStatus`, `NodeRegistration`, …) must not break consumers.
    The mechanism differs because the language constraints do:
    - **Rust:** `#[non_exhaustive]` on the struct.
    - **C ABI:** opaque handle + accessor functions.
@@ -156,7 +156,7 @@ The library's serving API is split into two parts:
 
 ```mermaid
 flowchart BT
-    Handle["<b>ServingHandle</b> (Clone-able)<br/>status() → StatusInfo<br/>generate_activation_code()<br/>shutdown()"]
+    Handle["<b>ServingHandle</b> (Clone-able)<br/>status() → ServingStatus<br/>generate_activation_code()<br/>shutdown()"]
     Session["<b>ServingSession</b> (runner task)<br/>Hub gRPC stream<br/>Endorsing state<br/>Handles PairNodesMessage<br/>Handles RosterCosignRequest"]
 
     Handle -- "channel" --> Session

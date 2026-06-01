@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, OnceCell};
 use tracing::{debug, info};
-use wispers_connect::p2p::P2pError;
+use wispers_connect::P2pError;
 use wispers_connect::{Node, QuicConnection, QuicStream};
 
 /// Default idle timeout for pooled connections (60 seconds).

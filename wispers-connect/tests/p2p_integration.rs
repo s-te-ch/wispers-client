@@ -4,14 +4,12 @@
 
 mod common;
 
-use wispers_connect::Node;
-use wispers_connect::crypto::SigningKeyPair;
 use wispers_connect::hub::proto::roster::Roster;
-use wispers_connect::roster::{
+use wispers_connect::{
+    AuthToken, ConnectivityGroupId, Node, NodeRegistration, SigningKeyPair,
     build_activation_payload, compute_signing_hash, create_bootstrap_roster,
     set_endorser_signature, set_new_node_signature,
 };
-use wispers_connect::types::{AuthToken, ConnectivityGroupId, NodeRegistration};
 
 use common::FakeHub;
 

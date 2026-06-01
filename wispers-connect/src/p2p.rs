@@ -435,6 +435,3 @@ impl QuicConnection {
         Ok(())
     }
 }
-
-/// Re-export StunTurnConfig from proto.
-pub use crate::hub::proto::StunTurnConfig;

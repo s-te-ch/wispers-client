@@ -10,6 +10,12 @@ use tonic::metadata::MetadataValue;
 use tonic::transport::{Channel, ClientTlsConfig};
 
 /// Proto-generated types for the Hub gRPC service.
+//
+// `pub` so integration tests under `tests/` can reach `proto::hub_server::Hub`
+// and the request/response messages to build a FakeHub. `#[doc(hidden)]` keeps
+// it out of rustdoc and to signal that this is not part of the stable API
+// surface.
+#[doc(hidden)]
 pub mod proto {
     /// Roster proto types.
     pub mod roster {
@@ -59,7 +65,7 @@ impl HubError {
 
 /// A node in a connectivity group.
 #[derive(Debug, Clone)]
-pub struct Node {
+pub(crate) struct Node {
     pub node_number: i32,
     pub name: String,
     pub metadata: String,
@@ -80,7 +86,7 @@ impl From<proto::hub::Node> for Node {
 }
 
 /// Client for communicating with the Wispers Connect Hub.
-pub struct HubClient {
+pub(crate) struct HubClient {
     client: ProtoHubClient<Channel>,
 }
 
@@ -88,7 +94,7 @@ impl HubClient {
     /// Connect to a hub at the given address.
     ///
     /// Supports both `http://` (plaintext) and `https://` (TLS) schemes.
-    pub async fn connect(hub_addr: impl Into<String>) -> Result<Self, HubError> {
+    pub(crate) async fn connect(hub_addr: impl Into<String>) -> Result<Self, HubError> {
         let addr = hub_addr.into();
         let mut endpoint = Channel::from_shared(addr.clone())?;
 
@@ -119,7 +125,10 @@ impl HubClient {
     /// Complete node registration using a registration token.
     ///
     /// Returns the node's credentials for future authenticated requests.
-    pub async fn complete_registration(&self, token: &str) -> Result<NodeRegistration, HubError> {
+    pub(crate) async fn complete_registration(
+        &self,
+        token: &str,
+    ) -> Result<NodeRegistration, HubError> {
         let request = tonic::Request::new(proto::NodeRegistrationRequest {
             token: token.into(),
         });
@@ -138,7 +147,10 @@ impl HubClient {
     }
 
     /// List all nodes in the connectivity group.
-    pub async fn list_nodes(&self, registration: &NodeRegistration) -> Result<Vec<Node>, HubError> {
+    pub(crate) async fn list_nodes(
+        &self,
+        registration: &NodeRegistration,
+    ) -> Result<Vec<Node>, HubError> {
         let mut request = tonic::Request::new(proto::ListNodesRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
@@ -160,7 +172,7 @@ impl HubClient {
     /// deadline the client would wait indefinitely, effectively giving an
     /// attacker unlimited time to crack the secret and inject a forged
     /// response.
-    pub async fn pair_nodes(
+    pub(crate) async fn pair_nodes(
         &self,
         registration: &NodeRegistration,
         message: proto::PairNodesMessage,
@@ -179,7 +191,7 @@ impl HubClient {
     /// Use this only during pre-activation flows (bootstrap, activation) when
     /// the node is not yet in the roster and cannot verify it.
     /// For activated nodes, use `get_and_verify_roster` instead.
-    pub async fn get_unverified_roster(
+    pub(crate) async fn get_unverified_roster(
         &self,
         registration: &NodeRegistration,
     ) -> Result<proto::roster::Roster, HubError> {
@@ -191,7 +203,7 @@ impl HubClient {
     }
 
     /// Fetch the connectivity group's metadata (id, name, created_at).
-    pub async fn get_group_metadata(
+    pub(crate) async fn get_group_metadata(
         &self,
         registration: &NodeRegistration,
     ) -> Result<proto::GroupMetadata, HubError> {
@@ -206,7 +218,7 @@ impl HubClient {
     ///
     /// This is the standard method for activated nodes. It fetches the roster
     /// and verifies the signature chain before returning.
-    pub async fn get_and_verify_roster(
+    pub(crate) async fn get_and_verify_roster(
         &self,
         registration: &NodeRegistration,
         verifier_public_key_spki: &[u8],
@@ -218,7 +230,7 @@ impl HubClient {
 
     /// Submit a roster update. The hub will obtain the endorser's cosignature
     /// and return the fully signed roster.
-    pub async fn update_roster(
+    pub(crate) async fn update_roster(
         &self,
         registration: &NodeRegistration,
         new_roster: proto::roster::Roster,
@@ -239,7 +251,7 @@ impl HubClient {
     /// Start serving: open a bidirectional stream for handling incoming requests.
     ///
     /// Returns a handle for sending responses and a stream of incoming requests.
-    pub async fn start_serving(
+    pub(crate) async fn start_serving(
         &self,
         registration: &NodeRegistration,
     ) -> Result<ServingConnection, HubError> {
@@ -261,7 +273,7 @@ impl HubClient {
     /// Get STUN/TURN server configuration for P2P connections.
     ///
     /// Returns the server addresses and optional TURN credentials.
-    pub async fn get_stun_turn_config(
+    pub(crate) async fn get_stun_turn_config(
         &self,
         registration: &NodeRegistration,
     ) -> Result<proto::StunTurnConfig, HubError> {
@@ -275,7 +287,7 @@ impl HubClient {
     /// Start a P2P connection to another node.
     ///
     /// The hub forwards this request to the target node and returns their response.
-    pub async fn start_connection(
+    pub(crate) async fn start_connection(
         &self,
         registration: &NodeRegistration,
         request: proto::StartConnectionRequest,
@@ -290,7 +302,10 @@ impl HubClient {
     /// Deregister this node from its connectivity group.
     ///
     /// This soft-deletes the node from the hub's database.
-    pub async fn deregister_node(&self, registration: &NodeRegistration) -> Result<(), HubError> {
+    pub(crate) async fn deregister_node(
+        &self,
+        registration: &NodeRegistration,
+    ) -> Result<(), HubError> {
         let mut request = tonic::Request::new(proto::DeregisterNodeRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
@@ -300,7 +315,7 @@ impl HubClient {
 }
 
 /// A bidirectional serving connection to the hub.
-pub struct ServingConnection {
+pub(crate) struct ServingConnection {
     /// Send responses to requests.
     pub response_tx: mpsc::Sender<proto::ServingResponse>,
     /// Receive incoming requests.
