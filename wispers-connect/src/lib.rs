@@ -107,6 +107,7 @@ mod types;
 
 pub use errors::NodeStateError;
 pub use hub::HubError;
+pub use crypto::TtlProfile;
 pub use node::{Node, NodeState, NodeStorage};
 pub use p2p::{ConnectionState, P2pError, QuicConnection, QuicStream, UdpConnection};
 pub use roster::RosterVerificationError;

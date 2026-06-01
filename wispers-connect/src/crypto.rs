@@ -1,6 +1,8 @@
 //! Cryptographic primitives: Ed25519 signing keys, X25519 key exchange,
 //! and pairing codes/secrets used during the activation protocol.
 
+use std::time::Duration;
+
 use ed25519_dalek::pkcs8::EncodePublicKey;
 use ed25519_dalek::{Signer, SigningKey};
 use hkdf::Hkdf;
@@ -12,17 +14,72 @@ use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519StaticSec
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Length of a pairing secret in bytes.
-const PAIRING_SECRET_LEN: usize = 7;
+/// Activation-code lifetime profile. This fixes both the TTL and the entropy:
+/// a code's security against offline brute-force is the entropy-vs-window
+/// trade, so the two must move together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TtlProfile {
+    /// Short-lived codes for interactive use cases, where we expect the user to
+    /// type in the code as soon as they see it.
+    #[default]
+    Interactive,
+    /// Long-lived codes delivered using asynchronous communication like email.
+    Asynchronous,
+}
 
-/// Length of the base36-encoded pairing secret in characters.
-///
-/// This used to be 10, which silently clipped ~4 bits of entropy: a
-/// 7-byte (56-bit) secret encodes to up to 11 base36 digits, and the
-/// old encoder kept only the last 10, reducing the effective keyspace
-/// from 2^56 to 36^10 ≈ 2^51.7. 11 base36 digits (36^11 ≈ 2^56.9) is
-/// the smallest length that fits 7 bytes without loss.
-const PAIRING_SECRET_BASE36_LEN: usize = 11;
+impl TtlProfile {
+    /// Secret length in bytes.
+    fn secret_len(self) -> usize {
+        match self {
+            TtlProfile::Interactive => 7,  // 56 bits
+            TtlProfile::Asynchronous => 9, // 72 bits
+        }
+    }
+
+    /// Length of the base36 encoding in characters: the smallest that fits
+    /// the secret without loss (36^11 ≈ 2^56.9 for 7 bytes, 36^14 ≈ 2^72.4
+    /// for 9 bytes).
+    fn base36_len(self) -> usize {
+        match self {
+            TtlProfile::Interactive => 11,
+            TtlProfile::Asynchronous => 14,
+        }
+    }
+
+    /// How long a generated code stays valid. This is the offline
+    /// brute-force window the secret length is calibrated against.
+    pub fn ttl(self) -> Duration {
+        match self {
+            TtlProfile::Interactive => Duration::from_secs(120),
+            TtlProfile::Asynchronous => Duration::from_secs(24 * 60 * 60),
+        }
+    }
+
+    /// Recover the profile from a secret's byte length.
+    fn from_secret_len(len: usize) -> Option<Self> {
+        match len {
+            7 => Some(TtlProfile::Interactive),
+            9 => Some(TtlProfile::Asynchronous),
+            _ => None,
+        }
+    }
+
+    /// Recover the profile from a base36 code's character length.
+    fn from_base36_len(len: usize) -> Option<Self> {
+        match len {
+            11 => Some(TtlProfile::Interactive),
+            14 => Some(TtlProfile::Asynchronous),
+            _ => None,
+        }
+    }
+}
+
+/// The new node's deadline on the pairing RPC, calibrated to the weakest
+/// (lowest-entropy) [`TtlProfile`], `Interactive`. This guards against the Hub
+/// stalling pairing to give itself time to derive the pairing code. The
+/// `no_profile_is_weaker_than_interactive` test makes sure we don't introduce
+/// a lower-entropy code in the future for which this deadline is too long.
+pub(crate) const PAIRING_RPC_DEADLINE: Duration = Duration::from_secs(120);
 
 /// Length of a nonce in bytes.
 const NONCE_LEN: usize = 16;
@@ -105,13 +162,13 @@ impl X25519KeyPair {
 /// A pairing secret for device-to-device activation.
 #[derive(Clone, Debug)]
 pub struct PairingSecret {
-    bytes: [u8; PAIRING_SECRET_LEN],
+    bytes: Vec<u8>,
 }
 
 impl PairingSecret {
-    /// Generate a new random pairing secret.
-    pub fn generate() -> Self {
-        let mut bytes = [0u8; PAIRING_SECRET_LEN];
+    /// Generate a new random pairing secret for the given profile.
+    pub fn generate(profile: TtlProfile) -> Self {
+        let mut bytes = vec![0u8; profile.secret_len()];
         rand::thread_rng().fill_bytes(&mut bytes);
         Self { bytes }
     }
@@ -122,7 +179,7 @@ impl PairingSecret {
         Ok(Self { bytes })
     }
 
-    /// Get the base36 encoding (`PAIRING_SECRET_BASE36_LEN` lowercase characters).
+    /// Get the base36 encoding.
     pub fn to_base36(&self) -> String {
         encode_base36(&self.bytes)
     }
@@ -162,7 +219,7 @@ impl PairingSecret {
 /// Error parsing a pairing secret.
 #[derive(Debug, thiserror::Error)]
 pub enum PairingSecretError {
-    #[error("invalid length: expected {PAIRING_SECRET_BASE36_LEN} characters")]
+    #[error("invalid length: expected 11 (interactive) or 14 (asynchronous) characters")]
     InvalidLength,
     #[error("invalid base36 character")]
     InvalidCharacter,
@@ -170,37 +227,39 @@ pub enum PairingSecretError {
     OutOfRange,
 }
 
-/// Encode bytes as `PAIRING_SECRET_BASE36_LEN` lowercase base36 characters.
-///
-/// A 7-byte value is at most `2^56 - 1 ≈ 7.2 × 10^16`, and `36^11 ≈ 1.3 × 10^17`,
-/// so 11 digits always suffice — no truncation is possible.
+/// Encode a secret as lowercase base36, zero-padded to its profile's
+/// `base36_len()`. The width that fits the bytes without loss is always
+/// available because the byte length determines the profile.
 fn encode_base36(bytes: &[u8]) -> String {
+    let width = TtlProfile::from_secret_len(bytes.len())
+        .expect("a secret always has a valid profile length")
+        .base36_len();
     let s = BigUint::from_bytes_be(bytes).to_str_radix(36);
     debug_assert!(
-        s.len() <= PAIRING_SECRET_BASE36_LEN,
-        "7 bytes must fit in {PAIRING_SECRET_BASE36_LEN} base36 digits"
+        s.len() <= width,
+        "{} bytes must fit in {width} base36 digits",
+        bytes.len()
     );
-    format!("{:0>width$}", s, width = PAIRING_SECRET_BASE36_LEN)
+    format!("{:0>width$}", s, width = width)
 }
 
-/// Decode `PAIRING_SECRET_BASE36_LEN` base36 characters to bytes.
-fn decode_base36(s: &str) -> Result<[u8; PAIRING_SECRET_LEN], PairingSecretError> {
-    if s.len() != PAIRING_SECRET_BASE36_LEN {
-        return Err(PairingSecretError::InvalidLength);
-    }
+/// Decode base36 characters to secret bytes.
+fn decode_base36(s: &str) -> Result<Vec<u8>, PairingSecretError> {
+    let secret_len = TtlProfile::from_base36_len(s.len())
+        .ok_or(PairingSecretError::InvalidLength)?
+        .secret_len();
     let n = BigUint::parse_bytes(s.as_bytes(), 36).ok_or(PairingSecretError::InvalidCharacter)?;
     let raw = n.to_bytes_be();
-    // Reject values that exceed what `PAIRING_SECRET_LEN` bytes can hold.
-    // `PAIRING_SECRET_BASE36_LEN` base36 digits can represent values up to
-    // `36^11 − 1 ≈ 1.3 × 10^17`, but a 7-byte secret only fits values up
-    // to `2^56 − 1 ≈ 7.2 × 10^16`. The gap is ~45% of the encodable space,
-    // so a user mistyping a code has a reasonable chance of landing in it.
-    if raw.len() > PAIRING_SECRET_LEN {
+    // Reject values that exceed what `secret_len` bytes can hold: the base36
+    // length can encode slightly more than the byte length holds (e.g. 11
+    // digits reach 36^11−1 ≈ 1.3×10^17 but 7 bytes only 2^56−1 ≈ 7.2×10^16),
+    // and that ~45% gap is where a mistyped code can land.
+    if raw.len() > secret_len {
         return Err(PairingSecretError::OutOfRange);
     }
-    // Left-pad to PAIRING_SECRET_LEN bytes (raw may be shorter for small values).
-    let mut result = [0u8; PAIRING_SECRET_LEN];
-    let offset = PAIRING_SECRET_LEN - raw.len();
+    // Left-pad to secret_len bytes (raw may be shorter for small values).
+    let mut result = vec![0u8; secret_len];
+    let offset = secret_len - raw.len();
     result[offset..].copy_from_slice(&raw);
     Ok(result)
 }
@@ -282,36 +341,92 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 mod tests {
     use super::*;
 
+    impl TtlProfile {
+        /// Every variant, for exhaustive tests. Kept honest by
+        /// `ttl_profile_all_covers_every_variant`.
+        const ALL: &'static [TtlProfile] = &[TtlProfile::Interactive, TtlProfile::Asynchronous];
+    }
+
+    /// Adding a `TtlProfile` variant makes this match non-exhaustive, which
+    /// fails to compile — a nudge to add the variant to `TtlProfile::ALL` (so
+    /// the entropy-floor check below covers it) and to re-check
+    /// `PAIRING_RPC_DEADLINE`.
+    #[test]
+    fn ttl_profile_all_covers_every_variant() {
+        for &p in TtlProfile::ALL {
+            match p {
+                TtlProfile::Interactive => {}
+                TtlProfile::Asynchronous => {}
+            }
+        }
+    }
+
+    /// The new node's pairing-RPC deadline is a single constant
+    /// (`PAIRING_RPC_DEADLINE`), calibrated to the weakest profile's
+    /// entropy. So `Interactive` must stay the floor, and no profile may be
+    /// weaker than it. This test fails if this precondition is ever violated.
+    #[test]
+    fn no_profile_is_weaker_than_interactive() {
+        let floor = TtlProfile::Interactive.secret_len();
+        assert_eq!(
+            floor, 7,
+            "PAIRING_RPC_DEADLINE (120s) is calibrated to a 7-byte/56-bit floor; \
+             changing Interactive's entropy means re-deriving that deadline"
+        );
+        for &p in TtlProfile::ALL {
+            assert!(
+                p.secret_len() >= floor,
+                "{p:?} has a {}-byte secret, weaker than Interactive's {}-byte floor; \
+                 the fixed {}s pairing deadline would be unsafe for it",
+                p.secret_len(),
+                floor,
+                PAIRING_RPC_DEADLINE.as_secs(),
+            );
+        }
+    }
+
     #[test]
     fn test_base36_roundtrip() {
-        let secret = PairingSecret::generate();
+        let secret = PairingSecret::generate(TtlProfile::Interactive);
         let encoded = secret.to_base36();
-        assert_eq!(encoded.len(), PAIRING_SECRET_BASE36_LEN);
+        assert_eq!(encoded.len(), 11);
+        let decoded = PairingSecret::from_base36(&encoded).unwrap();
+        assert_eq!(secret.bytes, decoded.bytes);
+    }
+
+    /// The asynchronous profile round-trips through its 14-char encoding.
+    #[test]
+    fn test_base36_roundtrip_asynchronous() {
+        let secret = PairingSecret::generate(TtlProfile::Asynchronous);
+        let encoded = secret.to_base36();
+        assert_eq!(encoded.len(), 14);
         let decoded = PairingSecret::from_base36(&encoded).unwrap();
         assert_eq!(secret.bytes, decoded.bytes);
     }
 
     /// Maximum-value secret (all 0xff) must round-trip — exercises the
-    /// edge of the encodable range where 7 bytes = 2^56 - 1.
+    /// edge of the encodable range, for both profiles.
     #[test]
     fn test_base36_roundtrip_max_value() {
-        let secret = PairingSecret {
-            bytes: [0xff; PAIRING_SECRET_LEN],
-        };
-        let encoded = secret.to_base36();
-        assert_eq!(encoded.len(), PAIRING_SECRET_BASE36_LEN);
-        let decoded = PairingSecret::from_base36(&encoded).unwrap();
-        assert_eq!(secret.bytes, decoded.bytes);
+        for profile in [TtlProfile::Interactive, TtlProfile::Asynchronous] {
+            let secret = PairingSecret {
+                bytes: vec![0xff; profile.secret_len()],
+            };
+            let encoded = secret.to_base36();
+            assert_eq!(encoded.len(), profile.base36_len());
+            let decoded = PairingSecret::from_base36(&encoded).unwrap();
+            assert_eq!(secret.bytes, decoded.bytes);
+        }
     }
 
     /// All-zero secret must round-trip (tests the left-padding path).
     #[test]
     fn test_base36_roundtrip_zero_value() {
         let secret = PairingSecret {
-            bytes: [0u8; PAIRING_SECRET_LEN],
+            bytes: vec![0u8; 7],
         };
         let encoded = secret.to_base36();
-        assert_eq!(encoded, "0".repeat(PAIRING_SECRET_BASE36_LEN));
+        assert_eq!(encoded, "0".repeat(11));
         let decoded = PairingSecret::from_base36(&encoded).unwrap();
         assert_eq!(secret.bytes, decoded.bytes);
     }
@@ -329,11 +444,14 @@ mod tests {
     /// Wrong length is rejected with the specific error variant.
     #[test]
     fn test_base36_rejects_wrong_length() {
-        // 10 chars (the old length) must now be rejected.
+        // 10 chars (the old interactive length) must now be rejected.
         let result = PairingSecret::from_base36("0123456789");
         assert!(matches!(result, Err(PairingSecretError::InvalidLength)));
-        // 12 chars too.
+        // 12 chars: between the two valid lengths.
         let result = PairingSecret::from_base36("0123456789ab");
+        assert!(matches!(result, Err(PairingSecretError::InvalidLength)));
+        // 13 chars: just short of asynchronous.
+        let result = PairingSecret::from_base36("0123456789abc");
         assert!(matches!(result, Err(PairingSecretError::InvalidLength)));
     }
 
@@ -350,16 +468,20 @@ mod tests {
 
     #[test]
     fn test_pairing_code_roundtrip() {
-        let code = PairingCode::new(42, PairingSecret::generate());
-        let formatted = code.format();
-        let parsed = PairingCode::parse(&formatted).unwrap();
-        assert_eq!(code.node_number, parsed.node_number);
-        assert_eq!(code.secret.bytes, parsed.secret.bytes);
+        for profile in [TtlProfile::Interactive, TtlProfile::Asynchronous] {
+            let code = PairingCode::new(42, PairingSecret::generate(profile));
+            let formatted = code.format();
+            let parsed = PairingCode::parse(&formatted).unwrap();
+            assert_eq!(code.node_number, parsed.node_number);
+            assert_eq!(code.secret.bytes, parsed.secret.bytes);
+            // The secret length (entropy tier) survives the round-trip.
+            assert_eq!(parsed.secret.bytes.len(), profile.secret_len());
+        }
     }
 
     #[test]
     fn test_mac_verification() {
-        let secret = PairingSecret::generate();
+        let secret = PairingSecret::generate(TtlProfile::Interactive);
         let payload = b"test payload";
         let mac = secret.compute_mac(payload);
         assert!(secret.verify_mac(payload, &mac));

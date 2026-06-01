@@ -166,9 +166,9 @@ impl HubClient {
 
     /// Send a pairing message to another node (routed through the hub).
     ///
-    /// Bounded by `serving::SECRET_TTL`: the pairing secret's security
-    /// against offline brute-force is calibrated to that window, so we
-    /// must not let a malicious hub stall the RPC past it. Without this
+    /// Bounded by `crypto::PAIRING_RPC_DEADLINE`: the pairing secret's
+    /// security against offline brute-force is calibrated to that window, so
+    /// we must not let a malicious hub stall the RPC past it. Without this
     /// deadline the client would wait indefinitely, effectively giving an
     /// attacker unlimited time to crack the secret and inject a forged
     /// response.
@@ -178,7 +178,7 @@ impl HubClient {
         message: proto::PairNodesMessage,
     ) -> Result<proto::PairNodesMessage, HubError> {
         let mut request = tonic::Request::new(message);
-        request.set_timeout(crate::serving::SECRET_TTL);
+        request.set_timeout(crate::crypto::PAIRING_RPC_DEADLINE);
         add_auth_metadata(request.metadata_mut(), registration)?;
 
         let response = self.client.clone().pair_nodes(request).await?;
