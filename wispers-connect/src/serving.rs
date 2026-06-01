@@ -47,7 +47,7 @@ impl ServingError {
 }
 
 /// Configuration for P2P connection handling.
-pub struct P2pConfig {
+pub(crate) struct P2pConfig {
     /// Hub address for fetching fresh roster on each connection request.
     pub hub_addr: String,
     /// Node registration for authenticating with the hub.
