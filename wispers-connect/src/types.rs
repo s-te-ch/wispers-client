@@ -159,6 +159,11 @@ pub enum GroupState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct GroupInfo {
+    pub id: ConnectivityGroupId,
+    /// Display name. `None` if the group has no name set.
+    pub name: Option<String>,
+    /// Unix timestamp in milliseconds when the group was created.
+    pub created_at_millis: i64,
     pub state: GroupState,
     pub nodes: Vec<NodeInfo>,
 }

@@ -356,6 +356,9 @@ interface NativeLibrary : Library {
 
     // ---- Group info / node accessors --------------------------------------
 
+    fun wispers_group_info_id(info: Pointer?): Pointer?
+    fun wispers_group_info_name(info: Pointer?): Pointer?
+    fun wispers_group_info_created_at_millis(info: Pointer?): Long
     fun wispers_group_info_state(info: Pointer?): Int
     fun wispers_group_info_nodes_count(info: Pointer?): Long
     fun wispers_group_info_node_at(info: Pointer?, index: Long): Pointer?

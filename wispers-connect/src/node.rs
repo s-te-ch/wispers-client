@@ -133,7 +133,7 @@ impl NodeStorage {
         let registration = state.registration.as_ref().expect("checked is_registered");
         let hub_addr = self.config.read().unwrap().hub_addr.clone();
 
-        let mut client = HubClient::connect(hub_addr)
+        let client = HubClient::connect(hub_addr)
             .await
             .map_err(NodeStateError::hub)?;
 
@@ -416,7 +416,7 @@ impl Node {
 
         self.require_pending()?;
 
-        let mut client = HubClient::connect(self.hub_addr())
+        let client = HubClient::connect(self.hub_addr())
             .await
             .map_err(NodeStateError::hub)?;
         let registration = client
@@ -441,27 +441,24 @@ impl Node {
     ///
     /// Requires: Registered or Activated state.
     ///
-    /// Fetches the hub node list and roster, analyzes activation state, and
-    /// returns a unified [`GroupInfo`] containing both the group state
-    /// and the full node list. This replaces the former `list_nodes()` method.
+    /// Fetches the hub node list, roster, and group metadata in parallel over
+    /// a single connection, analyzes activation state, and returns a unified
+    /// [`GroupInfo`].
     pub async fn group_info(&self) -> Result<GroupInfo, NodeStateError> {
         use crate::hub::HubClient;
         use crate::roster::active_nodes;
 
         let registration = self.require_at_least_registered()?;
-        let mut client = HubClient::connect(self.hub_addr())
+        let client = HubClient::connect(self.hub_addr())
             .await
             .map_err(NodeStateError::hub)?;
 
-        let hub_nodes = client
-            .list_nodes(registration)
-            .await
-            .map_err(NodeStateError::hub)?;
-
-        let roster = client
-            .get_unverified_roster(registration)
-            .await
-            .map_err(NodeStateError::hub)?;
+        let (hub_nodes, roster, metadata) = tokio::try_join!(
+            client.list_nodes(registration),
+            client.get_unverified_roster(registration),
+            client.get_group_metadata(registration),
+        )
+        .map_err(NodeStateError::hub)?;
 
         // Build a set of activated (non-revoked) roster node numbers
         let activated_set: std::collections::HashSet<i32> =
@@ -524,7 +521,19 @@ impl Node {
             }
         };
 
-        Ok(GroupInfo { state, nodes })
+        let name = if metadata.name.is_empty() {
+            None
+        } else {
+            Some(metadata.name)
+        };
+
+        Ok(GroupInfo {
+            id: ConnectivityGroupId::new(metadata.id),
+            name,
+            created_at_millis: metadata.created_at_millis,
+            state,
+            nodes,
+        })
     }
 
     /// Start a serving session.
@@ -608,7 +617,7 @@ impl Node {
         };
 
         // Connect and send the pairing request
-        let mut client = HubClient::connect(self.hub_addr())
+        let client = HubClient::connect(self.hub_addr())
             .await
             .map_err(NodeStateError::hub)?;
 
@@ -712,7 +721,7 @@ impl Node {
     /// (e.g. they were activated after this node started), refetch from the hub.
     async fn find_peer_in_roster(
         &self,
-        client: &mut crate::hub::HubClient,
+        client: &crate::hub::HubClient,
         peer_node_number: i32,
     ) -> Result<proto::roster::Node, crate::p2p::P2pError> {
         let (registration, roster_lock) = match &self.inner {
@@ -775,7 +784,7 @@ impl Node {
         let hub_addr = self.hub_addr();
 
         // Connect to hub
-        let mut client = HubClient::connect(&hub_addr).await?;
+        let client = HubClient::connect(&hub_addr).await?;
 
         // Get STUN/TURN configuration
         let stun_turn_config = client.get_stun_turn_config(registration).await?;
@@ -801,9 +810,7 @@ impl Node {
         let response = client.start_connection(registration, request).await?;
 
         // Verify answerer's signature against roster (refetch if peer is unknown)
-        let peer_node = self
-            .find_peer_in_roster(&mut client, peer_node_number)
-            .await?;
+        let peer_node = self.find_peer_in_roster(&client, peer_node_number).await?;
 
         let response_payload = p2p_signing::verify_response(&response, &peer_node.public_key_spki)
             .map_err(|_| P2pError::SignatureVerificationFailed)?;
@@ -850,7 +857,7 @@ impl Node {
         let hub_addr = self.hub_addr();
 
         // Connect to hub
-        let mut client = HubClient::connect(&hub_addr).await?;
+        let client = HubClient::connect(&hub_addr).await?;
 
         // Get STUN/TURN configuration
         let stun_turn_config = client.get_stun_turn_config(registration).await?;
@@ -876,9 +883,7 @@ impl Node {
         let response = client.start_connection(registration, request).await?;
 
         // Verify answerer's signature against roster (refetch if peer is unknown)
-        let peer_node = self
-            .find_peer_in_roster(&mut client, peer_node_number)
-            .await?;
+        let peer_node = self.find_peer_in_roster(&client, peer_node_number).await?;
 
         let response_payload = p2p_signing::verify_response(&response, &peer_node.public_key_spki)
             .map_err(|_| P2pError::SignatureVerificationFailed)?;
@@ -933,7 +938,7 @@ impl Node {
             }
             NodeState::Registered => {
                 let registration = self.persisted.registration.as_ref().expect("registered");
-                let mut client = HubClient::connect(self.hub_addr())
+                let client = HubClient::connect(self.hub_addr())
                     .await
                     .map_err(NodeStateError::hub)?;
                 // If unauthenticated, node was already removed server-side — just clean up locally.
@@ -964,7 +969,7 @@ impl Node {
                     return Err(NodeStateError::LastActiveNode);
                 }
 
-                let mut client = HubClient::connect(self.hub_addr())
+                let client = HubClient::connect(self.hub_addr())
                     .await
                     .map_err(NodeStateError::hub)?;
 
@@ -1056,7 +1061,7 @@ async fn start_serving_impl(
     use crate::hub::HubClient;
     use crate::serving::ServingSession;
 
-    let mut client = HubClient::connect(hub_addr).await?;
+    let client = HubClient::connect(hub_addr).await?;
     let conn = client.start_serving(registration).await?;
 
     let (handle, session, incoming) = ServingSession::new(

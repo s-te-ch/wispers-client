@@ -527,7 +527,7 @@ async fn start_serving_impl(
     use crate::hub::HubClient;
     use crate::serving::ServingSession;
 
-    let mut client = HubClient::connect(&params.hub_addr).await?;
+    let client = HubClient::connect(&params.hub_addr).await?;
     let conn = client.start_serving(&params.registration).await?;
 
     let (handle, session, incoming) = ServingSession::new(

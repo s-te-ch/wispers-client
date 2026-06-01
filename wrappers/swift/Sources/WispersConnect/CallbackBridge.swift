@@ -128,6 +128,9 @@ let wispersGroupInfoCallback: @convention(c) (
         CallbackBridge.resume(ctx, throwing: WispersError.nullPointer("GroupInfo is null"))
         return
     }
+    let id = swiftString(wispers_group_info_id(infoPtr)) ?? ""
+    let name = swiftString(wispers_group_info_name(infoPtr))
+    let createdAtMillis = wispers_group_info_created_at_millis(infoPtr)
     let state = GroupState(cValue: wispers_group_info_state(infoPtr))
     var nodes: [NodeInfo] = []
     let count = wispers_group_info_nodes_count(infoPtr)
@@ -137,7 +140,9 @@ let wispersGroupInfoCallback: @convention(c) (
         }
     }
     wispers_group_info_free(infoPtr)
-    CallbackBridge.resume(ctx, returning: GroupInfo(state: state, nodes: nodes))
+    CallbackBridge.resume(ctx, returning: GroupInfo(
+        id: id, name: name, createdAtMillis: createdAtMillis, state: state, nodes: nodes
+    ))
 }
 
 /// Start serving callback — resumes with three opaque pointers.

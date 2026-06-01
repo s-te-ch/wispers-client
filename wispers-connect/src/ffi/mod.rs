@@ -20,7 +20,8 @@ mod types;
 pub use types::{
     CallbackContext, WispersCallback, WispersGroupInfo, WispersGroupInfoCallback,
     WispersGroupState, WispersInitCallback, WispersNode, WispersNodeHandle, WispersNodeState,
-    WispersNodeStorageHandle, WispersRegistrationInfo, wispers_group_info_free,
+    WispersNodeStorageHandle, WispersRegistrationInfo, wispers_group_info_created_at_millis,
+    wispers_group_info_free, wispers_group_info_id, wispers_group_info_name,
     wispers_group_info_node_at, wispers_group_info_nodes_count, wispers_group_info_state,
     wispers_node_activation_status, wispers_node_is_online, wispers_node_is_self,
     wispers_node_last_seen_at_millis, wispers_node_metadata, wispers_node_name,

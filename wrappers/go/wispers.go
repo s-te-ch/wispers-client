@@ -89,8 +89,11 @@ type NodeInfo struct {
 
 // GroupInfo is a snapshot of the connectivity group's activation state.
 type GroupInfo struct {
-	State GroupState
-	Nodes []NodeInfo
+	ID              string
+	Name            *string // nil if the group has no name set
+	CreatedAtMillis int64
+	State           GroupState
+	Nodes           []NodeInfo
 }
 
 // RegistrationInfo contains registration information for a node.
@@ -116,8 +119,11 @@ type startServingResult struct {
 
 // groupInfoResult is the internal type sent through the bridge channel for GroupInfo.
 type groupInfoResult struct {
-	state GroupState
-	nodes []NodeInfo
+	id              string
+	name            *string
+	createdAtMillis int64
+	state           GroupState
+	nodes           []NodeInfo
 }
 
 // dataResult is the internal type sent through the bridge channel for data callbacks.

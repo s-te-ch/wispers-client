@@ -35,6 +35,15 @@ sealed class GroupState(val code: Int) {
  * Snapshot of the connectivity group's activation state.
  */
 data class GroupInfo(
+    /** Connectivity group identifier. */
+    val id: String,
+
+    /** Display name, or `null` if the group has no name set. */
+    val name: String?,
+
+    /** Unix timestamp in milliseconds when the group was created. */
+    val createdAtMillis: Long,
+
     /** Activation state of the group from this node's perspective. */
     val state: GroupState,
 
