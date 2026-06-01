@@ -50,10 +50,16 @@ class Node(Handle):
         """Get group activation state and node list. Requires REGISTERED or ACTIVATED."""
         from ._library import get_lib
         ptr = self._require_open()
-        state, nodes = call_async(
+        group_id, name, created_at_millis, state, nodes = call_async(
             get_lib().wispers_node_group_info_async, ptr, cb=GROUP_INFO_CB,
         )
-        return GroupInfo(state=state, nodes=nodes)
+        return GroupInfo(
+            id=group_id,
+            name=name,
+            created_at_millis=created_at_millis,
+            state=state,
+            nodes=nodes,
+        )
 
     def start_serving(self) -> Any:
         """Start a serving session. Returns ServingSession."""

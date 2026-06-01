@@ -571,6 +571,10 @@ static int test_group_info_accessors_null(void) {
     TEST("group info & node accessors handle NULL gracefully");
 
     // All accessors must tolerate NULL and return their documented fallback.
+    if (wispers_group_info_id(NULL) != NULL) FAIL("id(NULL) != NULL");
+    if (wispers_group_info_name(NULL) != NULL) FAIL("name(NULL) != NULL");
+    if (wispers_group_info_created_at_millis(NULL) != 0)
+        FAIL("created_at_millis(NULL) != 0");
     if (wispers_group_info_state(NULL) != WISPERS_GROUP_STATE_ALONE)
         FAIL("state(NULL) != ALONE");
     if (wispers_group_info_nodes_count(NULL) != 0)

@@ -549,6 +549,11 @@ static void print_group(WispersNodeHandle *node) {
         fprintf(stderr, "  (failed to get group info)\n");
         return;
     }
+    const char *gname = wispers_group_info_name(gi);
+    printf("  Group id:    %s\n", wispers_group_info_id(gi));
+    printf("  Group name:  %s\n", gname ? gname : "(unset)");
+    printf("  Created at:  %lld ms\n",
+           (long long)wispers_group_info_created_at_millis(gi));
     printf("  Group state: %s\n", group_state_str(wispers_group_info_state(gi)));
     size_t count = wispers_group_info_nodes_count(gi);
     for (size_t i = 0; i < count; i++) {

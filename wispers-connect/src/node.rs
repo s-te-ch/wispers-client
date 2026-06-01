@@ -810,9 +810,7 @@ impl Node {
         let response = client.start_connection(registration, request).await?;
 
         // Verify answerer's signature against roster (refetch if peer is unknown)
-        let peer_node = self
-            .find_peer_in_roster(&client, peer_node_number)
-            .await?;
+        let peer_node = self.find_peer_in_roster(&client, peer_node_number).await?;
 
         let response_payload = p2p_signing::verify_response(&response, &peer_node.public_key_spki)
             .map_err(|_| P2pError::SignatureVerificationFailed)?;
@@ -885,9 +883,7 @@ impl Node {
         let response = client.start_connection(registration, request).await?;
 
         // Verify answerer's signature against roster (refetch if peer is unknown)
-        let peer_node = self
-            .find_peer_in_roster(&client, peer_node_number)
-            .await?;
+        let peer_node = self.find_peer_in_roster(&client, peer_node_number).await?;
 
         let response_payload = p2p_signing::verify_response(&response, &peer_node.public_key_spki)
             .map_err(|_| P2pError::SignatureVerificationFailed)?;

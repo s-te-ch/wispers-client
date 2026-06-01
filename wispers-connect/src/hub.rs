@@ -119,14 +119,15 @@ impl HubClient {
     /// Complete node registration using a registration token.
     ///
     /// Returns the node's credentials for future authenticated requests.
-    pub async fn complete_registration(
-        &self,
-        token: &str,
-    ) -> Result<NodeRegistration, HubError> {
+    pub async fn complete_registration(&self, token: &str) -> Result<NodeRegistration, HubError> {
         let request = tonic::Request::new(proto::NodeRegistrationRequest {
             token: token.into(),
         });
-        let response = self.client.clone().complete_node_registration(request).await?;
+        let response = self
+            .client
+            .clone()
+            .complete_node_registration(request)
+            .await?;
         let reg = response.into_inner();
         Ok(NodeRegistration::new(
             ConnectivityGroupId::new(reg.connectivity_group_id),
@@ -137,10 +138,7 @@ impl HubClient {
     }
 
     /// List all nodes in the connectivity group.
-    pub async fn list_nodes(
-        &self,
-        registration: &NodeRegistration,
-    ) -> Result<Vec<Node>, HubError> {
+    pub async fn list_nodes(&self, registration: &NodeRegistration) -> Result<Vec<Node>, HubError> {
         let mut request = tonic::Request::new(proto::ListNodesRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
@@ -292,10 +290,7 @@ impl HubClient {
     /// Deregister this node from its connectivity group.
     ///
     /// This soft-deletes the node from the hub's database.
-    pub async fn deregister_node(
-        &self,
-        registration: &NodeRegistration,
-    ) -> Result<(), HubError> {
+    pub async fn deregister_node(&self, registration: &NodeRegistration) -> Result<(), HubError> {
         let mut request = tonic::Request::new(proto::DeregisterNodeRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 

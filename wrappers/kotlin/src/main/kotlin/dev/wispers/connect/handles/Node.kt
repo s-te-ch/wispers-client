@@ -119,14 +119,20 @@ class Node internal constructor(
             if (status != WispersStatus.SUCCESS.code) {
                 CallbackBridge.resumeException(ctx, WispersException.fromStatus(status))
             }
-        } as? Pointer ?: return GroupInfo(GroupState.Alone, emptyList())
+        } as? Pointer ?: return GroupInfo(
+            id = "",
+            name = null,
+            createdAtMillis = 0,
+            state = GroupState.Alone,
+            nodes = emptyList(),
+        )
 
         try {
+            val id = lib.wispers_group_info_id(giPtr)?.getString(0, "UTF-8") ?: ""
+            val name = lib.wispers_group_info_name(giPtr)?.getString(0, "UTF-8")
+            val createdAtMillis = lib.wispers_group_info_created_at_millis(giPtr)
             val state = GroupState.fromCode(lib.wispers_group_info_state(giPtr))
             val count = lib.wispers_group_info_nodes_count(giPtr).toInt()
-            if (count == 0) {
-                return GroupInfo(state, emptyList())
-            }
 
             val nodeInfos = (0 until count).map { i ->
                 val n = lib.wispers_group_info_node_at(giPtr, i.toLong())
@@ -142,7 +148,13 @@ class Node internal constructor(
                 )
             }
 
-            return GroupInfo(state, nodeInfos)
+            return GroupInfo(
+                id = id,
+                name = name,
+                createdAtMillis = createdAtMillis,
+                state = state,
+                nodes = nodeInfos,
+            )
         } finally {
             lib.wispers_group_info_free(giPtr)
         }

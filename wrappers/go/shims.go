@@ -40,6 +40,13 @@ func goWispersGroupInfoCallback(ctx unsafe.Pointer, status C.int, detail *C.char
 	// `gi` is an opaque WispersGroupInfo handle. Walk it via accessors and
 	// copy all data into Go values before freeing.
 	cGI := (*C.WispersGroupInfo)(gi)
+	id := C.GoString(C.wispers_group_info_id(cGI))
+	var name *string
+	if cName := C.wispers_group_info_name(cGI); cName != nil {
+		n := C.GoString(cName)
+		name = &n
+	}
+	createdAtMillis := int64(C.wispers_group_info_created_at_millis(cGI))
 	state := GroupState(C.wispers_group_info_state(cGI))
 	count := int(C.wispers_group_info_nodes_count(cGI))
 	nodes := make([]NodeInfo, count)
@@ -56,7 +63,13 @@ func goWispersGroupInfoCallback(ctx unsafe.Pointer, status C.int, detail *C.char
 		}
 	}
 	C.wispers_group_info_free(cGI)
-	resolvePendingCall(ctx, groupInfoResult{state: state, nodes: nodes})
+	resolvePendingCall(ctx, groupInfoResult{
+		id:              id,
+		name:            name,
+		createdAtMillis: createdAtMillis,
+		state:           state,
+		nodes:           nodes,
+	})
 }
 
 //export goWispersStartServingCallback

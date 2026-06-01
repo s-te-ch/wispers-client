@@ -54,6 +54,9 @@ public struct NodeInfo: Sendable, Identifiable {
 }
 
 public struct GroupInfo: Sendable {
+    public let id: String
+    public let name: String?
+    public let createdAtMillis: Int64
     public let state: GroupState
     public let nodes: [NodeInfo]
 }
