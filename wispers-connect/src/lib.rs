@@ -77,7 +77,7 @@
 //!
 //! # C FFI
 //!
-//! The [`ffi`] module exposes an opaque-handle + callback API for use from
+//! The library exposes an opaque-handle + callback C API for use from
 //! C, Go, Kotlin/JNA, Swift, and Python. See `include/wispers_connect.h`.
 //!
 //! # Further reading
@@ -89,21 +89,21 @@
 // Error types are intentionally unboxed for ergonomic matching by callers.
 #![allow(clippy::result_large_err)]
 
-pub mod crypto;
+mod crypto;
 mod encryption;
-pub mod errors;
-pub mod ffi;
-pub mod hub;
+mod errors;
+mod ffi;
+pub mod hub;  // Partially public for testing.
 mod ice;
 mod juice;
-pub mod node;
-pub mod p2p;
+mod node;
+mod p2p;
 mod p2p_signing;
 mod quic;
-pub mod roster;
-pub mod serving;
-pub mod storage;
-pub mod types;
+mod roster;
+mod serving;
+mod storage;
+mod types;
 
 pub use crypto::SigningKeyPair;
 pub use errors::{NodeStateError, WispersStatus};
@@ -123,3 +123,14 @@ pub use types::{
     ConnectivityGroupId, GroupInfo, GroupState, NodeInfo, NodeRegistration, PersistedNodeState,
     ROOT_KEY_LEN,
 };
+
+// Internal items reachable only because integration tests under `tests/` need
+// them to build rosters and credentials for the FakeHub. Not part of the
+// stable API surface.
+#[doc(hidden)]
+pub use roster::{
+    build_activation_payload, compute_signing_hash, create_bootstrap_roster,
+    set_endorser_signature, set_new_node_signature,
+};
+#[doc(hidden)]
+pub use types::AuthToken;
