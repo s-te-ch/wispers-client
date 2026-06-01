@@ -113,7 +113,7 @@ pub use p2p::{ConnectionState, P2pError, QuicConnection, QuicStream, UdpConnecti
 pub use roster::RosterVerificationError;
 pub use serving::{
     EndorsingStatus, IncomingConnections, P2pConfig, ServingError, ServingHandle, ServingSession,
-    StatusInfo,
+    ServingStatus,
 };
 pub use storage::{
     FileNodeStateStore, InMemoryNodeStateStore, NodeStateStore, StorageError,

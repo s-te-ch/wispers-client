@@ -57,7 +57,7 @@ pub struct P2pConfig {
 /// Information about the current serving session status.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct StatusInfo {
+pub struct ServingStatus {
     pub connected: bool,
     pub connectivity_group_id: ConnectivityGroupId,
     pub node_number: i32,
@@ -335,7 +335,7 @@ impl EndorsingState {
 /// Commands sent from ServingHandle to ServingSession.
 enum Command {
     Status {
-        reply: oneshot::Sender<StatusInfo>,
+        reply: oneshot::Sender<ServingStatus>,
     },
     GenerateActivationCode {
         reply: oneshot::Sender<Result<PairingCode, ServingError>>,
@@ -351,7 +351,7 @@ pub struct ServingHandle {
 
 impl ServingHandle {
     /// Get the current status of the serving session.
-    pub async fn status(&self) -> Result<StatusInfo, ServingError> {
+    pub async fn status(&self) -> Result<ServingStatus, ServingError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.cmd_tx
             .send(Command::Status { reply: reply_tx })
@@ -502,8 +502,8 @@ impl ServingSession {
         Ok(())
     }
 
-    fn build_status(&self) -> StatusInfo {
-        StatusInfo {
+    fn build_status(&self) -> ServingStatus {
+        ServingStatus {
             connected: true,
             connectivity_group_id: self.connectivity_group_id.clone(),
             node_number: self.node_number,
