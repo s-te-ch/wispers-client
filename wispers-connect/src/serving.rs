@@ -414,7 +414,7 @@ impl ServingSession {
     /// Returns a handle for sending commands, the session runner, and receivers
     /// for incoming P2P connections. P2P connections are only accepted once the
     /// node is activated (appears in the roster), but the channels are always created.
-    pub fn new(
+    pub(crate) fn new(
         conn: ServingConnection,
         signing_key: SigningKeyPair,
         connectivity_group_id: ConnectivityGroupId,
