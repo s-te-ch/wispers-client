@@ -105,7 +105,6 @@ mod serving;
 mod storage;
 mod types;
 
-pub use crypto::SigningKeyPair;
 pub use errors::NodeStateError;
 pub use hub::HubError;
 pub use node::{Node, NodeState, NodeStorage};
@@ -127,6 +126,8 @@ pub use types::{
 // Internal items reachable only because integration tests under `tests/` need
 // them to build rosters and credentials for the FakeHub. Not part of the
 // stable API surface.
+#[doc(hidden)]
+pub use crypto::SigningKeyPair;
 #[doc(hidden)]
 pub use roster::{
     build_activation_payload, compute_signing_hash, create_bootstrap_roster,
