@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::crypto::{PairingCode, TtlProfile, PairingSecret, SigningKeyPair, generate_nonce};
+use crate::crypto::{PairingCode, PairingSecret, SigningKeyPair, TtlProfile, generate_nonce};
 use crate::hub::ServingConnection;
 use crate::hub::proto;
 use crate::ice::IceAnswerer;
@@ -863,7 +863,11 @@ mod tests {
     fn generate_multiple_codes() {
         let (mut state, _) = make_state();
         let codes: Vec<PairingCode> = (0..5)
-            .map(|_| state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap())
+            .map(|_| {
+                state
+                    .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+                    .unwrap()
+            })
             .collect();
 
         // All codes are unique
@@ -881,9 +885,13 @@ mod tests {
     fn cap_enforced() {
         let (mut state, _) = make_state();
         for _ in 0..MAX_ACTIVE_ACTIVATIONS {
-            state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
+            state
+                .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+                .unwrap();
         }
-        let err = state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap_err();
+        let err = state
+            .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+            .unwrap_err();
         assert!(
             matches!(err, ServingError::TooManyActivationSessions),
             "expected TooManyActivationSessions, got: {}",
@@ -894,9 +902,15 @@ mod tests {
     #[test]
     fn pair_with_one_code_others_remain_valid() {
         let (mut state, key) = make_state();
-        let code_a = state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
-        let code_b = state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
-        let code_c = state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
+        let code_a = state
+            .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+            .unwrap();
+        let code_b = state
+            .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+            .unwrap();
+        let code_c = state
+            .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+            .unwrap();
 
         // Pair with code_b
         let msg = build_pair_message(&code_b, 10);
@@ -922,7 +936,9 @@ mod tests {
     #[test]
     fn same_code_cannot_be_used_twice() {
         let (mut state, key) = make_state();
-        let code = state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
+        let code = state
+            .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+            .unwrap();
 
         let msg1 = build_pair_message(&code, 10);
         assert!(state.pair_nodes(&msg1, NODE_NUMBER, &key).is_ok());
@@ -936,7 +952,9 @@ mod tests {
     #[test]
     fn wrong_secret_rejected() {
         let (mut state, key) = make_state();
-        let _code = state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
+        let _code = state
+            .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+            .unwrap();
 
         // Build a message with a bogus secret
         let bogus_code = PairingCode::new(1, PairingSecret::generate(TtlProfile::Interactive));
@@ -959,12 +977,16 @@ mod tests {
         let (mut state, key) = make_state();
         assert!(state.status().is_none());
 
-        state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
+        state
+            .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+            .unwrap();
         let s = state.status().unwrap();
         assert_eq!(s.codes_outstanding, 1);
         assert!(s.nodes_awaiting_cosign.is_empty());
 
-        let code = state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
+        let code = state
+            .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+            .unwrap();
         let msg = build_pair_message(&code, 10);
         state.pair_nodes(&msg, NODE_NUMBER, &key).unwrap();
 
@@ -979,7 +1001,11 @@ mod tests {
 
         // Generate 50 codes
         let codes: Vec<PairingCode> = (0..50)
-            .map(|_| state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap())
+            .map(|_| {
+                state
+                    .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+                    .unwrap()
+            })
             .collect();
 
         // Pair 50 of them → 50 pending
@@ -993,12 +1019,16 @@ mod tests {
 
         // Generate 50 more codes → total = 100
         for _ in 0..50 {
-            state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
+            state
+                .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+                .unwrap();
         }
 
         // 101st should fail
         assert!(matches!(
-            state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap_err(),
+            state
+                .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+                .unwrap_err(),
             ServingError::TooManyActivationSessions
         ));
     }
@@ -1006,7 +1036,9 @@ mod tests {
     #[test]
     fn pair_reply_has_correct_fields() {
         let (mut state, key) = make_state();
-        let code = state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
+        let code = state
+            .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+            .unwrap();
         let msg = build_pair_message(&code, 10);
         let reply = state.pair_nodes(&msg, NODE_NUMBER, &key).unwrap();
 
@@ -1025,7 +1057,9 @@ mod tests {
     #[test]
     fn expired_code_rejected() {
         let (mut state, key) = make_state_with_ttl(Duration::ZERO);
-        let code = state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
+        let code = state
+            .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+            .unwrap();
 
         // Code expired immediately — pairing should fail
         let msg = build_pair_message(&code, 10);
@@ -1039,16 +1073,22 @@ mod tests {
         let (mut state, _) = make_state_with_ttl(Duration::ZERO);
         // Generate MAX codes — they all expire immediately
         for _ in 0..MAX_ACTIVE_ACTIVATIONS {
-            state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
+            state
+                .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+                .unwrap();
         }
         // Should succeed because generate_activation_code prunes expired first
-        state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
+        state
+            .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+            .unwrap();
     }
 
     #[test]
     fn expired_codes_not_counted_in_status() {
         let (mut state, _) = make_state_with_ttl(Duration::ZERO);
-        state.generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive).unwrap();
+        state
+            .generate_activation_code_with_ttl(NODE_NUMBER, TtlProfile::Interactive)
+            .unwrap();
         // Code expired immediately — status should show nothing
         assert!(state.status().is_none());
     }
