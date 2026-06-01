@@ -248,6 +248,7 @@ impl PairingCode {
 
 /// Error parsing a pairing code.
 #[derive(Debug, thiserror::Error)]
+#[allow(clippy::enum_variant_names)] // "Invalid" prefix is meaningful here
 pub enum PairingCodeError {
     #[error("invalid format: expected 'node_number-secret'")]
     InvalidFormat,
