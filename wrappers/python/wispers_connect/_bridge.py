@@ -108,15 +108,20 @@ def GROUP_INFO_CB(ctx: int | None, status: int, detail: bytes | None,  # noqa: N
     # copy all data into Python objects before freeing.
     from ._library import get_lib
     lib = get_lib()
+    id_bytes = lib.wispers_group_info_id(gi_ptr)
+    name_bytes = lib.wispers_group_info_name(gi_ptr)
+    group_id = id_bytes.decode("utf-8") if id_bytes else ""
+    group_name = name_bytes.decode("utf-8") if name_bytes else None
+    created_at_millis = lib.wispers_group_info_created_at_millis(gi_ptr)
     state = GroupState(lib.wispers_group_info_state(gi_ptr))
     nodes: list[NodeInfo] = []
     for i in range(lib.wispers_group_info_nodes_count(gi_ptr)):
         n = lib.wispers_group_info_node_at(gi_ptr, i)
-        name_bytes = lib.wispers_node_name(n)
+        node_name_bytes = lib.wispers_node_name(n)
         metadata_bytes = lib.wispers_node_metadata(n)
         nodes.append(NodeInfo(
             node_number=lib.wispers_node_number(n),
-            name=name_bytes.decode("utf-8") if name_bytes else "",
+            name=node_name_bytes.decode("utf-8") if node_name_bytes else "",
             metadata=metadata_bytes.decode("utf-8") if metadata_bytes else "",
             is_self=lib.wispers_node_is_self(n),
             activation_status=ActivationStatus(lib.wispers_node_activation_status(n)),
@@ -124,7 +129,7 @@ def GROUP_INFO_CB(ctx: int | None, status: int, detail: bytes | None,  # noqa: N
             is_online=lib.wispers_node_is_online(n),
         ))
     lib.wispers_group_info_free(gi_ptr)
-    _resolve(ctx, (state, tuple(nodes)))
+    _resolve(ctx, (group_id, group_name, created_at_millis, state, tuple(nodes)))
 
 
 @WispersStartServingCallbackType  # type: ignore[untyped-decorator]

@@ -597,7 +597,7 @@ impl ServingSession {
         log::debug!("  StartConnectionRequest from node {}", caller_node_number,);
 
         // Fetch and verify fresh roster from hub
-        let mut client = match HubClient::connect(&self.p2p_config.hub_addr).await {
+        let client = match HubClient::connect(&self.p2p_config.hub_addr).await {
             Ok(c) => c,
             Err(e) => {
                 log::error!("  Failed to connect to hub: {}", e);

@@ -6,24 +6,24 @@ import "fmt"
 type Status int
 
 const (
-	StatusSuccess            Status = 0
-	StatusNullPointer        Status = 1
-	StatusInvalidUTF8        Status = 2
-	StatusStoreError         Status = 3
-	StatusAlreadyRegistered  Status = 4
-	StatusNotRegistered      Status = 5
-	StatusNotFound           Status = 6
-	StatusBufferTooSmall     Status = 7
-	StatusMissingCallback    Status = 8
+	StatusSuccess               Status = 0
+	StatusNullPointer           Status = 1
+	StatusInvalidUTF8           Status = 2
+	StatusStoreError            Status = 3
+	StatusAlreadyRegistered     Status = 4
+	StatusNotRegistered         Status = 5
+	StatusNotFound              Status = 6
+	StatusBufferTooSmall        Status = 7
+	StatusMissingCallback       Status = 8
 	StatusInvalidActivationCode Status = 9
-	StatusActivationFailed   Status = 10
-	StatusHubError           Status = 11
-	StatusConnectionFailed   Status = 12
-	StatusTimeout            Status = 13
-	StatusInvalidState       Status = 14
-	StatusUnauthenticated    Status = 15
-	StatusPeerRejected       Status = 16
-	StatusPeerUnavailable    Status = 17
+	StatusActivationFailed      Status = 10
+	StatusHubError              Status = 11
+	StatusConnectionFailed      Status = 12
+	StatusTimeout               Status = 13
+	StatusInvalidState          Status = 14
+	StatusUnauthenticated       Status = 15
+	StatusPeerRejected          Status = 16
+	StatusPeerUnavailable       Status = 17
 )
 
 // Error wraps a non-success WispersStatus code with optional detail.
@@ -80,23 +80,23 @@ func (e *Error) Error() string {
 
 // Sentinel errors for use with errors.Is().
 var (
-	ErrNullPointer        = &Error{Status: StatusNullPointer}
-	ErrInvalidUTF8        = &Error{Status: StatusInvalidUTF8}
-	ErrStoreError         = &Error{Status: StatusStoreError}
-	ErrAlreadyRegistered  = &Error{Status: StatusAlreadyRegistered}
-	ErrNotRegistered      = &Error{Status: StatusNotRegistered}
-	ErrNotFound           = &Error{Status: StatusNotFound}
-	ErrBufferTooSmall     = &Error{Status: StatusBufferTooSmall}
-	ErrMissingCallback    = &Error{Status: StatusMissingCallback}
+	ErrNullPointer           = &Error{Status: StatusNullPointer}
+	ErrInvalidUTF8           = &Error{Status: StatusInvalidUTF8}
+	ErrStoreError            = &Error{Status: StatusStoreError}
+	ErrAlreadyRegistered     = &Error{Status: StatusAlreadyRegistered}
+	ErrNotRegistered         = &Error{Status: StatusNotRegistered}
+	ErrNotFound              = &Error{Status: StatusNotFound}
+	ErrBufferTooSmall        = &Error{Status: StatusBufferTooSmall}
+	ErrMissingCallback       = &Error{Status: StatusMissingCallback}
 	ErrInvalidActivationCode = &Error{Status: StatusInvalidActivationCode}
-	ErrActivationFailed   = &Error{Status: StatusActivationFailed}
-	ErrHubError           = &Error{Status: StatusHubError}
-	ErrConnectionFailed   = &Error{Status: StatusConnectionFailed}
-	ErrTimeout            = &Error{Status: StatusTimeout}
-	ErrInvalidState       = &Error{Status: StatusInvalidState}
-	ErrUnauthenticated    = &Error{Status: StatusUnauthenticated}
-	ErrPeerRejected       = &Error{Status: StatusPeerRejected}
-	ErrPeerUnavailable    = &Error{Status: StatusPeerUnavailable}
+	ErrActivationFailed      = &Error{Status: StatusActivationFailed}
+	ErrHubError              = &Error{Status: StatusHubError}
+	ErrConnectionFailed      = &Error{Status: StatusConnectionFailed}
+	ErrTimeout               = &Error{Status: StatusTimeout}
+	ErrInvalidState          = &Error{Status: StatusInvalidState}
+	ErrUnauthenticated       = &Error{Status: StatusUnauthenticated}
+	ErrPeerRejected          = &Error{Status: StatusPeerRejected}
+	ErrPeerUnavailable       = &Error{Status: StatusPeerUnavailable}
 )
 
 // Is implements errors.Is support so callers can match sentinel values.

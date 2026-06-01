@@ -72,6 +72,15 @@ def declare_functions(lib: ctypes.CDLL) -> None:  # noqa: C901
     lib.wispers_group_info_free.restype = None
 
     # -- Group info / node accessors --
+    lib.wispers_group_info_id.argtypes = [c_void_p]
+    lib.wispers_group_info_id.restype = c_char_p
+
+    lib.wispers_group_info_name.argtypes = [c_void_p]
+    lib.wispers_group_info_name.restype = c_char_p
+
+    lib.wispers_group_info_created_at_millis.argtypes = [c_void_p]
+    lib.wispers_group_info_created_at_millis.restype = c_int64
+
     lib.wispers_group_info_state.argtypes = [c_void_p]
     lib.wispers_group_info_state.restype = c_int
 

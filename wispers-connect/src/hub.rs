@@ -126,13 +126,17 @@ impl HubClient {
     ///
     /// Returns the node's credentials for future authenticated requests.
     pub(crate) async fn complete_registration(
-        &mut self,
+        &self,
         token: &str,
     ) -> Result<NodeRegistration, HubError> {
         let request = tonic::Request::new(proto::NodeRegistrationRequest {
             token: token.into(),
         });
-        let response = self.client.complete_node_registration(request).await?;
+        let response = self
+            .client
+            .clone()
+            .complete_node_registration(request)
+            .await?;
         let reg = response.into_inner();
         Ok(NodeRegistration::new(
             ConnectivityGroupId::new(reg.connectivity_group_id),
@@ -144,13 +148,13 @@ impl HubClient {
 
     /// List all nodes in the connectivity group.
     pub(crate) async fn list_nodes(
-        &mut self,
+        &self,
         registration: &NodeRegistration,
     ) -> Result<Vec<Node>, HubError> {
         let mut request = tonic::Request::new(proto::ListNodesRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        let response = self.client.list_nodes(request).await?;
+        let response = self.client.clone().list_nodes(request).await?;
         let nodes = response
             .into_inner()
             .nodes
@@ -169,7 +173,7 @@ impl HubClient {
     /// attacker unlimited time to crack the secret and inject a forged
     /// response.
     pub(crate) async fn pair_nodes(
-        &mut self,
+        &self,
         registration: &NodeRegistration,
         message: proto::PairNodesMessage,
     ) -> Result<proto::PairNodesMessage, HubError> {
@@ -177,7 +181,7 @@ impl HubClient {
         request.set_timeout(crate::serving::SECRET_TTL);
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        let response = self.client.pair_nodes(request).await?;
+        let response = self.client.clone().pair_nodes(request).await?;
         Ok(response.into_inner())
     }
 
@@ -188,13 +192,25 @@ impl HubClient {
     /// the node is not yet in the roster and cannot verify it.
     /// For activated nodes, use `get_and_verify_roster` instead.
     pub(crate) async fn get_unverified_roster(
-        &mut self,
+        &self,
         registration: &NodeRegistration,
     ) -> Result<proto::roster::Roster, HubError> {
         let mut request = tonic::Request::new(proto::RosterRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        let response = self.client.get_roster(request).await?;
+        let response = self.client.clone().get_roster(request).await?;
+        Ok(response.into_inner())
+    }
+
+    /// Fetch the connectivity group's metadata (id, name, created_at).
+    pub(crate) async fn get_group_metadata(
+        &self,
+        registration: &NodeRegistration,
+    ) -> Result<proto::GroupMetadata, HubError> {
+        let mut request = tonic::Request::new(proto::GroupMetadataRequest {});
+        add_auth_metadata(request.metadata_mut(), registration)?;
+
+        let response = self.client.clone().get_group_metadata(request).await?;
         Ok(response.into_inner())
     }
 
@@ -203,7 +219,7 @@ impl HubClient {
     /// This is the standard method for activated nodes. It fetches the roster
     /// and verifies the signature chain before returning.
     pub(crate) async fn get_and_verify_roster(
-        &mut self,
+        &self,
         registration: &NodeRegistration,
         verifier_public_key_spki: &[u8],
     ) -> Result<proto::roster::Roster, HubError> {
@@ -215,7 +231,7 @@ impl HubClient {
     /// Submit a roster update. The hub will obtain the endorser's cosignature
     /// and return the fully signed roster.
     pub(crate) async fn update_roster(
-        &mut self,
+        &self,
         registration: &NodeRegistration,
         new_roster: proto::roster::Roster,
     ) -> Result<proto::roster::Roster, HubError> {
@@ -224,7 +240,7 @@ impl HubClient {
         });
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        let response = self.client.update_roster(request).await?;
+        let response = self.client.clone().update_roster(request).await?;
         response.into_inner().cosigned_roster.ok_or_else(|| {
             HubError::Rpc(tonic::Status::internal(
                 "missing cosigned_roster in response",
@@ -236,7 +252,7 @@ impl HubClient {
     ///
     /// Returns a handle for sending responses and a stream of incoming requests.
     pub(crate) async fn start_serving(
-        &mut self,
+        &self,
         registration: &NodeRegistration,
     ) -> Result<ServingConnection, HubError> {
         let (response_tx, response_rx) = mpsc::channel::<proto::ServingResponse>(32);
@@ -245,7 +261,7 @@ impl HubClient {
         let mut request = tonic::Request::new(response_stream);
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        let response = self.client.start_serving(request).await?;
+        let response = self.client.clone().start_serving(request).await?;
         let request_stream = response.into_inner();
 
         Ok(ServingConnection {
@@ -258,13 +274,13 @@ impl HubClient {
     ///
     /// Returns the server addresses and optional TURN credentials.
     pub(crate) async fn get_stun_turn_config(
-        &mut self,
+        &self,
         registration: &NodeRegistration,
     ) -> Result<proto::StunTurnConfig, HubError> {
         let mut request = tonic::Request::new(proto::StunTurnConfigRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        let response = self.client.get_stun_turn_config(request).await?;
+        let response = self.client.clone().get_stun_turn_config(request).await?;
         Ok(response.into_inner())
     }
 
@@ -272,14 +288,14 @@ impl HubClient {
     ///
     /// The hub forwards this request to the target node and returns their response.
     pub(crate) async fn start_connection(
-        &mut self,
+        &self,
         registration: &NodeRegistration,
         request: proto::StartConnectionRequest,
     ) -> Result<proto::StartConnectionResponse, HubError> {
         let mut grpc_request = tonic::Request::new(request);
         add_auth_metadata(grpc_request.metadata_mut(), registration)?;
 
-        let response = self.client.start_connection(grpc_request).await?;
+        let response = self.client.clone().start_connection(grpc_request).await?;
         Ok(response.into_inner())
     }
 
@@ -287,13 +303,13 @@ impl HubClient {
     ///
     /// This soft-deletes the node from the hub's database.
     pub(crate) async fn deregister_node(
-        &mut self,
+        &self,
         registration: &NodeRegistration,
     ) -> Result<(), HubError> {
         let mut request = tonic::Request::new(proto::DeregisterNodeRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        self.client.deregister_node(request).await?;
+        self.client.clone().deregister_node(request).await?;
         Ok(())
     }
 }

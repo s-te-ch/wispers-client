@@ -105,7 +105,13 @@ func (n *Node) GroupInfo() (*GroupInfo, error) {
 	case error:
 		return nil, v
 	case groupInfoResult:
-		return &GroupInfo{State: v.state, Nodes: v.nodes}, nil
+		return &GroupInfo{
+			ID:              v.id,
+			Name:            v.name,
+			CreatedAtMillis: v.createdAtMillis,
+			State:           v.state,
+			Nodes:           v.nodes,
+		}, nil
 	default:
 		panic("wispers: unexpected bridge result type")
 	}

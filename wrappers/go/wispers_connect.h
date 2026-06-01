@@ -117,7 +117,10 @@ typedef void (*WispersGroupInfoCallback)(
     WispersGroupInfo *group_info
 );
 
-// Group info accessors. The returned node pointer is borrowed from `info`.
+// Group info accessors. The returned node pointer and strings are borrowed from `info`.
+const char        *wispers_group_info_id(const WispersGroupInfo *info);
+const char        *wispers_group_info_name(const WispersGroupInfo *info);   // NULL if unset
+int64_t            wispers_group_info_created_at_millis(const WispersGroupInfo *info);
 WispersGroupState  wispers_group_info_state(const WispersGroupInfo *info);
 size_t             wispers_group_info_nodes_count(const WispersGroupInfo *info);
 const WispersNode *wispers_group_info_node_at(const WispersGroupInfo *info, size_t index);

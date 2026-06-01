@@ -226,6 +226,9 @@ pub struct WispersNode {
 
 /// Group activation snapshot exposed to C as an opaque handle.
 pub struct WispersGroupInfo {
+    id: CString,
+    name: Option<CString>,
+    created_at_millis: i64,
     state: WispersGroupState,
     nodes: Vec<WispersNode>,
 }
@@ -234,6 +237,12 @@ impl WispersGroupInfo {
     /// Materialize a `GroupInfo` snapshot into the FFI-owned representation.
     pub(crate) fn from_group_info(info: GroupInfo) -> Result<Self, WispersStatus> {
         let state = WispersGroupState::from(&info.state);
+        let id = CString::new(info.id.to_string()).map_err(|_| WispersStatus::InvalidUtf8)?;
+        let name = info
+            .name
+            .map(CString::new)
+            .transpose()
+            .map_err(|_| WispersStatus::InvalidUtf8)?;
         let nodes = info
             .nodes
             .into_iter()
@@ -259,7 +268,13 @@ impl WispersGroupInfo {
             })
             .collect::<Result<Vec<_>, WispersStatus>>()?;
 
-        Ok(Self { state, nodes })
+        Ok(Self {
+            id,
+            name,
+            created_at_millis: info.created_at_millis,
+            state,
+            nodes,
+        })
     }
 }
 
@@ -285,6 +300,34 @@ pub extern "C" fn wispers_group_info_free(group_info: *mut WispersGroupInfo) {
 // -----------------------------------------------------------------------------
 // Accessors — group info
 // -----------------------------------------------------------------------------
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_group_info_id(info: *const WispersGroupInfo) -> *const c_char {
+    if info.is_null() {
+        return ptr::null();
+    }
+    unsafe { (*info).id.as_ptr() }
+}
+
+/// Returns NULL if the group has no name set.
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_group_info_name(info: *const WispersGroupInfo) -> *const c_char {
+    if info.is_null() {
+        return ptr::null();
+    }
+    match unsafe { (*info).name.as_ref() } {
+        Some(name) => name.as_ptr(),
+        None => ptr::null(),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_group_info_created_at_millis(info: *const WispersGroupInfo) -> i64 {
+    if info.is_null() {
+        return 0;
+    }
+    unsafe { (*info).created_at_millis }
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_group_info_state(info: *const WispersGroupInfo) -> WispersGroupState {

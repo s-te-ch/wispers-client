@@ -60,6 +60,9 @@ class NodeInfo:
 
 @dataclass(frozen=True)
 class GroupInfo:
+    id: str
+    name: str | None
+    created_at_millis: int
     state: GroupState
     nodes: tuple[NodeInfo, ...]
 
