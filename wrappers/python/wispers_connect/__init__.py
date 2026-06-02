@@ -12,6 +12,7 @@ from .types import (
     NodeState,
     RegistrationInfo,
     Status,
+    TtlProfile,
 )
 
 from .exceptions import (
@@ -51,6 +52,7 @@ __all__ = [
     "NodeState",
     "RegistrationInfo",
     "Status",
+    "TtlProfile",
     # Exceptions
     "ActivationFailedError",
     "AlreadyRegisteredError",

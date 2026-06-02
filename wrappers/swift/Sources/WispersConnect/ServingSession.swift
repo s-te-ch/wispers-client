@@ -69,12 +69,18 @@ public final class ServingSession: @unchecked Sendable {
     }
 
     /// Generate an activation code for endorsing a new node.
-    public func generateActivationCode() async throws -> String {
+    ///
+    /// - Parameter ttlProfile: the code's lifetime profile. Defaults to
+    ///   ``TtlProfile/interactive`` (short-lived, for live entry); use
+    ///   ``TtlProfile/asynchronous`` for a long-lived code sent out-of-band.
+    public func generateActivationCode(
+        ttlProfile: TtlProfile = .interactive
+    ) async throws -> String {
         let ptr = try requireServing()
         return try await withCheckedThrowingContinuation { continuation in
             let ctx = CallbackBridge.register(continuation)
-            let status = wispers_serving_handle_generate_activation_code_async(
-                ptr, ctx, wispersActivationCodeCallback)
+            let status = wispers_serving_handle_generate_activation_code_with_ttl_async(
+                ptr, ttlProfile.cValue, ctx, wispersActivationCodeCallback)
             if status.rawValue != WISPERS_STATUS_SUCCESS.rawValue {
                 CallbackBridge.cancel(ctx)
                 continuation.resume(throwing: WispersError.fromStatus(status))

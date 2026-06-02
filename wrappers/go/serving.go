@@ -17,13 +17,22 @@ type ServingSession struct {
 	Incoming *IncomingConnections
 }
 
-// GenerateActivationCode generates an activation code for endorsing a new node.
+// GenerateActivationCode generates an activation code for endorsing a new node
+// using the default (interactive) profile.
 func (s *ServingSession) GenerateActivationCode() (string, error) {
+	return s.GenerateActivationCodeWithTTL(TtlProfileInteractive)
+}
+
+// GenerateActivationCodeWithTTL generates an activation code with an explicit
+// TTL profile (e.g. TtlProfileAsynchronous for a long-lived code suitable for
+// out-of-band delivery).
+func (s *ServingSession) GenerateActivationCodeWithTTL(profile TtlProfile) (string, error) {
 	ptr := s.serving.requireOpen()
 	call := newPendingCall()
 	defer call.cancel()
-	status := C.callGenerateActivationCodeAsync(
+	status := C.callGenerateActivationCodeWithTtlAsync(
 		(*C.WispersServingHandle)(ptr),
+		C.WispersTtlProfile(profile),
 		call.ctx(),
 	)
 	if err := errorFromStatus(int(status)); err != nil {

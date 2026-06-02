@@ -59,6 +59,19 @@ const (
 	GroupStateAllActivated   GroupState = 4
 )
 
+// TtlProfile selects the lifetime (and entropy) of a generated activation
+// code. Mirrors the C enum WispersTtlProfile.
+type TtlProfile int32
+
+const (
+	// TtlProfileInteractive is a short-lived code for live, at-the-keyboard
+	// entry (the default).
+	TtlProfileInteractive TtlProfile = 0
+	// TtlProfileAsynchronous is a long-lived code for out-of-band delivery
+	// (e.g. email).
+	TtlProfileAsynchronous TtlProfile = 1
+)
+
 func (s GroupState) String() string {
 	switch s {
 	case GroupStateAlone:
