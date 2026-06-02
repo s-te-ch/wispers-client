@@ -67,6 +67,23 @@ object NativeCallbacks {
     }
 
     /**
+     * Callback that receives a serving status handle.
+     *
+     * C signature:
+     * ```
+     * void (*WispersServingStatusCallback)(
+     *     void *ctx,
+     *     WispersStatus status,
+     *     const char *error_detail,
+     *     WispersServingStatus *serving_status
+     * );
+     * ```
+     */
+    fun interface WispersServingStatusCallback : Callback {
+        fun invoke(ctx: Pointer?, status: Int, errorDetail: String?, servingStatus: Pointer?)
+    }
+
+    /**
      * Callback for start_serving that receives session components.
      *
      * C signature:

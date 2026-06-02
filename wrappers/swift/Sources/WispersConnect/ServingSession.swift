@@ -88,6 +88,22 @@ public final class ServingSession: @unchecked Sendable {
         }
     }
 
+    /// Fetch a snapshot of the session's hub connection and endorsing state.
+    ///
+    /// Works whether or not the session currently holds a live hub connection,
+    /// so it can be polled to observe reconnects.
+    public func status() async throws -> ServingStatus {
+        let ptr = try requireServing()
+        return try await withCheckedThrowingContinuation { continuation in
+            let ctx = CallbackBridge.register(continuation)
+            let status = wispers_serving_handle_status_async(ptr, ctx, wispersServingStatusCallback)
+            if status.rawValue != WISPERS_STATUS_SUCCESS.rawValue {
+                CallbackBridge.cancel(ctx)
+                continuation.resume(throwing: WispersError.fromStatus(status))
+            }
+        }
+    }
+
     /// Request the serving session to shut down.
     public func shutdown() async throws {
         let ptr = try requireServing()

@@ -49,6 +49,31 @@ func (s *ServingSession) GenerateActivationCodeWithTTL(profile TtlProfile) (stri
 	}
 }
 
+// Status returns a snapshot of the serving session's hub connection and
+// endorsing state. The serving handle is not consumed; it works whether or not
+// the session currently holds a live hub connection.
+func (s *ServingSession) Status() (*ServingStatus, error) {
+	ptr := s.serving.requireOpen()
+	call := newPendingCall()
+	defer call.cancel()
+	status := C.callServingStatusAsync(
+		(*C.WispersServingHandle)(ptr),
+		call.ctx(),
+	)
+	if err := errorFromStatus(int(status)); err != nil {
+		return nil, err
+	}
+	runtime.KeepAlive(s)
+	switch v := call.wait().(type) {
+	case error:
+		return nil, v
+	case ServingStatus:
+		return &v, nil
+	default:
+		panic("wispers: unexpected bridge result type")
+	}
+}
+
 // Run runs the serving session event loop. Blocks until the session ends.
 // The session handle is consumed by this call.
 func (s *ServingSession) Run() error {

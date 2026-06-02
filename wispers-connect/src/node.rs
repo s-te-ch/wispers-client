@@ -1058,11 +1058,9 @@ async fn start_serving_impl(
     ),
     crate::hub::HubError,
 > {
-    use crate::hub::HubClient;
-    use crate::serving::ServingSession;
+    use crate::serving::{ServingSession, open_serving_connection};
 
-    let client = HubClient::connect(hub_addr).await?;
-    let conn = client.start_serving(registration).await?;
+    let conn = open_serving_connection(hub_addr, registration).await?;
 
     let (handle, session, incoming) = ServingSession::new(
         conn,

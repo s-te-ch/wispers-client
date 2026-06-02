@@ -40,6 +40,9 @@ WispersStartServingCallbackType = CFUNCTYPE(
     None, c_void_p, c_int, c_char_p, c_void_p, c_void_p, c_void_p
 )
 
+# void (*WispersServingStatusCallback)(void *ctx, WispersStatus, const char *, WispersServingStatus *)
+WispersServingStatusCallbackType = CFUNCTYPE(None, c_void_p, c_int, c_char_p, c_void_p)
+
 # void (*WispersActivationCodeCallback)(void *ctx, WispersStatus, const char *, char *activation_code)
 # activation_code is c_void_p (not c_char_p) so we can wispers_string_free() it.
 WispersActivationCodeCallbackType = CFUNCTYPE(None, c_void_p, c_int, c_char_p, c_void_p)
@@ -236,6 +239,33 @@ def declare_functions(lib: ctypes.CDLL) -> None:  # noqa: C901
 
     lib.wispers_serving_handle_shutdown_async.argtypes = [c_void_p, c_void_p, WispersCallbackType]
     lib.wispers_serving_handle_shutdown_async.restype = c_int
+
+    lib.wispers_serving_handle_status_async.argtypes = [
+        c_void_p, c_void_p, WispersServingStatusCallbackType,
+    ]
+    lib.wispers_serving_handle_status_async.restype = c_int
+
+    # -- Serving status accessors --
+    lib.wispers_serving_status_free.argtypes = [c_void_p]
+    lib.wispers_serving_status_free.restype = None
+
+    lib.wispers_serving_status_connected.argtypes = [c_void_p]
+    lib.wispers_serving_status_connected.restype = c_bool
+
+    lib.wispers_serving_status_node_number.argtypes = [c_void_p]
+    lib.wispers_serving_status_node_number.restype = c_int32
+
+    lib.wispers_serving_status_connectivity_group_id.argtypes = [c_void_p]
+    lib.wispers_serving_status_connectivity_group_id.restype = c_char_p
+
+    lib.wispers_serving_status_codes_outstanding.argtypes = [c_void_p]
+    lib.wispers_serving_status_codes_outstanding.restype = c_size_t
+
+    lib.wispers_serving_status_nodes_awaiting_cosign_count.argtypes = [c_void_p]
+    lib.wispers_serving_status_nodes_awaiting_cosign_count.restype = c_size_t
+
+    lib.wispers_serving_status_node_awaiting_cosign_at.argtypes = [c_void_p, c_size_t]
+    lib.wispers_serving_status_node_awaiting_cosign_at.restype = c_int32
 
     lib.wispers_serving_handle_free.argtypes = [c_void_p]
     lib.wispers_serving_handle_free.restype = None

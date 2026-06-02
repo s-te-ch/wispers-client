@@ -4,6 +4,8 @@
 
 mod common;
 
+use std::time::Duration;
+
 use wispers_connect::hub::proto::roster::Roster;
 use wispers_connect::{
     AuthToken, ConnectivityGroupId, Node, NodeRegistration, SigningKeyPair,
@@ -12,6 +14,17 @@ use wispers_connect::{
 };
 
 use common::FakeHub;
+
+/// Poll `cond` until it returns true, panicking if it doesn't within 5s.
+async fn wait_for(mut cond: impl FnMut() -> bool) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !cond() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("condition not met within timeout");
+}
 
 /// Create a properly signed test roster with two nodes.
 fn create_test_roster(
@@ -105,6 +118,80 @@ async fn test_p2p_connection_via_hub() {
     // Clean up
     drop(handle);
     session_handle.abort();
+}
+
+/// A hub blip (stream drop) must not stop a long-running serving session: it
+/// should reconnect on its own, keep its outstanding activation codes, and
+/// report itself disconnected-then-connected rather than silently healthy.
+#[tokio::test]
+async fn test_serving_reconnects_after_hub_blip() {
+    let root_key_1 = [31u8; 32];
+    let root_key_2 = [32u8; 32];
+    let signing_key_1 = SigningKeyPair::derive_from_root_key(&root_key_1);
+    let signing_key_2 = SigningKeyPair::derive_from_root_key(&root_key_2);
+    let roster = create_test_roster(&signing_key_1, 1, &signing_key_2, 2);
+
+    let hub = FakeHub::with_roster(roster.clone());
+    let ctrl = hub.controller();
+    let (hub_addr, _hub_handle) = hub.start().await.expect("hub starts");
+    let hub_url = format!("http://{}", hub_addr);
+
+    let registration_2 = NodeRegistration::new(
+        ConnectivityGroupId::from("test-reconnect"),
+        2,
+        AuthToken::new("token2"),
+        String::new(),
+    );
+    let node2 = Node::new_activated_for_test(root_key_2, roster, registration_2, hub_url);
+
+    let (handle, session, _incoming) = node2.start_serving().await.expect("node2 serves");
+    let session_task = tokio::spawn(async move {
+        let _ = session.run().await;
+    });
+
+    // First connection established.
+    wait_for(|| ctrl.serve_count() >= 1).await;
+    assert!(
+        handle.status().await.expect("status").connected,
+        "should be connected after start"
+    );
+
+    // Generate an activation code that must survive the reconnect.
+    handle.generate_activation_code().await.expect("gen code");
+    assert_eq!(
+        handle
+            .status()
+            .await
+            .expect("status")
+            .endorsing
+            .map(|e| e.codes_outstanding),
+        Some(1),
+    );
+
+    // Simulate a hub blip: the current stream ends under the session.
+    ctrl.force_disconnect().await;
+
+    // The session reconnects on its own (a second start_serving stream).
+    wait_for(|| ctrl.serve_count() >= 2).await;
+
+    // `connected` is set just after the new stream opens; poll briefly for it.
+    let mut status = handle.status().await.expect("status");
+    for _ in 0..50 {
+        if status.connected {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        status = handle.status().await.expect("status");
+    }
+    assert!(status.connected, "should be reconnected");
+    assert_eq!(
+        status.endorsing.map(|e| e.codes_outstanding),
+        Some(1),
+        "outstanding activation code should survive reconnect",
+    );
+
+    handle.shutdown().await.expect("shutdown");
+    let _ = session_task.await;
 }
 
 /// Test multiple messages in both directions.

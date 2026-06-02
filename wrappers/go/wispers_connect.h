@@ -62,6 +62,7 @@ typedef struct WispersQuicConnectionHandle WispersQuicConnectionHandle;
 typedef struct WispersQuicStreamHandle WispersQuicStreamHandle;
 typedef struct WispersGroupInfo WispersGroupInfo;
 typedef struct WispersNode WispersNode;
+typedef struct WispersServingStatus WispersServingStatus;
 
 // Host-provided storage callbacks. All functions must be non-null when used.
 // The ctx pointer carries all context the host needs, including any namespace
@@ -503,6 +504,39 @@ WispersStatus wispers_serving_handle_shutdown_async(
     void *ctx,
     WispersCallback callback
 );
+
+// Callback that receives a serving status handle (owned, free with
+// wispers_serving_status_free).
+typedef void (*WispersServingStatusCallback)(
+    void *ctx,
+    WispersStatus status,
+    const char *error_detail,
+    WispersServingStatus *serving_status
+);
+
+// Fetch the current status of a serving session (connection state + endorsing).
+// The serving handle is NOT consumed.
+// On success, callback receives a WispersServingStatus that must be freed with
+// wispers_serving_status_free().
+// Returns SUCCESS immediately if the async operation was started.
+WispersStatus wispers_serving_handle_status_async(
+    WispersServingHandle *handle,
+    void *ctx,
+    WispersServingStatusCallback callback
+);
+
+// Free a serving status handle.
+void wispers_serving_status_free(WispersServingStatus *status);
+
+// Serving status accessors.
+bool        wispers_serving_status_connected(const WispersServingStatus *status);
+int32_t     wispers_serving_status_node_number(const WispersServingStatus *status);
+const char *wispers_serving_status_connectivity_group_id(const WispersServingStatus *status);
+size_t      wispers_serving_status_codes_outstanding(const WispersServingStatus *status);
+size_t      wispers_serving_status_nodes_awaiting_cosign_count(const WispersServingStatus *status);
+// Node number at `index`, or -1 if out of bounds. Iterate
+// 0..wispers_serving_status_nodes_awaiting_cosign_count.
+int32_t     wispers_serving_status_node_awaiting_cosign_at(const WispersServingStatus *status, size_t index);
 
 // Free a serving handle.
 void wispers_serving_handle_free(WispersServingHandle *handle);

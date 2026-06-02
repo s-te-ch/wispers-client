@@ -310,6 +310,29 @@ interface NativeLibrary : Library {
     ): Int
 
     /**
+     * Fetch the current status of a serving session (connection + endorsing).
+     */
+    fun wispers_serving_handle_status_async(
+        handle: Pointer?,
+        ctx: Pointer?,
+        callback: NativeCallbacks.WispersServingStatusCallback?
+    ): Int
+
+    /**
+     * Free a serving status handle.
+     */
+    fun wispers_serving_status_free(status: Pointer?)
+
+    // ---- Serving status accessors -----------------------------------------
+
+    fun wispers_serving_status_connected(status: Pointer?): Byte
+    fun wispers_serving_status_node_number(status: Pointer?): Int
+    fun wispers_serving_status_connectivity_group_id(status: Pointer?): Pointer?
+    fun wispers_serving_status_codes_outstanding(status: Pointer?): Long
+    fun wispers_serving_status_nodes_awaiting_cosign_count(status: Pointer?): Long
+    fun wispers_serving_status_node_awaiting_cosign_at(status: Pointer?, index: Long): Int
+
+    /**
      * Free a serving handle.
      */
     fun wispers_serving_handle_free(handle: Pointer?)

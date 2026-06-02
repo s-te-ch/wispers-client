@@ -126,6 +126,17 @@ object Callbacks {
     }
 
     /**
+     * Serving status callback - resumes with Pointer to serving status on success.
+     */
+    val servingStatus = NativeCallbacks.WispersServingStatusCallback { ctx, status, errorDetail, servingStatus ->
+        if (status == WispersStatus.SUCCESS.code) {
+            CallbackBridge.resumeSuccess(ctx, servingStatus)
+        } else {
+            CallbackBridge.resumeException(ctx, WispersException.fromStatus(status, errorDetail))
+        }
+    }
+
+    /**
      * Start serving callback - resumes with triple of handles on success.
      */
     val startServing = NativeCallbacks.WispersStartServingCallback { ctx, status, errorDetail, servingHandle, session, incoming ->

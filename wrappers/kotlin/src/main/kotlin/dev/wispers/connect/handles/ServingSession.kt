@@ -4,6 +4,7 @@ import com.sun.jna.Pointer
 import dev.wispers.connect.internal.CallbackBridge
 import dev.wispers.connect.internal.Callbacks
 import dev.wispers.connect.internal.NativeLibrary
+import dev.wispers.connect.types.ServingStatus
 import dev.wispers.connect.types.TtlProfile
 import dev.wispers.connect.types.WispersException
 import dev.wispers.connect.types.WispersStatus
@@ -119,6 +120,48 @@ class ServingSession internal constructor(
             codePtr.getString(0, "UTF-8")
         } finally {
             lib.wispers_string_free(codePtr)
+        }
+    }
+
+    /**
+     * Fetch a snapshot of the session's hub connection and endorsing state.
+     *
+     * Works whether or not the session currently holds a live hub connection,
+     * so it can be polled to observe reconnects.
+     *
+     * @return The current serving status
+     * @throws WispersException.HubError on error
+     */
+    suspend fun status(): ServingStatus {
+        val result = suspendCancellableCoroutine<Any?> { cont ->
+            requireOpen()
+            val ctx = CallbackBridge.register(cont)
+
+            val status = lib.wispers_serving_handle_status_async(
+                servingHandle, ctx, Callbacks.servingStatus
+            )
+            if (status != WispersStatus.SUCCESS.code) {
+                CallbackBridge.resumeException(ctx, WispersException.fromStatus(status))
+            }
+        }
+
+        val statusPtr = result as? Pointer
+            ?: throw WispersException.NullPointer("Serving status is null")
+        return try {
+            val count = lib.wispers_serving_status_nodes_awaiting_cosign_count(statusPtr).toInt()
+            val awaiting = (0 until count).map { i ->
+                lib.wispers_serving_status_node_awaiting_cosign_at(statusPtr, i.toLong())
+            }
+            ServingStatus(
+                connected = lib.wispers_serving_status_connected(statusPtr) != 0.toByte(),
+                nodeNumber = lib.wispers_serving_status_node_number(statusPtr),
+                connectivityGroupId =
+                    lib.wispers_serving_status_connectivity_group_id(statusPtr)?.getString(0, "UTF-8") ?: "",
+                codesOutstanding = lib.wispers_serving_status_codes_outstanding(statusPtr).toInt(),
+                nodesAwaitingCosign = awaiting,
+            )
+        } finally {
+            lib.wispers_serving_status_free(statusPtr)
         }
     }
 

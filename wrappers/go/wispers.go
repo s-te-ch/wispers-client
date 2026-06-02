@@ -109,6 +109,20 @@ type GroupInfo struct {
 	Nodes           []NodeInfo
 }
 
+// ServingStatus is a snapshot of a serving session's hub connection and
+// endorsing state.
+type ServingStatus struct {
+	// Connected reports whether the session currently holds a live hub stream.
+	// False while it is reconnecting after a hub disconnect.
+	Connected           bool
+	NodeNumber          int32
+	ConnectivityGroupID string
+	// CodesOutstanding is the number of activation codes awaiting use.
+	CodesOutstanding int
+	// NodesAwaitingCosign lists node numbers that have paired and await cosign.
+	NodesAwaitingCosign []int32
+}
+
 // RegistrationInfo contains registration information for a node.
 type RegistrationInfo struct {
 	ConnectivityGroupID string

@@ -11,7 +11,7 @@ use crate::node::{Node, NodeState};
 use crate::p2p::{P2pError, QuicConnection, UdpConnection};
 use crate::serving::{IncomingConnections, ServingHandle, ServingSession};
 use std::ffi::{CString, c_void};
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_int};
 use std::ptr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -539,6 +539,180 @@ pub extern "C" fn wispers_serving_handle_shutdown_async(
     WispersStatus::Success
 }
 
+//-- Serving status -------------------------------------------------------------
+
+/// Snapshot of a serving session's status, exposed to C as an opaque handle.
+/// Produced by `wispers_serving_handle_status_async`; read its fields via the
+/// `wispers_serving_status_*` accessors, then free with
+/// `wispers_serving_status_free`.
+pub struct WispersServingStatus {
+    connected: bool,
+    node_number: c_int,
+    connectivity_group_id: CString,
+    codes_outstanding: usize,
+    nodes_awaiting_cosign: Vec<c_int>,
+}
+
+impl WispersServingStatus {
+    /// Materialize a `ServingStatus` snapshot into the FFI-owned representation.
+    fn from_serving_status(status: crate::serving::ServingStatus) -> Result<Self, WispersStatus> {
+        let connectivity_group_id = CString::new(status.connectivity_group_id.to_string())
+            .map_err(|_| WispersStatus::InvalidUtf8)?;
+        let (codes_outstanding, nodes_awaiting_cosign) = match status.endorsing {
+            Some(e) => (e.codes_outstanding, e.nodes_awaiting_cosign),
+            None => (0, Vec::new()),
+        };
+        Ok(Self {
+            connected: status.connected,
+            node_number: status.node_number,
+            connectivity_group_id,
+            codes_outstanding,
+            nodes_awaiting_cosign,
+        })
+    }
+}
+
+/// Callback that receives a serving status handle.
+pub type WispersServingStatusCallback = Option<
+    unsafe extern "C" fn(
+        ctx: *mut c_void,
+        status: WispersStatus,
+        error_detail: *const c_char,
+        serving_status: *mut WispersServingStatus,
+    ),
+>;
+
+/// Fetch the current status of a serving session.
+///
+/// The serving handle is NOT consumed. On success, the callback receives a
+/// `WispersServingStatus` that must be freed with `wispers_serving_status_free`.
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_serving_handle_status_async(
+    handle: *mut WispersServingHandle,
+    ctx: *mut c_void,
+    callback: WispersServingStatusCallback,
+) -> WispersStatus {
+    if handle.is_null() {
+        return WispersStatus::NullPointer;
+    }
+
+    let callback = match callback {
+        Some(cb) => cb,
+        None => return WispersStatus::MissingCallback,
+    };
+
+    let wrapper = unsafe { &*handle };
+    let serving_handle = wrapper.0.clone();
+    let ctx = CallbackContext(ctx);
+
+    runtime::spawn(async move {
+        match serving_handle.status().await {
+            Ok(status) => match WispersServingStatus::from_serving_status(status) {
+                Ok(ffi_status) => {
+                    let ptr = Box::into_raw(Box::new(ffi_status));
+                    unsafe {
+                        callback(ctx.ptr(), WispersStatus::Success, ptr::null(), ptr);
+                    }
+                }
+                Err(status) => {
+                    let detail =
+                        CString::new(format!("failed to build serving status: {status:?}"))
+                            .unwrap_or_default();
+                    unsafe {
+                        callback(ctx.ptr(), status, detail.as_ptr(), ptr::null_mut());
+                    }
+                }
+            },
+            Err(e) => {
+                let detail = CString::new(e.to_string()).unwrap_or_default();
+                let status = if e.is_unauthenticated() {
+                    WispersStatus::Unauthenticated
+                } else {
+                    WispersStatus::InvalidState
+                };
+                unsafe {
+                    callback(ctx.ptr(), status, detail.as_ptr(), ptr::null_mut());
+                }
+            }
+        }
+    });
+
+    WispersStatus::Success
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_serving_status_free(status: *mut WispersServingStatus) {
+    if status.is_null() {
+        return;
+    }
+    // SAFETY: allocated via Box::into_raw in wispers_serving_handle_status_async.
+    drop(unsafe { Box::from_raw(status) });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_serving_status_connected(status: *const WispersServingStatus) -> bool {
+    if status.is_null() {
+        return false;
+    }
+    unsafe { (*status).connected }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_serving_status_node_number(status: *const WispersServingStatus) -> c_int {
+    if status.is_null() {
+        return 0;
+    }
+    unsafe { (*status).node_number }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_serving_status_connectivity_group_id(
+    status: *const WispersServingStatus,
+) -> *const c_char {
+    if status.is_null() {
+        return ptr::null();
+    }
+    unsafe { (*status).connectivity_group_id.as_ptr() }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_serving_status_codes_outstanding(
+    status: *const WispersServingStatus,
+) -> usize {
+    if status.is_null() {
+        return 0;
+    }
+    unsafe { (*status).codes_outstanding }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_serving_status_nodes_awaiting_cosign_count(
+    status: *const WispersServingStatus,
+) -> usize {
+    if status.is_null() {
+        return 0;
+    }
+    unsafe { (*status).nodes_awaiting_cosign.len() }
+}
+
+/// Returns the node number awaiting cosign at `index`, or -1 if out of bounds.
+/// Iterate `0..wispers_serving_status_nodes_awaiting_cosign_count`.
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_serving_status_node_awaiting_cosign_at(
+    status: *const WispersServingStatus,
+    index: usize,
+) -> c_int {
+    if status.is_null() {
+        return -1;
+    }
+    let status = unsafe { &*status };
+    status
+        .nodes_awaiting_cosign
+        .get(index)
+        .copied()
+        .unwrap_or(-1)
+}
+
 // Implementation helpers
 
 /// Parameters extracted from a Node for starting a serving session.
@@ -577,11 +751,9 @@ fn extract_serving_params(node: &Node) -> Result<ServingParams, WispersStatus> {
 async fn start_serving_impl(
     params: ServingParams,
 ) -> Result<(ServingHandle, ServingSession, IncomingConnections), crate::hub::HubError> {
-    use crate::hub::HubClient;
-    use crate::serving::ServingSession;
+    use crate::serving::{ServingSession, open_serving_connection};
 
-    let client = HubClient::connect(&params.hub_addr).await?;
-    let conn = client.start_serving(&params.registration).await?;
+    let conn = open_serving_connection(&params.hub_addr, &params.registration).await?;
 
     let (handle, session, incoming) = ServingSession::new(
         conn,
