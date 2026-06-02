@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio_stream::{Stream, StreamExt};
@@ -56,25 +57,63 @@ impl HubState {
     }
 }
 
+/// Handle for observing and steering a running FakeHub from a test. Grab it
+/// (via `FakeHub::controller`) before calling `start`, which consumes the hub.
+#[derive(Clone)]
+pub struct FakeHubController {
+    /// Number of `start_serving` streams opened so far (i.e. connects +
+    /// reconnects).
+    serve_count: Arc<AtomicUsize>,
+    /// Sender that, when fired, ends the currently-open serving stream.
+    disconnect: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+}
+
+impl FakeHubController {
+    /// How many serving streams have been opened (1 after the first connect).
+    pub fn serve_count(&self) -> usize {
+        self.serve_count.load(Ordering::SeqCst)
+    }
+
+    /// Force the currently-open serving stream to end, simulating a hub blip.
+    pub async fn force_disconnect(&self) {
+        if let Some(tx) = self.disconnect.lock().await.take() {
+            let _ = tx.send(());
+        }
+    }
+}
+
 /// Fake hub implementation.
 pub struct FakeHub {
     state: Arc<Mutex<HubState>>,
     roster: roster::Roster,
+    serve_count: Arc<AtomicUsize>,
+    disconnect: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
 impl FakeHub {
     pub fn new() -> Self {
-        Self {
-            state: Arc::new(Mutex::new(HubState::new())),
-            roster: roster::Roster::default(),
-        }
+        Self::with_state(roster::Roster::default())
     }
 
     /// Create a fake hub with a specific roster.
     pub fn with_roster(roster: roster::Roster) -> Self {
+        Self::with_state(roster)
+    }
+
+    fn with_state(roster: roster::Roster) -> Self {
         Self {
             state: Arc::new(Mutex::new(HubState::new())),
             roster,
+            serve_count: Arc::new(AtomicUsize::new(0)),
+            disconnect: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Obtain a controller for observing/steering this hub. Call before `start`.
+    pub fn controller(&self) -> FakeHubController {
+        FakeHubController {
+            serve_count: self.serve_count.clone(),
+            disconnect: self.disconnect.clone(),
         }
     }
 
@@ -164,6 +203,15 @@ impl Hub for FakeHub {
             .and_then(|s| s.parse().ok())
             .ok_or_else(|| Status::invalid_argument("missing x-node-number"))?;
 
+        // Count this stream open (first connect + every reconnect).
+        self.serve_count.fetch_add(1, Ordering::SeqCst);
+
+        // Install a fresh disconnect trigger for this stream. Replacing the
+        // slot drops any previous sender, but by the time a node reconnects its
+        // previous stream has already ended.
+        let (disc_tx, disc_rx) = oneshot::channel::<()>();
+        *self.disconnect.lock().await = Some(disc_tx);
+
         // Channel for sending requests to this serving node
         let (request_tx, request_rx) = mpsc::channel::<ServingRequest>(16);
 
@@ -203,7 +251,8 @@ impl Hub for FakeHub {
             state.serving_nodes.remove(&node_number);
         });
 
-        // Send welcome message, then forward requests
+        // Send welcome message, then forward requests until the node closes the
+        // stream or a test forces a disconnect.
         let welcome_stream = async_stream::stream! {
             yield Ok(ServingRequest {
                 dest_node_number: node_number,
@@ -213,8 +262,15 @@ impl Hub for FakeHub {
             });
 
             let mut rx = request_rx;
-            while let Some(req) = rx.recv().await {
-                yield Ok(req);
+            let mut disc_rx = disc_rx;
+            loop {
+                tokio::select! {
+                    maybe_req = rx.recv() => match maybe_req {
+                        Some(req) => yield Ok(req),
+                        None => break,
+                    },
+                    _ = &mut disc_rx => break,
+                }
             }
         };
 

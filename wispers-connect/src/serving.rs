@@ -9,6 +9,7 @@
 //! connection.
 
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -17,8 +18,9 @@ use crate::hub::ServingConnection;
 use crate::hub::proto;
 use crate::ice::IceAnswerer;
 use crate::p2p::{P2pError, QuicConnection, UdpConnection};
-use crate::types::ConnectivityGroupId;
+use crate::types::{ConnectivityGroupId, NodeRegistration};
 use prost::Message;
+use rand::Rng;
 use tokio::sync::{mpsc, oneshot};
 
 /// Error type for serving operations.
@@ -78,7 +80,7 @@ pub struct EndorsingStatus {
 /// Maximum number of concurrent activation sessions (codes + pending cosigns).
 const MAX_ACTIVE_ACTIVATIONS: usize = 100;
 
-//-- Endorsing state (testable without hub connection) -------------------------------------------------
+//-- Endorsing state (testable without hub connection) -------------------------
 
 /// A pairing secret with an expiry time.
 struct TimedSecret {
@@ -324,7 +326,64 @@ impl EndorsingState {
     }
 }
 
-//-- ServingHandle + ServingSession ---------------------------------------------------------------------
+//-- Reconnect control flow ----------------------------------------------------
+
+/// Why the serve phase stopped driving the current connection.
+enum ServeOutcome {
+    /// A command asked the session to shut down.
+    Shutdown,
+    /// The hub stream dropped; reconnect and resume.
+    Disconnected,
+    /// An unrecoverable error (e.g. the hub rejected our credentials).
+    Fatal(ServingError),
+}
+
+/// Result of a reconnect phase. The connection is boxed because it is far
+/// larger than the other variants.
+enum ConnectOutcome {
+    Connected(Box<ServingConnection>),
+    Shutdown,
+    Fatal(ServingError),
+}
+
+/// Exponential backoff with jitter for hub reconnection. Calibrated for a
+/// long-running daemon: quick first retries, capped so a prolonged hub outage
+/// settles into steady polling rather than busy-looping.
+struct ReconnectBackoff {
+    current: Duration,
+}
+
+impl ReconnectBackoff {
+    const BASE: Duration = Duration::from_secs(1);
+    const CAP: Duration = Duration::from_secs(30);
+
+    fn new() -> Self {
+        Self {
+            current: Self::BASE,
+        }
+    }
+
+    /// Return the next delay (with ±20% jitter) and advance the schedule.
+    /// Jitter spreads reconnect attempts so a fleet of clients doesn't stampede
+    /// the hub in lockstep after a shared outage.
+    fn next_delay(&mut self) -> Duration {
+        let base = self.current;
+        self.current = (self.current * 2).min(Self::CAP);
+        let jitter = rand::thread_rng().gen_range(0.8..1.2);
+        base.mul_f64(jitter)
+    }
+}
+
+/// Open a fresh bidirectional serving stream to the hub.
+pub(crate) async fn open_serving_connection(
+    hub_addr: &str,
+    registration: &NodeRegistration,
+) -> Result<ServingConnection, crate::hub::HubError> {
+    let client = crate::hub::HubClient::connect(hub_addr).await?;
+    client.start_serving(registration).await
+}
+
+//-- ServingHandle + ServingSession --------------------------------------------
 
 /// Commands sent from ServingHandle to ServingSession.
 enum Command {
@@ -395,6 +454,7 @@ pub struct ServingSession {
     node_number: i32,
     connectivity_group_id: ConnectivityGroupId,
     endorsing: EndorsingState,
+    connected: bool,
     // P2P state (always present, but connections only accepted once activated)
     p2p_config: P2pConfig,
     incoming_udp_tx: mpsc::Sender<Result<UdpConnection, P2pError>>,
@@ -444,6 +504,7 @@ impl ServingSession {
             node_number,
             connectivity_group_id,
             endorsing: EndorsingState::new(),
+            connected: false,
             p2p_config,
             incoming_udp_tx: udp_tx,
             incoming_quic_tx: quic_tx,
@@ -455,53 +516,38 @@ impl ServingSession {
 
     /// Run the serving event loop.
     ///
-    /// This processes hub requests and local commands until shutdown or error.
+    /// Processes hub requests and local commands. On transient hub disconnects,
+    /// retries internally with exponential backoff. Returns with `Ok` if
+    /// explicitly shut down, with an `Err` if there was an unrecoverable error,
+    /// typically an auth error.
     pub async fn run(mut self) -> Result<(), ServingError> {
         log::info!("ServingSession running for node {}", self.node_number);
 
-        loop {
-            tokio::select! {
-                // Handle commands from ServingHandle
-                cmd = self.cmd_rx.recv() => {
-                    match cmd {
-                        Some(Command::Status { reply }) => {
-                            let status = self.build_status();
-                            let _ = reply.send(status);
-                        }
-                        Some(Command::GenerateActivationCode { ttl_profile, reply }) => {
-                            let result = self
-                                .endorsing
-                                .generate_activation_code_with_ttl(self.node_number, ttl_profile);
-                            let _ = reply.send(result);
-                        }
-                        Some(Command::Shutdown) => {
-                            log::info!("Shutdown requested");
-                            break;
-                        }
-                        None => {
-                            // All handles dropped
-                            log::info!("All handles dropped, shutting down");
-                            break;
-                        }
-                    }
-                }
+        // Snapshot the connection params so the reconnect path can borrow them
+        // without conflicting with the `&mut self` command handling.
+        let hub_addr = self.p2p_config.hub_addr.clone();
+        let registration = self.p2p_config.registration.clone();
 
-                // Handle hub requests
-                result = self.conn.request_stream.message() => {
-                    match result {
-                        Ok(Some(request)) => {
-                            self.handle_hub_request(request).await;
-                        }
-                        Ok(None) => {
-                            log::info!("Hub stream ended");
-                            break;
-                        }
-                        Err(e) => {
-                            log::error!("Hub stream error: {}", e);
-                            return Err(ServingError::Hub(crate::hub::HubError::Rpc(e)));
-                        }
-                    }
+        // The first connection was already established by `start_serving`.
+        self.connected = true;
+
+        loop {
+            match self.serve().await {
+                ServeOutcome::Shutdown => break,
+                ServeOutcome::Fatal(e) => return Err(e),
+                ServeOutcome::Disconnected => {
+                    self.connected = false;
                 }
+            }
+
+            match self.reconnect(&hub_addr, &registration).await {
+                ConnectOutcome::Connected(conn) => {
+                    self.conn = *conn;
+                    self.connected = true;
+                    log::info!("Reconnected to hub for node {}", self.node_number);
+                }
+                ConnectOutcome::Shutdown => break,
+                ConnectOutcome::Fatal(e) => return Err(e),
             }
         }
 
@@ -509,9 +555,137 @@ impl ServingSession {
         Ok(())
     }
 
+    /// Serve on the current connection until the hub stream drops, a command
+    /// requests shutdown, or a fatal error occurs.
+    async fn serve(&mut self) -> ServeOutcome {
+        loop {
+            tokio::select! {
+                // Local commands from ServingHandle.
+                cmd = self.cmd_rx.recv() => {
+                    if self.dispatch_command(cmd).is_break() {
+                        return ServeOutcome::Shutdown;
+                    }
+                }
+
+                // Incoming hub requests.
+                result = self.conn.request_stream.message() => {
+                    match result {
+                        Ok(Some(request)) => self.handle_hub_request(request).await,
+                        Ok(None) => {
+                            log::info!("Hub stream ended; will reconnect");
+                            return ServeOutcome::Disconnected;
+                        }
+                        Err(e) => {
+                            let err = crate::hub::HubError::Rpc(e);
+                            if err.is_unauthenticated() {
+                                log::warn!("Hub rejected authentication; stopping serving");
+                                return ServeOutcome::Fatal(ServingError::Hub(err));
+                            }
+                            log::warn!("Hub stream error: {err}; will reconnect");
+                            return ServeOutcome::Disconnected;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Re-establish the hub stream, retrying with exponential backoff.
+    async fn reconnect(
+        &mut self,
+        hub_addr: &str,
+        registration: &NodeRegistration,
+    ) -> ConnectOutcome {
+        let mut backoff = ReconnectBackoff::new();
+        loop {
+            let attempt = open_serving_connection(hub_addr, registration);
+            tokio::pin!(attempt);
+
+            // Race the connection attempt against incoming commands.
+            let result = loop {
+                tokio::select! {
+                    res = &mut attempt => break res,
+                    cmd = self.cmd_rx.recv() => {
+                        if self.dispatch_command(cmd).is_break() {
+                            return ConnectOutcome::Shutdown;
+                        }
+                    }
+                }
+            };
+
+            match result {
+                Ok(conn) => {
+                    return ConnectOutcome::Connected(Box::new(conn));
+                }
+                Err(e) if e.is_unauthenticated() => {
+                    log::warn!("Hub rejected authentication during reconnect; stopping serving");
+                    return ConnectOutcome::Fatal(ServingError::Hub(e));
+                }
+                Err(e) => {
+                    let wait = backoff.next_delay();
+                    log::warn!(
+                        "Hub reconnect failed: {e}; retrying in {:.1}s",
+                        wait.as_secs_f64()
+                    );
+                    if self.wait_while_servicing_commands(wait).await.is_break() {
+                        return ConnectOutcome::Shutdown;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Sleep for `dur` while still answering local commands. Returns
+    /// `ControlFlow::Break` if a shutdown was requested while waiting.
+    async fn wait_while_servicing_commands(&mut self, dur: Duration) -> ControlFlow<()> {
+        let sleep = tokio::time::sleep(dur);
+        tokio::pin!(sleep);
+        loop {
+            tokio::select! {
+                _ = &mut sleep => return ControlFlow::Continue(()),
+                cmd = self.cmd_rx.recv() => {
+                    if self.dispatch_command(cmd).is_break() {
+                        return ControlFlow::Break(());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Handle one command from a `ServingHandle`. These touch only local state,
+    /// so they work whether or not we currently have a hub connection. Returns
+    /// `ControlFlow::Break` when the session should shut down (explicit shutdown
+    /// or all handles dropped), `Continue` otherwise.
+    fn dispatch_command(&mut self, cmd: Option<Command>) -> ControlFlow<()> {
+        match cmd {
+            Some(Command::Status { reply }) => {
+                let _ = reply.send(self.build_status());
+                ControlFlow::Continue(())
+            }
+            Some(Command::GenerateActivationCode { ttl_profile, reply }) => {
+                let result = self
+                    .endorsing
+                    .generate_activation_code_with_ttl(self.node_number, ttl_profile);
+                let _ = reply.send(result);
+                ControlFlow::Continue(())
+            }
+            Some(Command::Shutdown) => {
+                log::info!("Shutdown requested");
+                ControlFlow::Break(())
+            }
+            None => {
+                // Every `ServingHandle` was dropped, so the command channel is
+                // closed: no further commands (not even shutdown) can ever
+                // arrive. The session is now uncontrollable, so it self-terminates.
+                log::info!("All serving handles dropped, shutting down");
+                ControlFlow::Break(())
+            }
+        }
+    }
+
     fn build_status(&self) -> ServingStatus {
         ServingStatus {
-            connected: true,
+            connected: self.connected,
             connectivity_group_id: self.connectivity_group_id.clone(),
             node_number: self.node_number,
             endorsing: self.endorsing.status(),
@@ -819,7 +993,7 @@ impl ServingSession {
     }
 }
 
-//-- Tests ---------------------------------------------------------------------------------------------
+//-- Tests ---------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
