@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.9.0 — API cleanup and more flexible registration and activation
+
+This release bundles a number of changes that may break library clients. The aim
+is to do this once and then have a stable interface for a while.
+
+### Support for long-lifetime registration and activation secrets.
+
+Previously, the tokens and codes used in node registration and activation were
+tuned for interactive use with easy-to-type codes and short lifetimes. Wispers
+now lets you generate longer-lived tokens and codes that are more suitable for
+asynchronous forms of communication, such as email.
+
+### API cleanup
+
+During development, a surprising number of symbols ended up being exported from
+the library. Moreover, structs returned from the library were written without
+forward compatibility in mind. We did an audit of all exported symbols and
+corrected any mistakes we found. _While minor in scope, this is a breaking
+change_ and you may have to update your callsites.
+
+### Miscellaneous
+
+- **Fix: Added missing info to API.**
+  - The node's `group_info()` method now returns ID and name of the node's
+	connectivity group.
+  - Serving status was only available in Rust, now has been added to all
+	available langauge wrappers.
+  - The `connected` field in serving status now correctly reflects the status.
+- **Fix: Hub connection re-connects**. The connection to the hub can get
+  temporarily interrupted, which previously caused a serving node to give up,
+  although the comments promised retrying behaviour. This caused long-running
+  processes to look alive but not be discoverable. With this release, a node
+  will now retry connecting to the hub after recoverable errors.
+
 ## v0.8.2 — Connectivity robustness
 
 Stability release focused on the `wconnect` proxy paths. The QUIC connection
@@ -36,7 +70,7 @@ the HTTP proxy is significantly improved.
   lets the user control what gets logged.
 - **`build.rs`** now produces an actionable error when the libjuice submodule
   directory exists but is empty — the common state after `git pull` updates the
-  submodule pointer without a follow-up `submodule update`. 
+  submodule pointer without a follow-up `submodule update`.
 
 ## v0.8.1 — Platform coverage & easier installs
 
