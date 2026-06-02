@@ -72,6 +72,31 @@ func goWispersGroupInfoCallback(ctx unsafe.Pointer, status C.int, detail *C.char
 	})
 }
 
+//export goWispersServingStatusCallback
+func goWispersServingStatusCallback(ctx unsafe.Pointer, status C.int, detail *C.char, ss unsafe.Pointer) {
+	if int(status) != 0 {
+		resolvePendingCall(ctx, &Error{Status: Status(status), Detail: C.GoString(detail)})
+		return
+	}
+	// `ss` is an opaque WispersServingStatus handle. Copy all data into Go
+	// values via accessors before freeing.
+	cSS := (*C.WispersServingStatus)(ss)
+	count := int(C.wispers_serving_status_nodes_awaiting_cosign_count(cSS))
+	awaiting := make([]int32, count)
+	for i := 0; i < count; i++ {
+		awaiting[i] = int32(C.wispers_serving_status_node_awaiting_cosign_at(cSS, C.size_t(i)))
+	}
+	result := ServingStatus{
+		Connected:           bool(C.wispers_serving_status_connected(cSS)),
+		NodeNumber:          int32(C.wispers_serving_status_node_number(cSS)),
+		ConnectivityGroupID: C.GoString(C.wispers_serving_status_connectivity_group_id(cSS)),
+		CodesOutstanding:    int(C.wispers_serving_status_codes_outstanding(cSS)),
+		NodesAwaitingCosign: awaiting,
+	}
+	C.wispers_serving_status_free(cSS)
+	resolvePendingCall(ctx, result)
+}
+
 //export goWispersStartServingCallback
 func goWispersStartServingCallback(ctx unsafe.Pointer, status C.int, detail *C.char, serving unsafe.Pointer, session unsafe.Pointer, incoming unsafe.Pointer) {
 	if int(status) != 0 {

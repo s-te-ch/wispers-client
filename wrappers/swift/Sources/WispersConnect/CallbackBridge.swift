@@ -145,6 +145,41 @@ let wispersGroupInfoCallback: @convention(c) (
     ))
 }
 
+/// Serving status callback — copies data via accessors, frees the C handle,
+/// resumes with ServingStatus.
+let wispersServingStatusCallback: @convention(c) (
+    UnsafeMutableRawPointer?,
+    WispersStatus,
+    UnsafePointer<CChar>?,
+    OpaquePointer?   // WispersServingStatus *
+) -> Void = { ctx, status, detail, statusPtr in
+    if let err = errorOrNil(status, detail) {
+        CallbackBridge.resume(ctx, throwing: err)
+        return
+    }
+    guard let statusPtr = statusPtr else {
+        CallbackBridge.resume(ctx, throwing: WispersError.nullPointer("ServingStatus is null"))
+        return
+    }
+    let connected = wispers_serving_status_connected(statusPtr)
+    let nodeNumber = wispers_serving_status_node_number(statusPtr)
+    let groupId = swiftString(wispers_serving_status_connectivity_group_id(statusPtr)) ?? ""
+    let codesOutstanding = Int(wispers_serving_status_codes_outstanding(statusPtr))
+    var awaiting: [Int32] = []
+    let count = wispers_serving_status_nodes_awaiting_cosign_count(statusPtr)
+    for i in 0..<count {
+        awaiting.append(wispers_serving_status_node_awaiting_cosign_at(statusPtr, i))
+    }
+    wispers_serving_status_free(statusPtr)
+    CallbackBridge.resume(ctx, returning: ServingStatus(
+        connected: connected,
+        nodeNumber: nodeNumber,
+        connectivityGroupId: groupId,
+        codesOutstanding: codesOutstanding,
+        nodesAwaitingCosign: awaiting
+    ))
+}
+
 /// Start serving callback — resumes with three opaque pointers.
 struct StartServingResult {
     let servingHandle: OpaquePointer

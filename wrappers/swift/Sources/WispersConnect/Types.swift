@@ -78,6 +78,19 @@ public struct GroupInfo: Sendable {
     public let nodes: [NodeInfo]
 }
 
+/// Snapshot of a serving session's hub connection and endorsing state.
+public struct ServingStatus: Sendable {
+    /// Whether the session currently holds a live hub stream. `false` while it
+    /// is reconnecting after a hub disconnect.
+    public let connected: Bool
+    public let nodeNumber: Int32
+    public let connectivityGroupId: String
+    /// Number of activation codes awaiting use.
+    public let codesOutstanding: Int
+    /// Node numbers that have paired and await cosign.
+    public let nodesAwaitingCosign: [Int32]
+}
+
 public struct RegistrationInfo: Sendable {
     public let connectivityGroupId: String
     public let nodeNumber: Int32

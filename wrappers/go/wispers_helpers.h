@@ -11,6 +11,7 @@ extern void goWispersCallback(void *ctx, int status, const char *detail);
 extern void goWispersInitCallback(void *ctx, int status, const char *detail, void *handle, int state);
 extern void goWispersGroupInfoCallback(void *ctx, int status, const char *detail, WispersGroupInfo *gi);
 extern void goWispersStartServingCallback(void *ctx, int status, const char *detail, void *serving, void *session, void *incoming);
+extern void goWispersServingStatusCallback(void *ctx, int status, const char *detail, WispersServingStatus *ss);
 extern void goWispersActivationCodeCallback(void *ctx, int status, const char *detail, char *code);
 extern void goWispersUdpConnectionCallback(void *ctx, int status, const char *detail, void *conn);
 extern void goWispersDataCallback(void *ctx, int status, const char *detail, const uint8_t *data, size_t len);
@@ -41,6 +42,10 @@ static inline void shimWispersGroupInfoCallback(void *ctx, WispersStatus status,
 
 static inline void shimWispersStartServingCallback(void *ctx, WispersStatus status, const char *detail, WispersServingHandle *serving, WispersServingSession *session, WispersIncomingConnections *incoming) {
 	goWispersStartServingCallback(ctx, (int)status, detail, (void*)serving, (void*)session, (void*)incoming);
+}
+
+static inline void shimWispersServingStatusCallback(void *ctx, WispersStatus status, const char *detail, WispersServingStatus *ss) {
+	goWispersServingStatusCallback(ctx, (int)status, detail, ss);
 }
 
 static inline void shimWispersActivationCodeCallback(void *ctx, WispersStatus status, const char *detail, char *code) {
@@ -156,6 +161,10 @@ static inline WispersStatus callServingSessionRunAsync(WispersServingSession *s,
 
 static inline WispersStatus callServingShutdownAsync(WispersServingHandle *h, void *ctx) {
 	return wispers_serving_handle_shutdown_async(h, ctx, shimWispersCallback);
+}
+
+static inline WispersStatus callServingStatusAsync(WispersServingHandle *h, void *ctx) {
+	return wispers_serving_handle_status_async(h, ctx, shimWispersServingStatusCallback);
 }
 
 static inline WispersStatus callIncomingAcceptUdpAsync(WispersIncomingConnections *h, void *ctx) {

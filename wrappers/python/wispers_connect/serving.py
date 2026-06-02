@@ -9,11 +9,12 @@ from ._bridge import (
     ACTIVATION_CODE_CB,
     BASIC_CB,
     QUIC_CONNECTION_CB,
+    SERVING_STATUS_CB,
     UDP_CONNECTION_CB,
     call_async,
 )
 from ._handle import Handle
-from .types import TtlProfile
+from .types import ServingStatus, TtlProfile
 
 
 class IncomingConnections(Handle):
@@ -127,6 +128,27 @@ class ServingSession:
             self._serving_ptr, int(ttl_profile), cb=ACTIVATION_CODE_CB,
         )
         return result
+
+    def status(self) -> ServingStatus:
+        """Return a snapshot of the session's hub connection and endorsing state.
+
+        Works whether or not the session currently holds a live hub connection,
+        so it can be polled to observe reconnects.
+        """
+        from ._library import get_lib
+        if self._serving_closed:
+            raise RuntimeError("wispers: serving handle already closed")
+        connected, node_number, cg_id, codes_outstanding, awaiting = call_async(
+            get_lib().wispers_serving_handle_status_async,
+            self._serving_ptr, cb=SERVING_STATUS_CB,
+        )
+        return ServingStatus(
+            connected=connected,
+            node_number=node_number,
+            connectivity_group_id=cg_id,
+            codes_outstanding=codes_outstanding,
+            nodes_awaiting_cosign=awaiting,
+        )
 
     def run(self) -> None:
         """Run the serving session event loop. Blocks until shutdown or error.

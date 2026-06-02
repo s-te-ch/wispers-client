@@ -9,7 +9,7 @@ from . import quic as _quic_mod
 from . import serving as _serving_mod
 from . import storage as _storage_mod
 from . import udp as _udp_mod
-from .types import GroupInfo, NodeState, RegistrationInfo, TtlProfile
+from .types import GroupInfo, NodeState, RegistrationInfo, ServingStatus, TtlProfile
 
 
 class NodeStorage:
@@ -123,6 +123,10 @@ class ServingSession:
         return await loop.run_in_executor(
             None, self._inner.generate_activation_code, ttl_profile,
         )
+
+    async def status(self) -> ServingStatus:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._inner.status)
 
     async def run(self) -> None:
         loop = asyncio.get_running_loop()

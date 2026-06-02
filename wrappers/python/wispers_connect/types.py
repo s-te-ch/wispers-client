@@ -80,6 +80,21 @@ class GroupInfo:
 
 
 @dataclass(frozen=True)
+class ServingStatus:
+    """Snapshot of a serving session's hub connection and endorsing state."""
+
+    #: Whether the session currently holds a live hub stream. False while it is
+    #: reconnecting after a hub disconnect.
+    connected: bool
+    node_number: int
+    connectivity_group_id: str
+    #: Number of activation codes awaiting use.
+    codes_outstanding: int
+    #: Node numbers that have paired and await cosign.
+    nodes_awaiting_cosign: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class RegistrationInfo:
     connectivity_group_id: str
     node_number: int

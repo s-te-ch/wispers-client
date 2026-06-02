@@ -728,6 +728,16 @@ static int test_generate_activation_code_with_ttl_null_handle(void) {
     return 0;
 }
 
+static int test_serving_handle_status_null_handle(void) {
+    TEST("serving_handle_status rejects NULL handle");
+
+    WispersStatus status = wispers_serving_handle_status_async(NULL, NULL, NULL);
+    if (status != WISPERS_STATUS_NULL_POINTER) FAIL("expected NULL_POINTER");
+
+    PASS();
+    return 0;
+}
+
 static int test_session_run_null_handle(void) {
     TEST("session_run rejects NULL handle");
 
@@ -1101,6 +1111,7 @@ int main(void) {
     failures += test_node_start_serving_null_handle();
     failures += test_generate_activation_code_null_handle();
     failures += test_generate_activation_code_with_ttl_null_handle();
+    failures += test_serving_handle_status_null_handle();
     failures += test_session_run_null_handle();
     failures += test_shutdown_null_handle();
 

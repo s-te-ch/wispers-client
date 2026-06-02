@@ -11,6 +11,7 @@ from .types import (
     NodeInfo,
     NodeState,
     RegistrationInfo,
+    ServingStatus,
     Status,
     TtlProfile,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "NodeInfo",
     "NodeState",
     "RegistrationInfo",
+    "ServingStatus",
     "Status",
     "TtlProfile",
     # Exceptions

@@ -17,6 +17,7 @@ from ._ffi import (
     WispersInitCallbackType,
     WispersQuicConnectionCallbackType,
     WispersQuicStreamCallbackType,
+    WispersServingStatusCallbackType,
     WispersStartServingCallbackType,
     WispersUdpConnectionCallbackType,
 )
@@ -140,6 +141,32 @@ def START_SERVING_CB(ctx: int | None, status: int, detail: bytes | None,  # noqa
         _resolve(ctx, _CallbackError(status, _detail_str(detail)))
     else:
         _resolve(ctx, (serving, session, incoming))
+
+
+@WispersServingStatusCallbackType  # type: ignore[untyped-decorator]
+def SERVING_STATUS_CB(ctx: int | None, status: int, detail: bytes | None,  # noqa: N802
+                      ss_ptr: int | None) -> None:
+    if status != 0:
+        _resolve(ctx, _CallbackError(status, _detail_str(detail)))
+        return
+    # ss_ptr is an opaque WispersServingStatus handle. Walk it via accessors and
+    # copy all data into Python objects before freeing.
+    from ._library import get_lib
+    lib = get_lib()
+    cg_bytes = lib.wispers_serving_status_connectivity_group_id(ss_ptr)
+    awaiting = tuple(
+        lib.wispers_serving_status_node_awaiting_cosign_at(ss_ptr, i)
+        for i in range(lib.wispers_serving_status_nodes_awaiting_cosign_count(ss_ptr))
+    )
+    result = (
+        bool(lib.wispers_serving_status_connected(ss_ptr)),
+        lib.wispers_serving_status_node_number(ss_ptr),
+        cg_bytes.decode("utf-8") if cg_bytes else "",
+        lib.wispers_serving_status_codes_outstanding(ss_ptr),
+        awaiting,
+    )
+    lib.wispers_serving_status_free(ss_ptr)
+    _resolve(ctx, result)
 
 
 @WispersActivationCodeCallbackType  # type: ignore[untyped-decorator]
