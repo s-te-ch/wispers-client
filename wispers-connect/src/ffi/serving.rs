@@ -322,13 +322,64 @@ pub extern "C" fn wispers_node_start_serving_async(
     WispersStatus::Success
 }
 
-/// Generate an activation code for endorsing a new node.
+/// TTL profile for activation codes, mirroring [`crate::crypto::TtlProfile`].
+/// Selects the code's entropy and validity window.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum WispersTtlProfile {
+    /// Short-lived code for live, at-the-keyboard entry.
+    Interactive = 0,
+    /// Long-lived code for out-of-band delivery (e.g. email).
+    Asynchronous = 1,
+}
+
+impl From<WispersTtlProfile> for crate::crypto::TtlProfile {
+    fn from(p: WispersTtlProfile) -> Self {
+        match p {
+            WispersTtlProfile::Interactive => crate::crypto::TtlProfile::Interactive,
+            WispersTtlProfile::Asynchronous => crate::crypto::TtlProfile::Asynchronous,
+        }
+    }
+}
+
+/// Generate an activation code for endorsing a new node (interactive profile).
 ///
 /// The serving handle is NOT consumed.
 /// On success, the callback receives the activation code string (caller must free with wispers_string_free).
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_serving_handle_generate_activation_code_async(
     handle: *mut WispersServingHandle,
+    ctx: *mut c_void,
+    callback: WispersActivationCodeCallback,
+) -> WispersStatus {
+    generate_activation_code_impl(
+        handle,
+        crate::crypto::TtlProfile::Interactive,
+        ctx,
+        callback,
+    )
+}
+
+/// Generate an activation code with an explicit TTL profile.
+///
+/// Like `wispers_serving_handle_generate_activation_code_async`, but lets the
+/// caller pick a long-lived (`asynchronous`) code for out-of-band delivery.
+/// The serving handle is NOT consumed.
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_serving_handle_generate_activation_code_with_ttl_async(
+    handle: *mut WispersServingHandle,
+    ttl_profile: WispersTtlProfile,
+    ctx: *mut c_void,
+    callback: WispersActivationCodeCallback,
+) -> WispersStatus {
+    generate_activation_code_impl(handle, ttl_profile.into(), ctx, callback)
+}
+
+/// Shared implementation: spawn the generation task and dispatch the result to
+/// `callback`.
+fn generate_activation_code_impl(
+    handle: *mut WispersServingHandle,
+    ttl_profile: crate::crypto::TtlProfile,
     ctx: *mut c_void,
     callback: WispersActivationCodeCallback,
 ) -> WispersStatus {
@@ -346,7 +397,9 @@ pub extern "C" fn wispers_serving_handle_generate_activation_code_async(
     let ctx = CallbackContext(ctx);
 
     runtime::spawn(async move {
-        let result = serving_handle.generate_activation_code().await;
+        let result = serving_handle
+            .generate_activation_code_with_ttl(ttl_profile)
+            .await;
         match result {
             Ok(pairing_code) => {
                 let code_str = pairing_code.format();

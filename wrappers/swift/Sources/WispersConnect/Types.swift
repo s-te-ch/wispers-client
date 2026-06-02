@@ -32,6 +32,23 @@ public enum GroupState: Int32, Sendable {
     }
 }
 
+/// TTL profile for activation codes (mirrors C enum `WispersTtlProfile`).
+///
+/// Selects the code's lifetime and entropy: `.interactive` is short-lived (for
+/// live entry); `.asynchronous` is long-lived (for out-of-band delivery, e.g.
+/// email).
+public enum TtlProfile: Int32, Sendable {
+    case interactive = 0
+    case asynchronous = 1
+
+    var cValue: WispersTtlProfile {
+        switch self {
+        case .interactive: return WISPERS_TTL_PROFILE_INTERACTIVE
+        case .asynchronous: return WISPERS_TTL_PROFILE_ASYNCHRONOUS
+        }
+    }
+}
+
 public struct NodeInfo: Sendable, Identifiable {
     public var id: Int32 { nodeNumber }
     public let nodeNumber: Int32

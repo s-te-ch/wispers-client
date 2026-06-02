@@ -45,6 +45,12 @@ typedef enum {
     WISPERS_ACTIVATION_ACTIVATED = 2,     // Node is in roster and not revoked
 } WispersActivationStatus;
 
+// TTL profile for activation codes (selects entropy + validity window).
+typedef enum {
+    WISPERS_TTL_PROFILE_INTERACTIVE = 0,  // short-lived, live at-the-keyboard entry
+    WISPERS_TTL_PROFILE_ASYNCHRONOUS = 1, // long-lived, out-of-band delivery (e.g. email)
+} WispersTtlProfile;
+
 // Forward declarations for opaque handles.
 typedef struct WispersNodeStorageHandle WispersNodeStorageHandle;
 typedef struct WispersNodeHandle WispersNodeHandle;
@@ -463,6 +469,18 @@ WispersStatus wispers_quic_stream_shutdown_async(
 // Returns SUCCESS immediately if the async operation was started.
 WispersStatus wispers_serving_handle_generate_activation_code_async(
     WispersServingHandle *handle,
+    void *ctx,
+    WispersActivationCodeCallback callback
+);
+
+// Generate an activation code with an explicit TTL profile.
+// Like wispers_serving_handle_generate_activation_code_async, but the caller
+// picks the profile (e.g. WISPERS_TTL_PROFILE_ASYNCHRONOUS for a long-lived
+// code suitable for out-of-band delivery). The serving handle is NOT consumed.
+// Returns SUCCESS immediately if the async operation was started.
+WispersStatus wispers_serving_handle_generate_activation_code_with_ttl_async(
+    WispersServingHandle *handle,
+    WispersTtlProfile ttl_profile,
     void *ctx,
     WispersActivationCodeCallback callback
 );

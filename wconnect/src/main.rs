@@ -38,7 +38,13 @@ enum Command {
         activation_code: String,
     },
     /// Get an activation code to endorse a new node (requires running server)
-    GetActivationCode,
+    GetActivationCode {
+        /// Code lifetime profile: "interactive" (default, short-lived, for live
+        /// entry) or "asynchronous" (long-lived, for out-of-band delivery e.g.
+        /// email).
+        #[arg(long, value_enum, default_value = "interactive")]
+        ttl_profile: ipc::TtlProfile,
+    },
     /// Clear stored credentials and state
     Logout,
     /// List nodes in the connectivity group
@@ -369,7 +375,9 @@ async fn async_main(
         Command::Activate { activation_code } => {
             activate(hub_override, profile, &activation_code).await
         }
-        Command::GetActivationCode => get_activation_code(hub_override, profile).await,
+        Command::GetActivationCode { ttl_profile } => {
+            get_activation_code(hub_override, profile, ttl_profile).await
+        }
         Command::Logout => logout(hub_override, profile).await,
         Command::Nodes => nodes(hub_override, profile).await,
         Command::Status => status(hub_override, profile).await,
@@ -464,7 +472,11 @@ async fn activate(hub_override: Option<&str>, profile: &str, activation_code: &s
     Ok(())
 }
 
-async fn get_activation_code(hub_override: Option<&str>, profile: &str) -> Result<()> {
+async fn get_activation_code(
+    hub_override: Option<&str>,
+    profile: &str,
+    ttl_profile: ipc::TtlProfile,
+) -> Result<()> {
     let storage = get_storage(hub_override, profile)?;
     let node = load_node(&storage).await?;
 
@@ -482,7 +494,7 @@ async fn get_activation_code(hub_override: Option<&str>, profile: &str) -> Resul
 
     // Request activation code
     let response = client
-        .request(&ipc::Request::GetActivationCode)
+        .request(&ipc::Request::GetActivationCode { ttl_profile })
         .await
         .context("failed to communicate with server")?;
 

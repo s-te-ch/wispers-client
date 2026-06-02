@@ -226,6 +226,11 @@ def declare_functions(lib: ctypes.CDLL) -> None:  # noqa: C901
     ]
     lib.wispers_serving_handle_generate_activation_code_async.restype = c_int
 
+    lib.wispers_serving_handle_generate_activation_code_with_ttl_async.argtypes = [
+        c_void_p, c_int, c_void_p, WispersActivationCodeCallbackType,
+    ]
+    lib.wispers_serving_handle_generate_activation_code_with_ttl_async.restype = c_int
+
     lib.wispers_serving_session_run_async.argtypes = [c_void_p, c_void_p, WispersCallbackType]
     lib.wispers_serving_session_run_async.restype = c_int
 

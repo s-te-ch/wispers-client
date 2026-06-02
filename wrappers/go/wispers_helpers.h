@@ -146,6 +146,10 @@ static inline WispersStatus callGenerateActivationCodeAsync(WispersServingHandle
 	return wispers_serving_handle_generate_activation_code_async(h, ctx, shimWispersActivationCodeCallback);
 }
 
+static inline WispersStatus callGenerateActivationCodeWithTtlAsync(WispersServingHandle *h, WispersTtlProfile ttl_profile, void *ctx) {
+	return wispers_serving_handle_generate_activation_code_with_ttl_async(h, ttl_profile, ctx, shimWispersActivationCodeCallback);
+}
+
 static inline WispersStatus callServingSessionRunAsync(WispersServingSession *s, void *ctx) {
 	return wispers_serving_session_run_async(s, ctx, shimWispersCallback);
 }

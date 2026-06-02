@@ -13,6 +13,7 @@ from ._bridge import (
     call_async,
 )
 from ._handle import Handle
+from .types import TtlProfile
 
 
 class IncomingConnections(Handle):
@@ -109,14 +110,21 @@ class ServingSession:
             IncomingConnections(incoming_ptr) if incoming_ptr else None
         )
 
-    def generate_activation_code(self) -> str:
-        """Generate an activation code for endorsing a new node."""
+    def generate_activation_code(
+        self, ttl_profile: TtlProfile = TtlProfile.INTERACTIVE,
+    ) -> str:
+        """Generate an activation code for endorsing a new node.
+
+        ``ttl_profile`` selects the code's lifetime (default
+        :attr:`TtlProfile.INTERACTIVE`; use :attr:`TtlProfile.ASYNCHRONOUS` for
+        a long-lived code sent out-of-band).
+        """
         from ._library import get_lib
         if self._serving_closed:
             raise RuntimeError("wispers: serving handle already closed")
         result: str = call_async(
-            get_lib().wispers_serving_handle_generate_activation_code_async,
-            self._serving_ptr, cb=ACTIVATION_CODE_CB,
+            get_lib().wispers_serving_handle_generate_activation_code_with_ttl_async,
+            self._serving_ptr, int(ttl_profile), cb=ACTIVATION_CODE_CB,
         )
         return result
 

@@ -4,6 +4,7 @@ import com.sun.jna.Pointer
 import dev.wispers.connect.internal.CallbackBridge
 import dev.wispers.connect.internal.Callbacks
 import dev.wispers.connect.internal.NativeLibrary
+import dev.wispers.connect.types.TtlProfile
 import dev.wispers.connect.types.WispersException
 import dev.wispers.connect.types.WispersStatus
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -94,16 +95,19 @@ class ServingSession internal constructor(
      *
      * The activation code format is "node_number-secret" (e.g., "1-abc123xyz0").
      *
+     * @param ttlProfile The code's lifetime profile. Defaults to
+     *   [TtlProfile.INTERACTIVE] (short-lived, for live entry); use
+     *   [TtlProfile.ASYNCHRONOUS] for a long-lived code sent out-of-band.
      * @return The activation code string
      * @throws WispersException.HubError on hub communication failure
      */
-    suspend fun generateActivationCode(): String {
+    suspend fun generateActivationCode(ttlProfile: TtlProfile = TtlProfile.INTERACTIVE): String {
         val result = suspendCancellableCoroutine<Any?> { cont ->
             requireOpen()
             val ctx = CallbackBridge.register(cont)
 
-            val status = lib.wispers_serving_handle_generate_activation_code_async(
-                servingHandle, ctx, Callbacks.activationCode
+            val status = lib.wispers_serving_handle_generate_activation_code_with_ttl_async(
+                servingHandle, ttlProfile.code, ctx, Callbacks.activationCode
             )
             if (status != WispersStatus.SUCCESS.code) {
                 CallbackBridge.resumeException(ctx, WispersException.fromStatus(status))

@@ -44,12 +44,35 @@ pub fn ipc_path(connectivity_group_id: &str, node_number: i32) -> PathBuf {
     return dir.join(format!("{}-{}.port", connectivity_group_id, node_number));
 }
 
+/// TTL profile parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TtlProfile {
+    /// Short-lived code for live, at-the-keyboard entry.
+    #[default]
+    Interactive,
+    /// Long-lived code for out-of-band delivery (e.g. email).
+    Asynchronous,
+}
+impl TtlProfile {
+    fn to_lib(self) -> wispers_connect::TtlProfile {
+        match self {
+            TtlProfile::Interactive => wispers_connect::TtlProfile::Interactive,
+            TtlProfile::Asynchronous => wispers_connect::TtlProfile::Asynchronous,
+        }
+    }
+}
+
 /// Request from CLI to server.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Request {
     Status,
-    GetActivationCode,
+    GetActivationCode {
+        /// Code lifetime profile. Defaults to 'interactive'.
+        #[serde(default)]
+        ttl_profile: TtlProfile,
+    },
     Shutdown,
 }
 
@@ -392,12 +415,17 @@ async fn process_request(line: &str, handle: &ServingHandle) -> Response {
             Err(e) => Response::error(format!("status failed: {}", e)),
         },
 
-        Request::GetActivationCode => match handle.generate_activation_code().await {
-            Ok(code) => Response::success(ResponseData::ActivationCode(ActivationCodeData {
-                activation_code: code.format(),
-            })),
-            Err(e) => Response::error(format!("{}", e)),
-        },
+        Request::GetActivationCode { ttl_profile } => {
+            match handle
+                .generate_activation_code_with_ttl(ttl_profile.to_lib())
+                .await
+            {
+                Ok(code) => Response::success(ResponseData::ActivationCode(ActivationCodeData {
+                    activation_code: code.format(),
+                })),
+                Err(e) => Response::error(format!("{}", e)),
+            }
+        }
 
         Request::Shutdown => {
             let _ = handle.shutdown().await;

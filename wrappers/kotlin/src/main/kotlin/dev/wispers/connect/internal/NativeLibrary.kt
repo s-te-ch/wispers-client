@@ -284,6 +284,13 @@ interface NativeLibrary : Library {
         callback: NativeCallbacks.WispersActivationCodeCallback?
     ): Int
 
+    fun wispers_serving_handle_generate_activation_code_with_ttl_async(
+        handle: Pointer?,
+        ttlProfile: Int,
+        ctx: Pointer?,
+        callback: NativeCallbacks.WispersActivationCodeCallback?
+    ): Int
+
     /**
      * Run the serving session event loop (consumes session).
      */

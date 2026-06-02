@@ -47,6 +47,18 @@ class GroupState(IntEnum):
     ALL_ACTIVATED = 4
 
 
+class TtlProfile(IntEnum):
+    """TTL profile for activation codes (mirrors C enum WispersTtlProfile).
+
+    Selects the code's lifetime and entropy. INTERACTIVE is short-lived (for
+    live entry); ASYNCHRONOUS is long-lived (for out-of-band delivery, e.g.
+    email).
+    """
+
+    INTERACTIVE = 0
+    ASYNCHRONOUS = 1
+
+
 @dataclass(frozen=True)
 class NodeInfo:
     node_number: int
