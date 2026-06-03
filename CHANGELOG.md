@@ -18,7 +18,8 @@ During development, a surprising number of symbols ended up being exported from
 the library. Moreover, structs returned from the library were written without
 forward compatibility in mind. We did an audit of all exported symbols and
 corrected any mistakes we found. _While minor in scope, this is a breaking
-change_ and you may have to update your callsites.
+change_ and you may have to update your callsites. Compiled binaries stay
+compatible across versions.
 
 ### Miscellaneous
 
