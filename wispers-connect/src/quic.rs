@@ -267,9 +267,9 @@ struct ConnectionInner<T> {
     transport: T,
     /// Our role (client or server).
     role: QuicRole,
-    /// Local address (for recv_info).
+    /// Local address (for `recv_info`).
     local_addr: SocketAddr,
-    /// Peer address (for recv_info).
+    /// Peer address (for `recv_info`).
     peer_addr: SocketAddr,
     /// Notified when connection state changes (data available, established, etc.).
     state_notify: Notify,
@@ -673,7 +673,7 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
                     }
                 }
             }
-            _ = tokio::time::sleep(timeout_duration) => {
+            () = tokio::time::sleep(timeout_duration) => {
                 // Timeout - call on_timeout
                 inner.handle_timeout().await;
                 // Notify in case handshake progressed
@@ -836,7 +836,7 @@ impl<T: IceTransport + 'static> Stream<T> {
     }
 }
 
-/// Trait for ICE transports (abstracts IceCaller and IceAnswerer).
+/// Trait for ICE transports (abstracts `IceCaller` and `IceAnswerer`).
 pub trait IceTransport: Send + Sync {
     /// Send a packet over the ICE connection.
     fn send(&self, data: &[u8]) -> Result<(), IceError>;
@@ -1046,8 +1046,8 @@ mod tests {
     ///   client: write → finish → read
     ///
     /// The client sends FIN *before* attempting to read the server's response.
-    /// If quiche garbage-collects the stream between finish() and read(), the
-    /// read will fail with InvalidStreamState.
+    /// If quiche garbage-collects the stream between `finish()` and `read()`, the
+    /// read will fail with `InvalidStreamState`.
     #[tokio::test]
     async fn test_finish_before_read() {
         let (client, server) = loopback_pair().await;
@@ -1092,7 +1092,7 @@ mod tests {
     }
 
     /// Same as above but with multiple concurrent streams, which is closer
-    /// to the WebView scenario (4 parallel HTTP requests).
+    /// to the `WebView` scenario (4 parallel HTTP requests).
     #[tokio::test]
     async fn test_finish_before_read_concurrent() {
         let (client, server) = loopback_pair().await;
@@ -1131,7 +1131,7 @@ mod tests {
             let client = Arc::clone(&client);
             handles.push(tokio::spawn(async move {
                 let stream = client.open_stream().await.unwrap();
-                let payload = format!("request {}", i);
+                let payload = format!("request {i}");
                 stream.write_all(payload.as_bytes()).await.unwrap();
 
                 // Finish BEFORE reading
@@ -1143,14 +1143,14 @@ mod tests {
                     let n = stream
                         .read(&mut buf)
                         .await
-                        .unwrap_or_else(|_| panic!("stream {} read failed", i));
+                        .unwrap_or_else(|_| panic!("stream {i} read failed"));
                     if n == 0 {
                         break;
                     }
                     response.extend_from_slice(&buf[..n]);
                 }
 
-                assert_eq!(response, payload.as_bytes(), "stream {} mismatch", i);
+                assert_eq!(response, payload.as_bytes(), "stream {i} mismatch");
             }));
         }
 

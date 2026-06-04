@@ -102,7 +102,7 @@ impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ptr = unsafe { ffi::juice_state_to_string(self.as_raw()) };
         if ptr.is_null() {
-            write!(f, "{:?}", self)
+            write!(f, "{self:?}")
         } else {
             unsafe {
                 let s = CStr::from_ptr(ptr);
@@ -153,7 +153,7 @@ impl fmt::Display for JuiceError {
             JuiceError::Closed => write!(f, "juice: agent already closed"),
             JuiceError::CreationFailed => write!(f, "juice: failed to create agent"),
             JuiceError::InteriorNul => write!(f, "juice: string contains interior NUL byte"),
-            JuiceError::Unknown(code) => write!(f, "juice: error code {}", code),
+            JuiceError::Unknown(code) => write!(f, "juice: error code {code}"),
         }
     }
 }
@@ -212,7 +212,7 @@ impl OwnedConfig {
         }
 
         if !raw_servers.is_empty() {
-            raw.turn_servers = raw_servers.as_ptr() as *mut _;
+            raw.turn_servers = raw_servers.as_ptr().cast_mut();
             raw.turn_servers_count = raw_servers.len() as i32;
         }
 
@@ -233,7 +233,7 @@ impl OwnedConfig {
     }
 
     fn as_raw(&self) -> *const ffi::juice_config {
-        &self.raw
+        &raw const self.raw
     }
 }
 
@@ -352,7 +352,7 @@ impl JuiceAgent {
         let rc = unsafe {
             ffi::juice_get_local_description(
                 agent,
-                buffer.as_mut_ptr() as *mut c_char,
+                buffer.as_mut_ptr().cast::<c_char>(),
                 buffer.len(),
             )
         };
@@ -389,7 +389,7 @@ impl JuiceAgent {
         let ptr = if data.is_empty() {
             ptr::null()
         } else {
-            data.as_ptr() as *const c_char
+            data.as_ptr().cast::<c_char>()
         };
         let rc = unsafe { ffi::juice_send(agent, ptr, data.len()) };
         to_result(rc)
@@ -415,9 +415,9 @@ impl JuiceAgent {
         let rc = unsafe {
             ffi::juice_get_selected_candidates(
                 agent,
-                local.as_mut_ptr() as *mut c_char,
+                local.as_mut_ptr().cast::<c_char>(),
                 local.len(),
-                remote.as_mut_ptr() as *mut c_char,
+                remote.as_mut_ptr().cast::<c_char>(),
                 remote.len(),
             )
         };
@@ -434,9 +434,9 @@ impl JuiceAgent {
         let rc = unsafe {
             ffi::juice_get_selected_addresses(
                 agent,
-                local.as_mut_ptr() as *mut c_char,
+                local.as_mut_ptr().cast::<c_char>(),
                 local.len(),
-                remote.as_mut_ptr() as *mut c_char,
+                remote.as_mut_ptr().cast::<c_char>(),
                 remote.len(),
             )
         };
@@ -527,7 +527,7 @@ unsafe extern "C" fn on_recv_data(
     // SAFETY: Called from libjuice C code with valid user_ptr and data buffer
     unsafe {
         with_inner(user_ptr, |inner| {
-            let slice = std::slice::from_raw_parts(data as *const u8, size);
+            let slice = std::slice::from_raw_parts(data.cast::<u8>(), size);
             let buf = slice.to_vec();
             (inner.on_recv)(buf);
         });

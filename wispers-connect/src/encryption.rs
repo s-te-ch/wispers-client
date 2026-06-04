@@ -271,12 +271,12 @@ mod tests {
 
         // Multiple messages in both directions
         for i in 0..5 {
-            let msg = format!("caller message {}", i);
+            let msg = format!("caller message {i}");
             let enc = caller.encrypt(msg.as_bytes()).unwrap();
             let dec = answerer.decrypt(&enc).unwrap();
             assert_eq!(dec, msg.as_bytes());
 
-            let msg = format!("answerer message {}", i);
+            let msg = format!("answerer message {i}");
             let enc = answerer.encrypt(msg.as_bytes()).unwrap();
             let dec = caller.decrypt(&enc).unwrap();
             assert_eq!(dec, msg.as_bytes());

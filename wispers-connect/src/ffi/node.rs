@@ -209,7 +209,7 @@ pub extern "C" fn wispers_node_state(handle: *mut WispersNodeHandle) -> WispersN
 
 /// Register the node with the hub using a registration token.
 ///
-/// Returns INVALID_STATE if the node is not in Pending state.
+/// Returns `INVALID_STATE` if the node is not in Pending state.
 /// The node handle is NOT consumed - it transitions to Registered state on success.
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_node_register_async(
@@ -259,7 +259,7 @@ pub extern "C" fn wispers_node_register_async(
 /// Activate the node using an activation code from an endorser.
 ///
 /// The activation code format is "node_number-secret" (e.g., "1-abc123xyz0").
-/// Returns INVALID_STATE if the node is not in Registered state.
+/// Returns `INVALID_STATE` if the node is not in Registered state.
 /// The node handle is NOT consumed - it transitions to Activated state on success.
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_node_activate_async(
@@ -359,10 +359,10 @@ pub extern "C" fn wispers_node_logout_async(
 
 /// Get the group's activation state and node list.
 ///
-/// Returns INVALID_STATE if the node is in Pending state.
+/// Returns `INVALID_STATE` if the node is in Pending state.
 /// The node handle is NOT consumed.
-/// On success, callback receives a WispersGroupInfo that must be freed
-/// with wispers_group_info_free().
+/// On success, callback receives a `WispersGroupInfo` that must be freed
+/// with `wispers_group_info_free()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn wispers_node_group_info_async(
     handle: *mut WispersNodeHandle,

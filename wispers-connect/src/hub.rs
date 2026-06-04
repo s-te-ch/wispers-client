@@ -202,7 +202,7 @@ impl HubClient {
         Ok(response.into_inner())
     }
 
-    /// Fetch the connectivity group's metadata (id, name, created_at).
+    /// Fetch the connectivity group's metadata (id, name, `created_at`).
     pub(crate) async fn get_group_metadata(
         &self,
         registration: &NodeRegistration,
