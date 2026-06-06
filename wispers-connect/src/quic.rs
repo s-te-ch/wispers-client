@@ -734,6 +734,11 @@ impl<T: IceTransport + 'static> Stream<T> {
     pub async fn write_all(&self, data: &[u8]) -> Result<(), QuicError> {
         let mut offset = 0;
         while offset < data.len() {
+            // Arm the notification before the send so a flow-control window
+            // update arriving between the send and the wait isn't lost.
+            let mut notified = std::pin::pin!(self.inner.state_notify.notified());
+            notified.as_mut().enable();
+
             let written = {
                 let mut conn = self.inner.conn.lock().await;
                 match conn.stream_send(self.stream_id, &data[offset..], false) {
@@ -747,8 +752,8 @@ impl<T: IceTransport + 'static> Stream<T> {
                 offset += written;
                 self.inner.flush_send().await?;
             } else {
-                // Flow control blocked, wait for state change
-                self.inner.state_notify.notified().await;
+                // Flow control blocked, wait for the armed notification.
+                notified.await;
             }
         }
         Ok(())
@@ -766,6 +771,12 @@ impl<T: IceTransport + 'static> Stream<T> {
         }
 
         loop {
+            // Arm the notification before checking for data. `notify_waiters()`
+            // only wakes already-registered waiters, so not doing it would
+            // risk losing the wakeup.
+            let mut notified = std::pin::pin!(self.inner.state_notify.notified());
+            notified.as_mut().enable();
+
             // Try to read from the stream
             {
                 let mut conn = self.inner.conn.lock().await;
@@ -804,8 +815,8 @@ impl<T: IceTransport + 'static> Stream<T> {
                 }
             }
 
-            // Wait for state change (driver will notify when data arrives)
-            self.inner.state_notify.notified().await;
+            // Wait for the armed notification (driver fires it when data arrives).
+            notified.await;
         }
     }
 
