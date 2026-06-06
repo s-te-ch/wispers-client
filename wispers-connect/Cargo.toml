@@ -43,3 +43,6 @@ android_logger = "0.14"
 
 [dev-dependencies]
 async-stream = "0.3"
+# Tests use #[tokio::test(flavor = "multi_thread")] plus a timeout, so they need
+# the multi-thread runtime, the test macro, and timers spelled out explicitly.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
