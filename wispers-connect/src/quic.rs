@@ -734,6 +734,11 @@ impl<T: IceTransport + 'static> Stream<T> {
     pub async fn write_all(&self, data: &[u8]) -> Result<(), QuicError> {
         let mut offset = 0;
         while offset < data.len() {
+            // Arm the notification before the send so a flow-control window
+            // update arriving between the send and the wait isn't lost.
+            let mut notified = std::pin::pin!(self.inner.state_notify.notified());
+            notified.as_mut().enable();
+
             let written = {
                 let mut conn = self.inner.conn.lock().await;
                 match conn.stream_send(self.stream_id, &data[offset..], false) {
@@ -747,8 +752,8 @@ impl<T: IceTransport + 'static> Stream<T> {
                 offset += written;
                 self.inner.flush_send().await?;
             } else {
-                // Flow control blocked, wait for state change
-                self.inner.state_notify.notified().await;
+                // Flow control blocked, wait for the armed notification.
+                notified.await;
             }
         }
         Ok(())
@@ -766,6 +771,12 @@ impl<T: IceTransport + 'static> Stream<T> {
         }
 
         loop {
+            // Arm the notification before checking for data. `notify_waiters()`
+            // only wakes already-registered waiters, so not doing it would
+            // risk losing the wakeup.
+            let mut notified = std::pin::pin!(self.inner.state_notify.notified());
+            notified.as_mut().enable();
+
             // Try to read from the stream
             {
                 let mut conn = self.inner.conn.lock().await;
@@ -804,8 +815,8 @@ impl<T: IceTransport + 'static> Stream<T> {
                 }
             }
 
-            // Wait for state change (driver will notify when data arrives)
-            self.inner.state_notify.notified().await;
+            // Wait for the armed notification (driver fires it when data arrives).
+            notified.await;
         }
     }
 
@@ -1040,6 +1051,86 @@ mod tests {
         assert_eq!(n, 0);
 
         server_task.await.unwrap();
+    }
+
+    /// Smoke test for concurrent stream multiplexing over a single connection.
+    ///
+    /// Opens many streams at once and ping-pongs single bytes on each, blocking on
+    /// every echo, to exercise the stream read/write loops and the driver under
+    /// heavy concurrency. Asserts every byte round-trips intact. The generous
+    /// timeout is a deadlock guard: if a future change wedges a stream, this fails
+    /// instead of hanging CI.
+    ///
+    /// Runs on the multi-threaded runtime to match the real binaries
+    /// (`Builder::new_multi_thread()`), so the driver and stream tasks run in
+    /// genuine parallel.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_loopback_concurrent_streams() {
+        use std::sync::Arc;
+
+        // Enough concurrency to stress the shared connection mutex and the driver;
+        // single-byte rounds keep a healthy run well under a second.
+        const STREAMS: usize = 32;
+        const ROUNDS: usize = 50;
+
+        let (client, server) = loopback_pair().await;
+        let client = Arc::new(client);
+        let server = Arc::new(server);
+
+        // Server: accept every stream and echo each byte straight back.
+        let server_task = {
+            let server = Arc::clone(&server);
+            tokio::spawn(async move {
+                let mut handlers = Vec::new();
+                for _ in 0..STREAMS {
+                    let stream = server.accept_stream().await.expect("accept");
+                    handlers.push(tokio::spawn(async move {
+                        let mut b = [0u8; 1];
+                        loop {
+                            let n = stream.read(&mut b).await.expect("server read");
+                            if n == 0 {
+                                break;
+                            }
+                            stream.write_all(&b[..n]).await.expect("server write");
+                        }
+                    }));
+                }
+                for h in handlers {
+                    h.await.expect("server handler");
+                }
+            })
+        };
+
+        // Client: ping-pong ROUNDS single bytes per stream, blocking on each echo.
+        // Each echo is a lone notify with an idle gap behind it — nothing else is
+        // queued to re-poke the reader if its wakeup is lost.
+        let mut clients = Vec::new();
+        for i in 0..STREAMS {
+            let client = Arc::clone(&client);
+            clients.push(tokio::spawn(async move {
+                let stream = client.open_stream().await.expect("open");
+                for r in 0..ROUNDS {
+                    let out = [(i ^ r) as u8];
+                    stream.write_all(&out).await.expect("client write");
+                    let mut inb = [0u8; 1];
+                    let n = stream.read(&mut inb).await.expect("client read");
+                    assert_eq!(n, 1, "stream {i} round {r}: short echo");
+                    assert_eq!(inb[0], out[0], "stream {i} round {r}: wrong echo");
+                }
+                stream.finish().await.expect("client finish");
+            }));
+        }
+
+        let run = async {
+            for c in clients {
+                c.await.expect("client task");
+            }
+            server_task.await.expect("server task");
+        };
+
+        tokio::time::timeout(std::time::Duration::from_secs(15), run)
+            .await
+            .expect("concurrent streams stalled — lost wakeup in read()/write_all()");
     }
 
     /// The sequence under investigation:
