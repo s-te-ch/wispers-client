@@ -19,7 +19,7 @@ use sha2::Sha256;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::{Mutex, Notify};
 
 use crate::ice::{IceAnswerer, IceCaller, IceError};
@@ -277,8 +277,8 @@ struct ConnectionInner<T> {
     shutdown: AtomicBool,
     /// Stream IDs that have been accepted (to avoid returning same stream twice).
     accepted_streams: Mutex<std::collections::HashSet<u64>>,
-    /// Stream IDs that have been opened by us (to avoid reusing finished streams).
-    opened_streams: Mutex<std::collections::HashSet<u64>>,
+    /// Index of the next bidirectional stream to hand out (stream_id = base + 4*n).
+    next_stream_index: AtomicU64,
 }
 
 impl<T: IceTransport> ConnectionInner<T> {
@@ -384,7 +384,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             state_notify: Notify::new(),
             shutdown: AtomicBool::new(false),
             accepted_streams: Mutex::new(std::collections::HashSet::new()),
-            opened_streams: Mutex::new(std::collections::HashSet::new()),
+            next_stream_index: AtomicU64::new(0),
         });
 
         // Send Initial packet immediately (don't wait for driver)
@@ -436,7 +436,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             state_notify: Notify::new(),
             shutdown: AtomicBool::new(false),
             accepted_streams: Mutex::new(std::collections::HashSet::new()),
-            opened_streams: Mutex::new(std::collections::HashSet::new()),
+            next_stream_index: AtomicU64::new(0),
         });
 
         // Process the initial packet we already received
@@ -515,76 +515,56 @@ impl<T: IceTransport + 'static> Connection<T> {
     /// Returns a stream that can be used for reading and writing.
     /// Both client and server can open streams (they use different ID ranges).
     pub async fn open_stream(&self) -> Result<Stream<T>, QuicError> {
-        // Check if the peer allows us to open more streams
-        let stream_id = {
-            let mut conn = self.inner.conn.lock().await;
-            let streams_left = conn.peer_streams_left_bidi();
-            if streams_left == 0 {
-                return Err(QuicError::Stream(format!(
-                    "peer allows 0 bidirectional streams (is_established={})",
-                    conn.is_established()
-                )));
-            }
-
-            // Stream ID assignment:
-            // - Client-initiated bidi: 0, 4, 8, ... (id % 4 == 0)
-            // - Server-initiated bidi: 1, 5, 9, ... (id % 4 == 1)
-            let base = match self.inner.role {
-                QuicRole::Client => 0u64,
-                QuicRole::Server => 1u64,
-            };
-
-            let mut opened = self.inner.opened_streams.lock().await;
-
-            // Find next available stream ID for our role
-            let mut candidate = base;
-            loop {
-                // Skip streams we've already opened (even if finished)
-                if opened.contains(&candidate) {
-                    candidate += 4;
-                } else {
-                    // Check if this stream is in use (peer might have opened it)
-                    match conn.stream_capacity(candidate) {
-                        Ok(_) => {
-                            // Stream exists and has capacity - it's in use
-                            candidate += 4;
-                        }
-                        Err(quiche::Error::InvalidStreamState(_)) => {
-                            // Stream doesn't exist yet - we can use it
-                            break;
-                        }
-                        Err(_) => {
-                            candidate += 4;
-                        }
-                    }
-                }
-                if candidate > 4 * INITIAL_MAX_STREAMS_BIDI {
-                    return Err(QuicError::Stream("no available stream IDs".into()));
-                }
-            }
-
-            opened.insert(candidate);
-            candidate
+        // Bidirectional stream IDs (RFC 9000 §2.1) are client-initiated 0,4,8,…
+        // and server-initiated 1,5,9,…. IDs are monotonic and never reused, so we
+        // just hand out the next one for our role. The *concurrent* stream count
+        // is bounded by the peer's MAX_STREAMS; when it's exhausted we wait for
+        // the peer to raise it (which it does as in-flight streams close) rather
+        // than failing or capping the connection's lifetime stream count.
+        let base = match self.inner.role {
+            QuicRole::Client => 0u64,
+            QuicRole::Server => 1u64,
         };
 
-        // Send a zero-byte write to "open" the stream
-        {
-            let mut conn = self.inner.conn.lock().await;
-            match conn.stream_send(stream_id, &[], false) {
-                Ok(_) => {}
-                Err(quiche::Error::Done) => {}
-                Err(e) => return Err(QuicError::Quic(e)),
+        loop {
+            let mut notified = std::pin::pin!(self.inner.state_notify.notified());
+            notified.as_mut().enable();
+
+            let opened = {
+                let mut conn = self.inner.conn.lock().await;
+                if conn.is_closed() {
+                    return Err(QuicError::ConnectionClosed);
+                }
+                if conn.peer_streams_left_bidi() == 0 {
+                    // No credit right now — fall through to wait for MAX_STREAMS.
+                    None
+                } else {
+                    // Allocate the next ID and open it with a zero-byte send, both
+                    // under the lock so the credit check and the send are atomic
+                    // (concurrent callers can't over-allocate past the limit).
+                    let n = self.inner.next_stream_index.fetch_add(1, Ordering::Relaxed);
+                    let stream_id = base + 4 * n;
+                    match conn.stream_send(stream_id, &[], false) {
+                        Ok(_) | Err(quiche::Error::Done) => Some(stream_id),
+                        Err(e) => return Err(QuicError::Quic(e)),
+                    }
+                }
+            };
+
+            match opened {
+                Some(stream_id) => {
+                    // Flush to notify the peer (driver also flushes; do it now for
+                    // lower latency).
+                    self.inner.flush_send().await?;
+                    return Ok(Stream {
+                        inner: Arc::clone(&self.inner),
+                        stream_id,
+                        recv_fin: AtomicBool::new(false),
+                    });
+                }
+                None => notified.await,
             }
         }
-
-        // Flush to notify the peer
-        self.inner.flush_send().await?;
-
-        Ok(Stream {
-            inner: Arc::clone(&self.inner),
-            stream_id,
-            recv_fin: AtomicBool::new(false),
-        })
     }
 
     /// Accept an incoming stream from the peer.
@@ -1159,5 +1139,66 @@ mod tests {
         }
 
         server_task.await.unwrap();
+    }
+
+    /// Opening more streams over a connection's lifetime than
+    /// `INITIAL_MAX_STREAMS_BIDI` must work. QUIC stream IDs are monotonic and the
+    /// peer raises `MAX_STREAMS` as streams close, so a long-lived connection can
+    /// serve unlimited requests (bounded only by *concurrent* streams).
+    ///
+    /// The previous allocator scanned candidate IDs up to `4 * INITIAL_…` and
+    /// never reused them, so it hard-capped a connection at `INITIAL_MAX_STREAMS_BIDI`
+    /// streams *for its entire life* — the ~101st `open_stream` returned
+    /// "no available stream IDs". This opens 250 sequentially and must succeed.
+    #[tokio::test]
+    async fn test_loopback_streams_beyond_initial_limit() {
+        let (client, server) = loopback_pair().await;
+
+        // Server: accept streams forever, echo each one's bytes back, finish.
+        let server_task = tokio::spawn(async move {
+            loop {
+                let stream = match server.accept_stream().await {
+                    Ok(s) => s,
+                    Err(_) => break, // connection gone at end of test
+                };
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 64];
+                    let mut data = Vec::new();
+                    loop {
+                        match stream.read(&mut buf).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => data.extend_from_slice(&buf[..n]),
+                        }
+                    }
+                    let _ = stream.write_all(&data).await;
+                    let _ = stream.finish().await;
+                });
+            }
+        });
+
+        // Open well past the 100-stream initial limit, one at a time (each fully
+        // closed before the next so credit always replenishes), verifying echoes.
+        const COUNT: u64 = 250;
+        for i in 0..COUNT {
+            let stream = client
+                .open_stream()
+                .await
+                .unwrap_or_else(|e| panic!("open_stream #{i} failed: {e:?}"));
+            stream.write_all(b"ping").await.expect("client write");
+            stream.finish().await.expect("client finish");
+
+            let mut buf = [0u8; 64];
+            let mut got = Vec::new();
+            loop {
+                let n = stream.read(&mut buf).await.expect("client read");
+                if n == 0 {
+                    break;
+                }
+                got.extend_from_slice(&buf[..n]);
+            }
+            assert_eq!(&got[..], b"ping", "stream #{i}: echo mismatch");
+        }
+
+        server_task.abort();
     }
 }
