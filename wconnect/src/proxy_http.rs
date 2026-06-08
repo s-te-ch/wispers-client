@@ -352,6 +352,12 @@ async fn handle_http_request(
         .write_all(http_request.as_bytes())
         .await
         .context("failed to send HTTP request")?;
+    // This stream carries exactly one request, so FIN the send side now. Without
+    // this, we eventually run out of stream budget.
+    quic_stream
+        .finish()
+        .await
+        .context("failed to finish request stream")?;
 
     let mut buf = [0u8; 8192];
     loop {
@@ -434,6 +440,8 @@ fn build_http_request(request: &ParsedRequest, path: &str) -> String {
     for (name, value) in &request.headers {
         http.push_str(&format!("{}: {}\r\n", name, value));
     }
+    // One stream per request.
+    http.push_str("Connection: close\r\n");
 
     // End of headers
     http.push_str("\r\n");
