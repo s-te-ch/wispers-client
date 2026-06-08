@@ -287,6 +287,25 @@ impl JuiceAgent {
         on_gathering_done: impl Fn() + Send + Sync + 'static,
         on_recv: impl Fn(Vec<u8>) + Send + Sync + 'static,
     ) -> Result<Self> {
+        // TEMP instrumentation: bump libjuice's own log level (stderr, separate
+        // from Rust `log`) so we can watch the ICE consent/keepalive exchange.
+        // `WISPERS_JUICE_LOG=debug` shows consent checks and their responses,
+        // which is what we need to see why `Lost connectivity` fires on a LAN.
+        static JUICE_LOG_INIT: std::sync::Once = std::sync::Once::new();
+        JUICE_LOG_INIT.call_once(|| {
+            if let Ok(v) = std::env::var("WISPERS_JUICE_LOG") {
+                let level = match v.to_ascii_lowercase().as_str() {
+                    "verbose" => ffi::juice_log_level_JUICE_LOG_LEVEL_VERBOSE,
+                    "debug" => ffi::juice_log_level_JUICE_LOG_LEVEL_DEBUG,
+                    "info" => ffi::juice_log_level_JUICE_LOG_LEVEL_INFO,
+                    "warn" => ffi::juice_log_level_JUICE_LOG_LEVEL_WARN,
+                    "error" => ffi::juice_log_level_JUICE_LOG_LEVEL_ERROR,
+                    _ => ffi::juice_log_level_JUICE_LOG_LEVEL_DEBUG,
+                };
+                unsafe { ffi::juice_set_log_level(level) };
+            }
+        });
+
         let inner = Arc::new(JuiceAgentInner::new(
             on_state_change,
             on_candidate,
