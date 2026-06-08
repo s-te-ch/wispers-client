@@ -299,6 +299,9 @@ impl<T: IceTransport> ConnectionInner<T> {
 
             match send_result {
                 Ok((len, _send_info)) => {
+                    // TEMP instrumentation: if the last log line before a stall is
+                    // this with no following progress, transport.send (ICE) blocked.
+                    log::info!("[wispers QUIC] flush: ICE send {len}B");
                     self.transport.send(&buf[..len])?;
                 }
                 Err(quiche::Error::Done) => break,
@@ -653,19 +656,28 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
         tokio::time::interval(std::time::Duration::from_millis(KEEPALIVE_INTERVAL_MS));
     keepalive_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
+    // TEMP instrumentation: heartbeat counter so we can see in the logs whether
+    // the driver keeps looping (and what wakes it) or goes dark before the idle
+    // timeout. Every loop exit logs a reason.
+    let mut iter: u64 = 0;
     loop {
+        iter += 1;
         // Check if we should stop
         if inner.shutdown.load(Ordering::SeqCst) {
+            log::warn!("[wispers QUIC] driver exit (iter {iter}): shutdown flag");
             break;
         }
 
         // Flush any pending outgoing packets
+        log::info!("[wispers QUIC] driver iter {iter}: flushing");
         if inner.flush_send().await.is_err() {
+            log::warn!("[wispers QUIC] driver exit (iter {iter}): flush_send error");
             break;
         }
 
         // Check if connection is closed
         if inner.is_closed().await {
+            log::warn!("[wispers QUIC] driver exit (iter {iter}): connection closed");
             inner.state_notify.notify_waiters();
             break;
         }
@@ -673,39 +685,47 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
         // Get timeout for next event
         let timeout = inner.timeout().await;
         let timeout_duration = timeout.unwrap_or(std::time::Duration::from_millis(100));
+        log::info!("[wispers QUIC] driver iter {iter}: flushed, waiting (timeout {timeout_duration:?})");
 
         // Wait for incoming packet, timeout, or keepalive tick
         tokio::select! {
             result = inner.transport.recv() => {
                 match result {
                     Ok(packet) => {
+                        log::info!("[wispers QUIC] driver iter {iter}: recv {}B", packet.len());
                         // Process the packet
                         if inner.process_packet(packet).await.is_err() {
+                            log::warn!("[wispers QUIC] driver exit (iter {iter}): process_packet error");
                             break;
                         }
                         // Notify waiters that state may have changed
                         inner.state_notify.notify_waiters();
                     }
-                    Err(_) => {
+                    Err(e) => {
                         // ICE error, stop the driver
+                        log::warn!("[wispers QUIC] driver exit (iter {iter}): transport.recv error: {e:?}");
                         break;
                     }
                 }
             }
             _ = tokio::time::sleep(timeout_duration) => {
+                log::info!("[wispers QUIC] driver iter {iter}: timeout fired");
                 // Timeout - call on_timeout
                 inner.handle_timeout().await;
                 // Notify in case handshake progressed
                 inner.state_notify.notify_waiters();
             }
             _ = keepalive_interval.tick() => {
+                log::info!("[wispers QUIC] driver iter {iter}: keepalive tick");
                 // Send keepalive PING to prevent idle timeout
                 if inner.send_keepalive().await.is_err() {
+                    log::warn!("[wispers QUIC] driver exit (iter {iter}): send_keepalive error");
                     break;
                 }
             }
         }
     }
+    log::warn!("[wispers QUIC] driver loop ended");
 }
 
 /// A QUIC stream for reading and writing data.
