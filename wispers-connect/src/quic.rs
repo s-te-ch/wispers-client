@@ -284,6 +284,11 @@ struct ConnectionInner<T> {
     /// entry is `(stream_id, sent_fin, recv_fin)` — the two half-states captured
     /// at drop time, so the drain can shut down exactly the half/halves still open.
     pending_shutdown: std::sync::Mutex<Vec<(u64, bool, bool)>>,
+    /// TEMP instrumentation: true while the driver is inside `flush_send`. The
+    /// stall watchdog samples this; a flush that stays active for seconds means
+    /// the driver has wedged (e.g. starved on the `conn` lock) and triggers a
+    /// runtime task dump.
+    driver_flush_active: AtomicBool,
 }
 
 impl<T: IceTransport> ConnectionInner<T> {
@@ -417,6 +422,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             accepted_streams: Mutex::new(std::collections::HashSet::new()),
             next_stream_index: AtomicU64::new(0),
             pending_shutdown: std::sync::Mutex::new(Vec::new()),
+            driver_flush_active: AtomicBool::new(false),
         });
 
         // Send Initial packet immediately (don't wait for driver)
@@ -427,6 +433,7 @@ impl<T: IceTransport + 'static> Connection<T> {
         let driver_handle = tokio::spawn(async move {
             driver_loop(driver_inner).await;
         });
+        spawn_stall_watchdog(Arc::clone(&inner));
 
         Ok(Self {
             inner,
@@ -470,6 +477,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             accepted_streams: Mutex::new(std::collections::HashSet::new()),
             next_stream_index: AtomicU64::new(0),
             pending_shutdown: std::sync::Mutex::new(Vec::new()),
+            driver_flush_active: AtomicBool::new(false),
         });
 
         // Process the initial packet we already received
@@ -483,6 +491,7 @@ impl<T: IceTransport + 'static> Connection<T> {
         let driver_handle = tokio::spawn(async move {
             driver_loop(driver_inner).await;
         });
+        spawn_stall_watchdog(Arc::clone(&inner));
 
         Ok(Self {
             inner,
@@ -674,9 +683,13 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
             break;
         }
 
-        // Flush any pending outgoing packets
+        // Flush any pending outgoing packets. Mark the flush active so the stall
+        // watchdog can detect a flush that never returns (the wedge signature).
         log::info!("[wispers QUIC] driver iter {iter}: flushing");
-        if inner.flush_send().await.is_err() {
+        inner.driver_flush_active.store(true, Ordering::SeqCst);
+        let flush_res = inner.flush_send().await;
+        inner.driver_flush_active.store(false, Ordering::SeqCst);
+        if flush_res.is_err() {
             log::warn!("[wispers QUIC] driver exit (iter {iter}): flush_send error");
             break;
         }
@@ -752,6 +765,71 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
         }
     }
     log::warn!("[wispers QUIC] driver loop ended");
+}
+
+/// TEMP instrumentation: watch the driver's flush phase. `flush_send` completes
+/// in well under a second normally; if the driver sits inside it for ~2s the
+/// connection has wedged (e.g. starved on the `conn` lock). When that happens,
+/// dump the runtime's task traces — the async-aware equivalent of a thread
+/// backtrace — so we can see where every task is suspended and which one holds
+/// the lock the driver is waiting on.
+fn spawn_stall_watchdog<T: IceTransport + 'static>(inner: Arc<ConnectionInner<T>>) {
+    tokio::spawn(async move {
+        let mut consec = 0u32;
+        let mut dumped = false;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            if inner.shutdown.load(Ordering::SeqCst) {
+                break;
+            }
+            if inner.driver_flush_active.load(Ordering::SeqCst) {
+                consec += 1;
+                if consec >= 2 && !dumped {
+                    dumped = true;
+                    log::warn!(
+                        "[wispers QUIC] WATCHDOG: driver stuck in flush_send for ~{consec}s — connection wedged; dumping tasks"
+                    );
+                    dump_runtime_tasks().await;
+                }
+            } else {
+                consec = 0;
+                dumped = false;
+            }
+        }
+    });
+}
+
+/// Dump every task's await-trace via tokio's runtime task dump. Built only when
+/// the crate `taskdump` feature is enabled, which in turn requires
+/// `RUSTFLAGS="--cfg tokio_unstable"` on linux x86/x86_64/aarch64 (the server).
+#[cfg(feature = "taskdump")]
+async fn dump_runtime_tasks() {
+    let handle = tokio::runtime::Handle::current();
+    // A task blocked in synchronous/FFI code never reaches an await, so it can't
+    // be traced and `dump()` would hang — bound it so that case is itself a
+    // (different) diagnostic outcome rather than hanging the watchdog.
+    match tokio::time::timeout(std::time::Duration::from_secs(3), handle.dump()).await {
+        Ok(dump) => {
+            for (i, task) in dump.tasks().iter().enumerate() {
+                log::warn!(
+                    "[wispers QUIC] WATCHDOG task[{i}] id={}:\n{}",
+                    task.id(),
+                    task.trace()
+                );
+            }
+            log::warn!("[wispers QUIC] WATCHDOG: task dump complete");
+        }
+        Err(_) => log::warn!(
+            "[wispers QUIC] WATCHDOG: Handle::dump() timed out — a task is likely blocked in sync/FFI code (not at an await); grab a gdb backtrace now"
+        ),
+    }
+}
+
+#[cfg(not(feature = "taskdump"))]
+async fn dump_runtime_tasks() {
+    log::warn!(
+        "[wispers QUIC] WATCHDOG: task dump unavailable — rebuild with `--features taskdump` and RUSTFLAGS=\"--cfg tokio_unstable\" on Linux to capture await traces"
+    );
 }
 
 /// A QUIC stream for reading and writing data.

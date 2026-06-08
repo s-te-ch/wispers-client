@@ -11,6 +11,13 @@ description = "Client library for Wispers Connect"
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[features]
+# TEMP: enables tokio's runtime task dump for the stall watchdog (see
+# `dump_runtime_tasks` in quic.rs). tokio only allows this feature when built
+# with RUSTFLAGS="--cfg tokio_unstable" on linux aarch64/x86/x86_64, so the
+# feature is self-enforcing — enabling it on any other build fails loudly.
+taskdump = ["tokio/taskdump"]
+
 [dependencies]
 aes-gcm = "0.10"
 log = "0.4"
@@ -26,7 +33,7 @@ quiche = { version = "0.24", features = ["boringssl-boring-crate"] }
 rand = { version = "0.8", features = ["std"] }
 sha2 = "0.10"
 thiserror = "1.0"
-tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 tokio-stream = "0.1"
 tonic = { version = "0.12", features = ["tls-native-roots", "tls-webpki-roots"] }
 urlencoding = "2.1"
