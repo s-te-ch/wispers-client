@@ -903,7 +903,7 @@ mod tests {
         let http = build_http_request(&request, "/api/test");
         assert_eq!(
             http,
-            "GET /api/test HTTP/1.1\r\nHost: 3.wispers.link\r\nUser-Agent: test/1.0\r\n\r\n"
+            "GET /api/test HTTP/1.1\r\nHost: 3.wispers.link\r\nUser-Agent: test/1.0\r\nConnection: close\r\n\r\n"
         );
     }
 
