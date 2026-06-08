@@ -279,6 +279,9 @@ struct ConnectionInner<T> {
     accepted_streams: Mutex<std::collections::HashSet<u64>>,
     /// Index of the next bidirectional stream to hand out (stream_id = base + 4*n).
     next_stream_index: AtomicU64,
+    /// Stream IDs whose `Stream` was dropped without closing cleanly, queued for
+    /// reset at the next `open_stream` call. A std Mutex because `Drop` is sync;
+    pending_shutdown: std::sync::Mutex<Vec<u64>>,
 }
 
 impl<T: IceTransport> ConnectionInner<T> {
@@ -346,6 +349,19 @@ impl<T: IceTransport> ConnectionInner<T> {
         let conn = self.conn.lock().await;
         conn.is_closed()
     }
+
+    /// Reset streams whose `Stream` was dropped without closing cleanly. Called
+    /// with the connection already locked.
+    fn drain_pending_shutdown(&self, conn: &mut quiche::Connection) {
+        let ids: Vec<u64> = {
+            let mut q = self.pending_shutdown.lock().unwrap();
+            std::mem::take(&mut *q)
+        };
+        for id in ids {
+            let _ = conn.stream_shutdown(id, quiche::Shutdown::Read, 0);
+            let _ = conn.stream_shutdown(id, quiche::Shutdown::Write, 0);
+        }
+    }
 }
 
 /// A QUIC connection over an ICE transport.
@@ -385,6 +401,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             shutdown: AtomicBool::new(false),
             accepted_streams: Mutex::new(std::collections::HashSet::new()),
             next_stream_index: AtomicU64::new(0),
+            pending_shutdown: std::sync::Mutex::new(Vec::new()),
         });
 
         // Send Initial packet immediately (don't wait for driver)
@@ -437,6 +454,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             shutdown: AtomicBool::new(false),
             accepted_streams: Mutex::new(std::collections::HashSet::new()),
             next_stream_index: AtomicU64::new(0),
+            pending_shutdown: std::sync::Mutex::new(Vec::new()),
         });
 
         // Process the initial packet we already received
@@ -532,6 +550,8 @@ impl<T: IceTransport + 'static> Connection<T> {
 
             let opened = {
                 let mut conn = self.inner.conn.lock().await;
+                // Reset any abandoned streams first.
+                self.inner.drain_pending_shutdown(&mut conn);
                 if conn.is_closed() {
                     return Err(QuicError::ConnectionClosed);
                 }
@@ -551,15 +571,18 @@ impl<T: IceTransport + 'static> Connection<T> {
                 }
             };
 
+            // Flush outside the lock: pushes out both any queued resets and a new
+            // stream's opening frame. Done even when blocked on credit so the
+            // resets reach the peer and prompt it to return MAX_STREAMS.
+            self.inner.flush_send().await?;
+
             match opened {
                 Some(stream_id) => {
-                    // Flush to notify the peer (driver also flushes; do it now for
-                    // lower latency).
-                    self.inner.flush_send().await?;
                     return Ok(Stream {
                         inner: Arc::clone(&self.inner),
                         stream_id,
                         recv_fin: AtomicBool::new(false),
+                        sent_fin: AtomicBool::new(false),
                     });
                 }
                 None => notified.await,
@@ -576,6 +599,8 @@ impl<T: IceTransport + 'static> Connection<T> {
             // Check for readable streams (peer has opened and sent data)
             {
                 let mut conn = self.inner.conn.lock().await;
+                // Reset any streams the application dropped without a clean close.
+                self.inner.drain_pending_shutdown(&mut conn);
                 let mut accepted = self.inner.accepted_streams.lock().await;
 
                 // Find a readable stream that hasn't been accepted yet
@@ -586,6 +611,7 @@ impl<T: IceTransport + 'static> Connection<T> {
                             inner: Arc::clone(&self.inner),
                             stream_id,
                             recv_fin: AtomicBool::new(false),
+                            sent_fin: AtomicBool::new(false),
                         });
                     }
                 }
@@ -595,7 +621,8 @@ impl<T: IceTransport + 'static> Connection<T> {
                 }
             }
 
-            // Wait for state change (driver will notify when packet arrives)
+            // Push out any queued resets, then wait for the next state change.
+            self.inner.flush_send().await?;
             self.inner.state_notify.notified().await;
         }
     }
@@ -680,6 +707,9 @@ pub struct Stream<T: IceTransport + 'static> {
     /// Set to true once `stream_recv` returns fin, so subsequent reads
     /// return 0 without touching quiche (the stream may already be collected).
     recv_fin: AtomicBool,
+    /// Set to true once we send our FIN via `finish()`. With `recv_fin` it tells
+    /// `Drop` the stream closed cleanly, so it needn't be reset.
+    sent_fin: AtomicBool,
 }
 
 impl<T: IceTransport + 'static> Stream<T> {
@@ -810,6 +840,7 @@ impl<T: IceTransport + 'static> Stream<T> {
                 Err(e) => return Err(QuicError::Quic(e)),
             }
         }
+        self.sent_fin.store(true, Ordering::Release);
         self.inner.flush_send().await?;
         Ok(())
     }
@@ -824,6 +855,20 @@ impl<T: IceTransport + 'static> Stream<T> {
         }
         self.inner.flush_send().await?;
         Ok(())
+    }
+}
+
+impl<T: IceTransport + 'static> Drop for Stream<T> {
+    /// Queue the stream for reset unless it closed cleanly. `Drop` can't take the
+    /// async connection lock, so it just enqueues; the next `open_stream` /
+    /// `accept_stream` drains the queue. Skip streams that already closed cleanly.
+    fn drop(&mut self) {
+        if self.recv_fin.load(Ordering::Acquire) && self.sent_fin.load(Ordering::Acquire) {
+            return;
+        }
+        if let Ok(mut q) = self.inner.pending_shutdown.lock() {
+            q.push(self.stream_id);
+        }
     }
 }
 
@@ -1289,6 +1334,61 @@ mod tests {
             }
             assert_eq!(&got[..], b"ping", "stream #{i}: echo mismatch");
         }
+
+        server_task.abort();
+    }
+
+    /// A stream dropped without a clean close is reset by the next
+    /// `open_stream`/`accept_stream` (RAII cleanup), reclaiming its MAX_STREAMS
+    /// credit. Here the client *only drops* each stream — no `finish()`, no
+    /// `shutdown()` — yet, because the server reads each stream (as a real relay
+    /// does), opening 300 (well past the 100 initial limit) must not stall.
+    ///
+    /// Measured rule behind this (loopback matrix, since removed): credit is
+    /// returned iff the client terminates the stream (reset/FIN) AND the server
+    /// calls `stream_recv` on it. The Drop net supplies the reset; the server
+    /// here supplies the read. Without the net, this same loop stalls at 100.
+    #[tokio::test]
+    async fn test_dropped_streams_reclaim_credit() {
+        let (client, server) = loopback_pair().await;
+
+        // Server: accept each stream and read it to completion (the reset shows
+        // up as Err), which lets quiche collect it and return credit.
+        let server_task = tokio::spawn(async move {
+            loop {
+                let stream = match server.accept_stream().await {
+                    Ok(s) => s,
+                    Err(_) => break,
+                };
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 64];
+                    loop {
+                        match stream.read(&mut buf).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(_) => {}
+                        }
+                    }
+                });
+            }
+        });
+
+        let run = async {
+            const COUNT: u64 = 300;
+            for i in 0..COUNT {
+                let stream = client
+                    .open_stream()
+                    .await
+                    .unwrap_or_else(|e| panic!("open_stream #{i} failed: {e:?}"));
+                stream.write_all(b"x").await.expect("client write");
+                // Abandon: no finish(), no shutdown() — just drop. The next
+                // open_stream must reset it and reclaim its credit.
+                drop(stream);
+            }
+        };
+
+        tokio::time::timeout(std::time::Duration::from_secs(15), run)
+            .await
+            .expect("credit stalled — dropped streams were not reclaimed");
 
         server_task.abort();
     }
