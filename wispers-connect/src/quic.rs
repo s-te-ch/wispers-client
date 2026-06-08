@@ -279,9 +279,11 @@ struct ConnectionInner<T> {
     accepted_streams: Mutex<std::collections::HashSet<u64>>,
     /// Index of the next bidirectional stream to hand out (stream_id = base + 4*n).
     next_stream_index: AtomicU64,
-    /// Stream IDs whose `Stream` was dropped without closing cleanly, queued for
-    /// reset at the next `open_stream` call. A std Mutex because `Drop` is sync;
-    pending_shutdown: std::sync::Mutex<Vec<u64>>,
+    /// Streams dropped without closing cleanly, queued for cleanup at the next
+    /// `open_stream`/`accept_stream` (a std Mutex because `Drop` is sync). Each
+    /// entry is `(stream_id, sent_fin, recv_fin)` — the two half-states captured
+    /// at drop time, so the drain can shut down exactly the half/halves still open.
+    pending_shutdown: std::sync::Mutex<Vec<(u64, bool, bool)>>,
 }
 
 impl<T: IceTransport> ConnectionInner<T> {
@@ -350,16 +352,26 @@ impl<T: IceTransport> ConnectionInner<T> {
         conn.is_closed()
     }
 
-    /// Reset streams whose `Stream` was dropped without closing cleanly. Called
-    /// with the connection already locked.
+    /// Clean up streams whose `Stream` was dropped without closing cleanly,
+    /// reclaiming their MAX_STREAMS credit. Called with the connection locked.
     fn drain_pending_shutdown(&self, conn: &mut quiche::Connection) {
-        let ids: Vec<u64> = {
+        let streams: Vec<(u64, bool, bool)> = {
             let mut q = self.pending_shutdown.lock().unwrap();
             std::mem::take(&mut *q)
         };
-        for id in ids {
-            let _ = conn.stream_shutdown(id, quiche::Shutdown::Read, 0);
-            let _ = conn.stream_shutdown(id, quiche::Shutdown::Write, 0);
+        for (id, sent_fin, recv_fin) in streams {
+            // Receive half: if we never read the peer's FIN, STOP_SENDING finishes
+            // it so quiche can collect the stream. Harmless if the peer already
+            // finished sending.
+            if !recv_fin {
+                let _ = conn.stream_shutdown(id, quiche::Shutdown::Read, 0);
+            }
+            // Send half: RESET only if we didn't cleanly FIN it. Resetting a
+            // finished send half would turn still-in-flight data into a
+            // RESET_STREAM and truncate the response the peer is reading.
+            if !sent_fin {
+                let _ = conn.stream_shutdown(id, quiche::Shutdown::Write, 0);
+            }
         }
     }
 }
@@ -859,15 +871,20 @@ impl<T: IceTransport + 'static> Stream<T> {
 }
 
 impl<T: IceTransport + 'static> Drop for Stream<T> {
-    /// Queue the stream for reset unless it closed cleanly. `Drop` can't take the
-    /// async connection lock, so it just enqueues; the next `open_stream` /
-    /// `accept_stream` drains the queue. Skip streams that already closed cleanly.
+    /// Queue the stream for cleanup unless it closed cleanly. `Drop` can't take
+    /// the async connection lock, so it just enqueues; the next `open_stream` /
+    /// `accept_stream` drains the queue under the lock it already holds.
     fn drop(&mut self) {
-        if self.recv_fin.load(Ordering::Acquire) && self.sent_fin.load(Ordering::Acquire) {
+        let sent_fin = self.sent_fin.load(Ordering::Acquire);
+        let recv_fin = self.recv_fin.load(Ordering::Acquire);
+        // Both halves closed cleanly, nothing to do.
+        if sent_fin && recv_fin {
             return;
         }
+        // Record both half-states so the next drain shuts down exactly the
+        // half/halves left open.
         if let Ok(mut q) = self.inner.pending_shutdown.lock() {
-            q.push(self.stream_id);
+            q.push((self.stream_id, sent_fin, recv_fin));
         }
     }
 }
