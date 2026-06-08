@@ -570,10 +570,16 @@ impl<T: IceTransport + 'static> Connection<T> {
                 if conn.is_closed() {
                     return Err(QuicError::ConnectionClosed);
                 }
-                if conn.peer_streams_left_bidi() == 0 {
+                let credit = conn.peer_streams_left_bidi();
+                // TEMP instrumentation: watch the bidi-stream budget. A burst of
+                // "waiting for MAX_STREAMS" right when requests hang means credit
+                // isn't recycling (streams not being collected by the peer).
+                if credit == 0 {
+                    log::warn!("[wispers QUIC] open_stream: out of bidi credit, waiting for MAX_STREAMS");
                     // No credit right now — fall through to wait for MAX_STREAMS.
                     None
                 } else {
+                    log::info!("[wispers QUIC] open_stream: bidi credit left={credit}");
                     // Allocate the next ID and open it with a zero-byte send, both
                     // under the lock so the credit check and the send are atomic
                     // (concurrent callers can't over-allocate past the limit).
@@ -677,7 +683,27 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
 
         // Check if connection is closed
         if inner.is_closed().await {
-            log::warn!("[wispers QUIC] driver exit (iter {iter}): connection closed");
+            // TEMP instrumentation: surface *why* it closed. `peer_error` is the
+            // CONNECTION_CLOSE we received; `local_error` is one quiche raised
+            // locally (e.g. a protocol violation). `is_app` distinguishes an
+            // application close from a transport/protocol error.
+            let (peer_err, local_err) = {
+                let conn = inner.conn.lock().await;
+                let fmt = |e: Option<&quiche::ConnectionError>| {
+                    e.map(|e| {
+                        format!(
+                            "is_app={} code={} reason={:?}",
+                            e.is_app,
+                            e.error_code,
+                            String::from_utf8_lossy(&e.reason)
+                        )
+                    })
+                };
+                (fmt(conn.peer_error()), fmt(conn.local_error()))
+            };
+            log::warn!(
+                "[wispers QUIC] driver exit (iter {iter}): connection closed; peer_error={peer_err:?} local_error={local_err:?}"
+            );
             inner.state_notify.notify_waiters();
             break;
         }
