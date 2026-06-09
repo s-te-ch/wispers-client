@@ -297,12 +297,47 @@ impl<T: IceTransport> ConnectionInner<T> {
                 conn.send(&mut buf)
             };
 
-            match send_result {
-                Ok((len, _send_info)) => {
-                    self.transport.send(&buf[..len])?;
-                }
+            let (len, send_info) = match send_result {
+                Ok(v) => v,
                 Err(quiche::Error::Done) => break,
                 Err(e) => return Err(QuicError::Quic(e)),
+            };
+
+            // Honour quiche's pacing. quiche stamps each datagram with the time
+            // it should go on the wire; blasting them out as fast as the loop
+            // runs overruns the ICE socket's send buffer under load. A full
+            // buffer makes libjuice drop datagrams — including its own periodic
+            // STUN consent checks, whose loss trips "Lost connectivity" after
+            // ~30s and tears the connection down. Sub-millisecond pacing gaps
+            // are left for the socket buffer to absorb; only meaningful gaps are
+            // slept on, which also keeps buffer headroom for libjuice's
+            // keepalives.
+            let now = std::time::Instant::now();
+            if send_info.at > now + std::time::Duration::from_millis(1) {
+                tokio::time::sleep_until(tokio::time::Instant::from_std(send_info.at)).await;
+            }
+
+            // Treat a full send buffer as backpressure, not a fatal error.
+            // Propagating EWOULDBLOCK with `?` used to tear down the whole
+            // connection. Retry the datagram with a short backoff; if the buffer
+            // stays full, stop draining and let the driver flush again later
+            // (quiche retransmits anything it considers lost).
+            let mut backoff = std::time::Duration::from_micros(250);
+            loop {
+                match self.transport.send(&buf[..len]) {
+                    Ok(()) => break,
+                    Err(e) if e.is_would_block() => {
+                        if backoff > std::time::Duration::from_millis(8) {
+                            log::warn!(
+                                "[wispers QUIC] ICE send buffer full after retries, backing off"
+                            );
+                            return Ok(());
+                        }
+                        tokio::time::sleep(backoff).await;
+                        backoff *= 2;
+                    }
+                    Err(e) => return Err(QuicError::from(e)),
+                }
             }
         }
         Ok(())
