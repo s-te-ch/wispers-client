@@ -9,7 +9,12 @@
 //! Both connection types have a unified API - callers and answerers use the same type.
 //! Incoming connections are fully established before being delivered to the user.
 
+use std::io;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::encryption::{EncryptionError, P2pCipher};
 use crate::ice::{IceAnswerer, IceCaller, IceError};
@@ -299,6 +304,46 @@ impl QuicStreamInner {
     }
 }
 
+// Delegate poll-based I/O to the underlying role-specific `quic::Stream`, which
+// is `Unpin`, so plain `Pin::new` projection is sound.
+impl AsyncRead for QuicStreamInner {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Caller(s) => Pin::new(s).poll_read(cx, buf),
+            Self::Answerer(s) => Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for QuicStreamInner {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        match self.get_mut() {
+            Self::Caller(s) => Pin::new(s).poll_write(cx, buf),
+            Self::Answerer(s) => Pin::new(s).poll_write(cx, buf),
+        }
+    }
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Caller(s) => Pin::new(s).poll_flush(cx),
+            Self::Answerer(s) => Pin::new(s).poll_flush(cx),
+        }
+    }
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match self.get_mut() {
+            Self::Caller(s) => Pin::new(s).poll_shutdown(cx),
+            Self::Answerer(s) => Pin::new(s).poll_shutdown(cx),
+        }
+    }
+}
+
 /// A QUIC stream for reading and writing data.
 ///
 /// Streams provide ordered, reliable byte delivery within a QUIC connection.
@@ -339,6 +384,35 @@ impl QuicStream {
     /// Shutdown the stream (stop sending and receiving).
     pub async fn shutdown(&self) -> Result<(), P2pError> {
         Ok(self.inner.shutdown().await?)
+    }
+}
+
+/// Poll-based I/O, so a `QuicStream` can be handed straight to hyper/tokio
+/// (e.g. `TokioIo::new(stream)`). Additive to the async-fn API above; both
+/// share the same underlying connection.
+impl AsyncRead for QuicStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for QuicStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
+    }
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
     }
 }
 
