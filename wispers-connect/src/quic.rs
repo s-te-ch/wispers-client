@@ -41,13 +41,17 @@ const MAX_IDLE_TIMEOUT_MS: u64 = 30_000;
 const KEEPALIVE_INTERVAL_MS: u64 = 15_000;
 
 /// Initial max data (connection-level flow control).
-const INITIAL_MAX_DATA: u64 = 10_000_000; // 10 MB
+// TEMP (exhaustion test): 10MB -> 100MB. If the ~30s blackout's onset defers
+// proportionally, the stall is connection-level data-credit exhaustion (a leak
+// of max_data credit on torn-down/undrained streams), not a hang.
+const INITIAL_MAX_DATA: u64 = 100_000_000; // was 10 MB
 
 /// Initial max stream data (per-stream flow control).
 const INITIAL_MAX_STREAM_DATA: u64 = 1_000_000; // 1 MB
 
 /// Maximum concurrent bidirectional streams.
-const INITIAL_MAX_STREAMS_BIDI: u64 = 100;
+// TEMP (exhaustion test): 100 -> 1000, belt-and-suspenders alongside max_data.
+const INITIAL_MAX_STREAMS_BIDI: u64 = 1000; // was 100
 
 /// Length of the derived PSK in bytes.
 const PSK_LEN: usize = 32;
