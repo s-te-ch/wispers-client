@@ -297,12 +297,37 @@ impl<T: IceTransport> ConnectionInner<T> {
                 conn.send(&mut buf)
             };
 
-            match send_result {
-                Ok((len, _send_info)) => {
-                    self.transport.send(&buf[..len])?;
-                }
+            let (len, send_info) = match send_result {
+                Ok(v) => v,
                 Err(quiche::Error::Done) => break,
                 Err(e) => return Err(QuicError::Quic(e)),
+            };
+
+            // Honour quiche's pacing.
+            let now = std::time::Instant::now();
+            if send_info.at > now + std::time::Duration::from_millis(1) {
+                tokio::time::sleep_until(tokio::time::Instant::from_std(send_info.at)).await;
+            }
+
+            // Treat a full send buffer (EWOULDBLOCK) as backpressure. If the
+            // buffer stays full, stop draining and let the driver flush again
+            // later.
+            let mut backoff = std::time::Duration::from_micros(250);
+            loop {
+                match self.transport.send(&buf[..len]) {
+                    Ok(()) => break,
+                    Err(e) if e.is_would_block() => {
+                        if backoff > std::time::Duration::from_millis(8) {
+                            log::warn!(
+                                "[wispers QUIC] ICE send buffer full after retries, backing off"
+                            );
+                            return Ok(());
+                        }
+                        tokio::time::sleep(backoff).await;
+                        backoff *= 2;
+                    }
+                    Err(e) => return Err(QuicError::from(e)),
+                }
             }
         }
         Ok(())
