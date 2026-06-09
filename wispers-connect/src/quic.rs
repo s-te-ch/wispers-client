@@ -50,7 +50,7 @@ const INITIAL_MAX_DATA: u64 = 10_000_000; // 10 MB
 const INITIAL_MAX_STREAM_DATA: u64 = 1_000_000; // 1 MB
 
 /// Maximum concurrent bidirectional streams.
-const INITIAL_MAX_STREAMS_BIDI: u64 = 100;
+const INITIAL_MAX_STREAMS_BIDI: u64 = 256;
 
 /// Length of the derived PSK in bytes.
 const PSK_LEN: usize = 32;
@@ -1734,8 +1734,9 @@ mod tests {
     ///
     /// The previous allocator scanned candidate IDs up to `4 * INITIAL_…` and
     /// never reused them, so it hard-capped a connection at `INITIAL_MAX_STREAMS_BIDI`
-    /// streams *for its entire life* — the ~101st `open_stream` returned
-    /// "no available stream IDs". This opens 250 sequentially and must succeed.
+    /// streams *for its entire life* — the `(cap+1)`th `open_stream` returned
+    /// "no available stream IDs". This opens past the cap sequentially and must
+    /// succeed.
     #[tokio::test]
     async fn test_loopback_streams_beyond_initial_limit() {
         let (client, server) = loopback_pair().await;
@@ -1762,9 +1763,11 @@ mod tests {
             }
         });
 
-        // Open well past the 100-stream initial limit, one at a time (each fully
+        // Open well past the initial stream limit, one at a time (each fully
         // closed before the next so credit always replenishes), verifying echoes.
-        const COUNT: u64 = 250;
+        // Exceed the concurrent-stream cap so this keeps guarding the
+        // lifetime-cap regression even as INITIAL_MAX_STREAMS_BIDI changes.
+        const COUNT: u64 = INITIAL_MAX_STREAMS_BIDI + 20;
         for i in 0..COUNT {
             let stream = client
                 .open_stream()
