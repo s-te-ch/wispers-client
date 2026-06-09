@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.9.1 — Stream-handling robustness under load
+
+Stability release hardening the QUIC stream lifecycle and send backpressure
+under high-churn, high-throughput use (e.g. proxying a web app). No API changes.
+
+- **Backpressure is now honoured in the QUIC send path.** Outgoing packets are
+  paced on quiche's schedule instead of flushed as fast as the loop runs, and a
+  full ICE send buffer is treated as transient backpressure rather than a fatal
+  error. This stops bursts from overrunning the socket buffer — which could
+  starve libjuice's STUN keepalives and drop the connection.
+- **Stream teardown and credit handling are more robust.** Streams closed or
+  dropped mid-flight are now shut down per-direction and reliably return their
+  `MAX_STREAMS` credit, fixing stalls, leaks and a race that surfaced under many
+  short-lived streams (notably a stream-per-request proxy).
+- **`wconnect`'s HTTP proxy** finishes each request's stream promptly, so the
+  peer returns stream credit and long proxy sessions stay healthy under load.
+
 ## v0.9.0 — API cleanup and more flexible registration and activation
 
 This release bundles a number of changes that may break library clients. The aim
