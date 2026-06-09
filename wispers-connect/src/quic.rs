@@ -1009,7 +1009,7 @@ impl<T: IceTransport + 'static> AsyncRead for Stream<T> {
                     Poll::Pending
                 }
             }
-            Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("{e:?}")))),
+            Err(e) => Poll::Ready(Err(io::Error::other(format!("{e:?}")))),
         }
     }
 }
@@ -1035,23 +1035,20 @@ impl<T: IceTransport + 'static> AsyncWrite for Stream<T> {
             Ok(n) => {
                 // Push out what's immediately sendable; the driver paces the rest.
                 if let Err(e) = this.inner.flush_ready(&mut conn) {
-                    return Poll::Ready(Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("{e:?}"),
-                    )));
+                    return Poll::Ready(Err(io::Error::other(format!("{e:?}"))));
                 }
                 Poll::Ready(Ok(n))
             }
-            Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("{e:?}")))),
+            Err(e) => Poll::Ready(Err(io::Error::other(format!("{e:?}")))),
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
-        if let Ok(mut conn) = this.inner.conn.try_lock() {
-            if let Err(e) = this.inner.flush_ready(&mut conn) {
-                return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("{e:?}"))));
-            }
+        if let Ok(mut conn) = this.inner.conn.try_lock()
+            && let Err(e) = this.inner.flush_ready(&mut conn)
+        {
+            return Poll::Ready(Err(io::Error::other(format!("{e:?}"))));
         }
         // Whatever is still queued is the driver's job to flush (with pacing).
         Poll::Ready(Ok(()))
@@ -1072,7 +1069,7 @@ impl<T: IceTransport + 'static> AsyncWrite for Stream<T> {
                 let _ = this.inner.flush_ready(&mut conn);
                 Poll::Ready(Ok(()))
             }
-            Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("{e:?}")))),
+            Err(e) => Poll::Ready(Err(io::Error::other(format!("{e:?}")))),
         }
     }
 }
