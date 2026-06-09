@@ -292,6 +292,10 @@ struct ConnectionInner<T> {
     /// `.await` a `Notify`, so it registers its task waker here instead. The
     /// driver wakes these alongside every `state_notify` signal.
     poll_wakers: std::sync::Mutex<Vec<Waker>>,
+    /// Set true once the background driver loop has terminated. Once it is gone,
+    /// a read/write that would otherwise wait sees this and returns a terminal
+    /// error instead of hanging forever.
+    driver_exited: AtomicBool,
 }
 
 impl<T: IceTransport> ConnectionInner<T> {
@@ -495,6 +499,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             next_stream_index: AtomicU64::new(0),
             pending_shutdown: std::sync::Mutex::new(Vec::new()),
             poll_wakers: std::sync::Mutex::new(Vec::new()),
+            driver_exited: AtomicBool::new(false),
         });
 
         // Send Initial packet immediately (don't wait for driver)
@@ -549,6 +554,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             next_stream_index: AtomicU64::new(0),
             pending_shutdown: std::sync::Mutex::new(Vec::new()),
             poll_wakers: std::sync::Mutex::new(Vec::new()),
+            driver_exited: AtomicBool::new(false),
         });
 
         // Process the initial packet we already received
@@ -788,6 +794,13 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
             }
         }
     }
+
+    // Whatever ended the loop, the driver is now gone and nothing else will
+    // wake parked stream readers/writers. Flag it and wake everyone a final
+    // time so they can observe the exit and return a terminal error instead of
+    // waiting forever.
+    inner.driver_exited.store(true, Ordering::SeqCst);
+    inner.notify_state_change();
 }
 
 /// A QUIC stream for reading and writing data.
@@ -919,6 +932,12 @@ impl<T: IceTransport + 'static> Stream<T> {
                 }
             }
 
+            // Only the driver fires the notification we're about to wait on. If
+            // it has exited, no wake is coming, so error out rather than hang.
+            if self.inner.driver_exited.load(Ordering::Acquire) {
+                return Err(QuicError::ConnectionClosed);
+            }
+
             // Wait for the armed notification (driver fires it when data arrives).
             notified.await;
         }
@@ -1000,7 +1019,9 @@ impl<T: IceTransport + 'static> AsyncRead for Stream<T> {
                 if conn.stream_finished(this.stream_id) {
                     this.recv_fin.store(true, Ordering::Release);
                     Poll::Ready(Ok(())) // EOF
-                } else if conn.is_closed() {
+                } else if conn.is_closed() || this.inner.driver_exited.load(Ordering::Acquire) {
+                    // Closed, or the driver that would wake us is gone — either
+                    // way no more data is coming.
                     Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::ConnectionAborted,
                         "QUIC connection closed",
@@ -1031,7 +1052,17 @@ impl<T: IceTransport + 'static> AsyncWrite for Stream<T> {
         };
         match conn.stream_send(this.stream_id, buf, false) {
             // Flow-control blocked: re-polled when the peer grants more window.
-            Ok(0) | Err(quiche::Error::Done) => Poll::Pending,
+            Ok(0) | Err(quiche::Error::Done) => {
+                // If the driver's gone, waiting is hopeless.
+                if this.inner.driver_exited.load(Ordering::Acquire) {
+                    Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::ConnectionAborted,
+                        "QUIC connection closed",
+                    )))
+                } else {
+                    Poll::Pending
+                }
+            }
             Ok(n) => {
                 // Push out what's immediately sendable; the driver paces the rest.
                 if let Err(e) = this.inner.flush_ready(&mut conn) {
@@ -1324,15 +1355,11 @@ mod tests {
                     .unwrap();
                 AsyncWriteExt::write_all(&mut stream, &got).await.unwrap();
                 AsyncWriteExt::shutdown(&mut stream).await.unwrap();
-                // Hand the connection back instead of dropping it here. A real
-                // connection is pooled and long-lived; dropping it now tears down
-                // the loopback transport mid-flight: the client's next ack `send`
-                // fails, its driver exits, and a reader parked on our queued FIN
-                // never wakes.
-                //
-                // TODO: The transport-specific *trigger* is a test artifact,
-                // but the underlying driver-death-strands-readers gap is real and
-                // tracked separately (driver must notify + readers must observe exit).
+                // Hand the connection back so it outlives the client's read
+                // below. A real connection is pooled and long-lived, and the
+                // server must stay up to deliver the echo + FIN and ack the
+                // client; dropping it here would tear down the loopback transport
+                // mid-flight.
                 server
             });
 
@@ -1354,6 +1381,59 @@ mod tests {
         })
         .await
         .expect("test_loopback_poll_io timed out — likely a poll-impl deadlock");
+    }
+
+    /// A reader parked waiting for data must get a terminal error — not hang —
+    /// once the background driver exits. Here the peer (and its transport end)
+    /// goes away, so the client's driver hits a transport error and stops while
+    /// we are reading. Regression guard for the async-fn `read` path: the driver
+    /// flags its exit and wakes parked waiters so they don't wait forever.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_read_errors_when_driver_exits() {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let (client, server) = loopback_pair().await;
+            let stream = client.open_stream().await.unwrap();
+            stream.write_all(b"ping").await.unwrap();
+
+            // Drop the peer: the client's transport now fails, so its driver
+            // exits while we are about to park in read().
+            drop(server);
+
+            let mut buf = [0u8; 64];
+            let res = stream.read(&mut buf).await;
+            assert!(
+                res.is_err(),
+                "read after driver exit must return an error, got {res:?}"
+            );
+        })
+        .await
+        .expect("read must return promptly once the driver exits, not hang");
+    }
+
+    /// Same guarantee on the poll-based path: `poll_read` must surface a
+    /// terminal error once the driver is gone instead of parking forever.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_poll_read_errors_when_driver_exits() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let (client, server) = loopback_pair().await;
+            let mut stream = client.open_stream().await.unwrap();
+            AsyncWriteExt::write_all(&mut stream, b"ping")
+                .await
+                .unwrap();
+
+            drop(server);
+
+            let mut buf = [0u8; 64];
+            let res = AsyncReadExt::read(&mut stream, &mut buf).await;
+            assert!(
+                res.is_err(),
+                "poll_read after driver exit must return an error, got {res:?}"
+            );
+        })
+        .await
+        .expect("poll_read must return promptly once the driver exits, not hang");
     }
 
     /// Smoke test for concurrent stream multiplexing over a single connection.
