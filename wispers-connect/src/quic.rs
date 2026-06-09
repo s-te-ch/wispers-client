@@ -16,10 +16,13 @@ use boring::x509::extension::{BasicConstraints, SubjectKeyIdentifier};
 use boring::x509::{X509Builder, X509NameBuilder};
 use hkdf::Hkdf;
 use sha2::Sha256;
+use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::task::{Context, Poll, Waker};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::{Mutex, Notify};
 
 use crate::ice::{IceAnswerer, IceCaller, IceError};
@@ -284,6 +287,11 @@ struct ConnectionInner<T> {
     /// entry is `(stream_id, sent_fin, recv_fin)` — the two half-states captured
     /// at drop time, so the drain can shut down exactly the half/halves still open.
     pending_shutdown: std::sync::Mutex<Vec<(u64, bool, bool)>>,
+    /// Wakers parked by the poll-based stream I/O (`AsyncRead`/`AsyncWrite`). The
+    /// async-fn API waits on `state_notify`, but a synchronous `poll_*` can't
+    /// `.await` a `Notify`, so it registers its task waker here instead. The
+    /// driver wakes these alongside every `state_notify` signal.
+    poll_wakers: std::sync::Mutex<Vec<Waker>>,
 }
 
 impl<T: IceTransport> ConnectionInner<T> {
@@ -328,6 +336,53 @@ impl<T: IceTransport> ConnectionInner<T> {
                     }
                     Err(e) => return Err(QuicError::from(e)),
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Signal a connection state change to *both* waiter mechanisms: the
+    /// async-fn API's `Notify` and the poll-based API's waker registry.
+    fn notify_state_change(&self) {
+        self.state_notify.notify_waiters();
+        let wakers: Vec<Waker> = std::mem::take(&mut self.poll_wakers.lock().unwrap());
+        for w in wakers {
+            w.wake();
+        }
+    }
+
+    /// Register a poll task's waker so the next `notify_state_change` re-polls
+    /// it. De-duplicates by `will_wake` so repeated `Pending` polls from the
+    /// same task don't grow the list without bound.
+    fn register_poll_waker(&self, waker: &Waker) {
+        let mut wakers = self.poll_wakers.lock().unwrap();
+        if !wakers.iter().any(|w| w.will_wake(waker)) {
+            wakers.push(waker.clone());
+        }
+    }
+
+    /// Synchronous, pacing-aware flush used by the poll-based write path: send
+    /// the datagrams quiche has ready to go *now*, and stop at the first one
+    /// paced for the future (left for the driver) or on EWOULDBLOCK. Unlike
+    /// `flush_send` it never `.await`s, so it fits inside `poll_write`.
+    fn flush_ready(&self, conn: &mut quiche::Connection) -> Result<(), QuicError> {
+        let mut buf = [0u8; MAX_DATAGRAM_SIZE];
+        loop {
+            let (len, send_info) = match conn.send(&mut buf) {
+                Ok(v) => v,
+                Err(quiche::Error::Done) => break,
+                Err(e) => return Err(QuicError::Quic(e)),
+            };
+            // Stop at the first datagram paced more than ~1ms out and leave it
+            // for the driver's paced flush; sub-ms gaps are absorbed inline (the
+            // socket buffer soaks them up), matching `flush_send`.
+            if send_info.at > std::time::Instant::now() + std::time::Duration::from_millis(1) {
+                break;
+            }
+            match self.transport.send(&buf[..len]) {
+                Ok(()) => {}
+                Err(e) if e.is_would_block() => break, // buffer full; driver retries
+                Err(e) => return Err(QuicError::from(e)),
             }
         }
         Ok(())
@@ -439,6 +494,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             accepted_streams: Mutex::new(std::collections::HashSet::new()),
             next_stream_index: AtomicU64::new(0),
             pending_shutdown: std::sync::Mutex::new(Vec::new()),
+            poll_wakers: std::sync::Mutex::new(Vec::new()),
         });
 
         // Send Initial packet immediately (don't wait for driver)
@@ -492,6 +548,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             accepted_streams: Mutex::new(std::collections::HashSet::new()),
             next_stream_index: AtomicU64::new(0),
             pending_shutdown: std::sync::Mutex::new(Vec::new()),
+            poll_wakers: std::sync::Mutex::new(Vec::new()),
         });
 
         // Process the initial packet we already received
@@ -561,7 +618,7 @@ impl<T: IceTransport + 'static> Connection<T> {
         }
         self.inner.flush_send().await?;
         self.inner.shutdown.store(true, Ordering::SeqCst);
-        self.inner.state_notify.notify_waiters();
+        self.inner.notify_state_change();
         Ok(())
     }
 
@@ -691,7 +748,7 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
 
         // Check if connection is closed
         if inner.is_closed().await {
-            inner.state_notify.notify_waiters();
+            inner.notify_state_change();
             break;
         }
 
@@ -709,7 +766,7 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
                             break;
                         }
                         // Notify waiters that state may have changed
-                        inner.state_notify.notify_waiters();
+                        inner.notify_state_change();
                     }
                     Err(_) => {
                         // ICE error, stop the driver
@@ -721,7 +778,7 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
                 // Timeout - call on_timeout
                 inner.handle_timeout().await;
                 // Notify in case handshake progressed
-                inner.state_notify.notify_waiters();
+                inner.notify_state_change();
             }
             _ = keepalive_interval.tick() => {
                 // Send keepalive PING to prevent idle timeout
@@ -892,6 +949,131 @@ impl<T: IceTransport + 'static> Stream<T> {
         }
         self.inner.flush_send().await?;
         Ok(())
+    }
+}
+
+// Poll-based I/O, additive to the async-fn API above. Lets the stream be used
+// directly as a hyper/tokio I/O type. The conn lock is taken with `try_lock`
+// (it is never held across an `.await`); on contention we reschedule via the
+// task waker.
+impl<T: IceTransport + 'static> AsyncRead for Stream<T> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        // `Stream` holds only an `Arc` + atomics, so it is `Unpin`; `poll_*`
+        // just `get_mut`s.
+        let this = self.get_mut();
+        // Already saw FIN. Report EOF without touching quiche (the stream may
+        // have been collected).
+        if this.recv_fin.load(Ordering::Acquire) {
+            return Poll::Ready(Ok(()));
+        }
+        // Arm before checking, so a state change racing our check still re-polls
+        // us (de-duplicated by `will_wake`).
+        this.inner.register_poll_waker(cx.waker());
+
+        let mut conn = match this.inner.conn.try_lock() {
+            Ok(g) => g,
+            // Briefly contended. Reschedule to retry.
+            Err(_) => {
+                cx.waker().wake_by_ref();
+                return Poll::Pending;
+            }
+        };
+
+        let dst = buf.initialize_unfilled();
+        match conn.stream_recv(this.stream_id, dst) {
+            Ok((n, fin)) => {
+                if fin {
+                    this.recv_fin.store(true, Ordering::Release);
+                }
+                if n == 0 && !fin {
+                    Poll::Pending // no data right now, but not EOF
+                } else {
+                    buf.advance(n);
+                    Poll::Ready(Ok(()))
+                }
+            }
+            Err(quiche::Error::Done) => {
+                if conn.stream_finished(this.stream_id) {
+                    this.recv_fin.store(true, Ordering::Release);
+                    Poll::Ready(Ok(())) // EOF
+                } else if conn.is_closed() {
+                    Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::ConnectionAborted,
+                        "QUIC connection closed",
+                    )))
+                } else {
+                    Poll::Pending
+                }
+            }
+            Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("{e:?}")))),
+        }
+    }
+}
+
+impl<T: IceTransport + 'static> AsyncWrite for Stream<T> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+        this.inner.register_poll_waker(cx.waker());
+        let mut conn = match this.inner.conn.try_lock() {
+            Ok(g) => g,
+            Err(_) => {
+                cx.waker().wake_by_ref(); // contended; retry (not a state change)
+                return Poll::Pending;
+            }
+        };
+        match conn.stream_send(this.stream_id, buf, false) {
+            // Flow-control blocked: re-polled when the peer grants more window.
+            Ok(0) | Err(quiche::Error::Done) => Poll::Pending,
+            Ok(n) => {
+                // Push out what's immediately sendable; the driver paces the rest.
+                if let Err(e) = this.inner.flush_ready(&mut conn) {
+                    return Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("{e:?}"),
+                    )));
+                }
+                Poll::Ready(Ok(n))
+            }
+            Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("{e:?}")))),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        if let Ok(mut conn) = this.inner.conn.try_lock() {
+            if let Err(e) = this.inner.flush_ready(&mut conn) {
+                return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("{e:?}"))));
+            }
+        }
+        // Whatever is still queued is the driver's job to flush (with pacing).
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        let mut conn = match this.inner.conn.try_lock() {
+            Ok(g) => g,
+            Err(_) => {
+                cx.waker().wake_by_ref(); // contended; retry (not a state change)
+                return Poll::Pending;
+            }
+        };
+        match conn.stream_send(this.stream_id, &[], true) {
+            Ok(_) | Err(quiche::Error::Done) => {
+                this.sent_fin.store(true, Ordering::Release);
+                let _ = this.inner.flush_ready(&mut conn);
+                Poll::Ready(Ok(()))
+            }
+            Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("{e:?}")))),
+        }
     }
 }
 
@@ -1118,6 +1300,51 @@ mod tests {
         assert_eq!(n, 0);
 
         server_task.await.unwrap();
+    }
+
+    /// Exercises the poll-based `AsyncRead`/`AsyncWrite` impls end-to-end:
+    /// write + FIN + read-to-EOF, driven through tokio's Ext helpers so the
+    /// data flows via `poll_read`/`poll_write`/`poll_shutdown` and the
+    /// poll-waker registry, not the async-fn API. Multi-threaded so the
+    /// driver and stream tasks run in parallel like the real binaries.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_loopback_poll_io() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Deadlock guard: a poll-impl regression (e.g. a lost wakeup) would
+        // otherwise hang forever instead of failing.
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let (client, server) = loopback_pair().await;
+            let payload = b"poll-based hello over QUIC".to_vec();
+            let expected = payload.clone();
+
+            let server_task = tokio::spawn(async move {
+                let mut stream = server.accept_stream().await.unwrap();
+                // Read the whole request to EOF, then echo it back and FIN.
+                let mut got = Vec::new();
+                AsyncReadExt::read_to_end(&mut stream, &mut got)
+                    .await
+                    .unwrap();
+                AsyncWriteExt::write_all(&mut stream, &got).await.unwrap();
+                AsyncWriteExt::shutdown(&mut stream).await.unwrap();
+            });
+
+            let mut stream = client.open_stream().await.unwrap();
+            AsyncWriteExt::write_all(&mut stream, &payload)
+                .await
+                .unwrap();
+            AsyncWriteExt::shutdown(&mut stream).await.unwrap(); // FIN so the server's read_to_end ends
+
+            let mut echoed = Vec::new();
+            AsyncReadExt::read_to_end(&mut stream, &mut echoed)
+                .await
+                .unwrap();
+            assert_eq!(echoed, expected);
+
+            server_task.await.unwrap();
+        })
+        .await
+        .expect("test_loopback_poll_io timed out — likely a poll-impl deadlock");
     }
 
     /// Smoke test for concurrent stream multiplexing over a single connection.
