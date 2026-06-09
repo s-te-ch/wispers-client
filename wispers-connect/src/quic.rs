@@ -50,6 +50,18 @@ const INITIAL_MAX_DATA: u64 = 10_000_000; // 10 MB
 const INITIAL_MAX_STREAM_DATA: u64 = 1_000_000; // 1 MB
 
 /// Maximum concurrent bidirectional streams.
+///
+/// waclient opens one stream per HTTP request (`Connection: close`), so a
+/// browser reload storm — many parallel requests, plus cancelled in-flight ones
+/// whose MAX_STREAMS credit is only reclaimed a round-trip later — churns
+/// through streams fast. A low ceiling makes `open_stream` block on credit under
+/// bursts (transient stalls that clear once the churn stops). The cap is cheap:
+/// quiche allocates per-stream state lazily and the real backpressure is the
+/// connection-level data limit (`INITIAL_MAX_DATA`), so this just buys burst
+/// headroom. Kept modest because each concurrent stream the peer opens costs a
+/// spawned task and a fresh upstream TCP connection on the answerer — and a
+/// connection serves a single user, so the realistic burst ceiling is low
+/// hundreds (a ~25-request page reload-stormed a few times over).
 const INITIAL_MAX_STREAMS_BIDI: u64 = 100;
 
 /// Length of the derived PSK in bytes.
@@ -767,6 +779,18 @@ async fn driver_loop<T: IceTransport>(inner: Arc<ConnectionInner<T>>) {
         // Check if we should stop
         if inner.shutdown.load(Ordering::SeqCst) {
             break;
+        }
+
+        // Reset streams abandoned (dropped without a clean close) since the last
+        // pass, so their MAX_STREAMS credit is returned to the peer promptly
+        // instead of waiting for the next open_stream/accept_stream to drain the
+        // queue — which, between request bursts, may be a long while. The
+        // resulting RESET/STOP_SENDING frames go out with the flush just below.
+        // Gated on a cheap non-empty check so an idle driver doesn't take the
+        // connection lock every tick.
+        if !inner.pending_shutdown.lock().unwrap().is_empty() {
+            let mut conn = inner.conn.lock().await;
+            inner.drain_pending_shutdown(&mut conn);
         }
 
         // Flush any pending outgoing packets
@@ -1528,6 +1552,72 @@ mod tests {
         .expect("handshake must return promptly once the driver exits, not hang");
     }
 
+    /// The driver must reclaim an abandoned stream's MAX_STREAMS credit on its
+    /// own, without waiting for the next `open_stream`/`accept_stream` to drain
+    /// the cleanup queue. Models the reload-storm pattern: open up to the
+    /// concurrent-stream cap, then abandon every stream (as cancelled requests
+    /// do) and — crucially — make no further `open_stream` call. The peer is
+    /// passive (just holds what it accepts), so the only thing that can return
+    /// credit is the client driver flushing the queued RESETs. Before the
+    /// driver-side drain this hung: the RESETs never went out, so the peer never
+    /// collected the streams nor raised MAX_STREAMS.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_driver_reclaims_abandoned_stream_credit() {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let (client, server) = loopback_pair().await;
+
+            // Peer actively drains each accepted stream (reads until the client's
+            // reset arrives), so quiche can collect it and raise MAX_STREAMS — a
+            // passive peer that never reads would leak the credit regardless. The
+            // peer never abandons a stream itself, so the only thing that can
+            // return the client's credit is the client driver flushing the queued
+            // RESETs.
+            let _server_task = tokio::spawn(async move {
+                while let Ok(stream) = server.accept_stream().await {
+                    tokio::spawn(async move {
+                        let mut buf = [0u8; 64];
+                        loop {
+                            match stream.read(&mut buf).await {
+                                Ok(0) | Err(_) => break,
+                                Ok(_) => {}
+                            }
+                        }
+                    });
+                }
+            });
+
+            // Exhaust the client's whole stream allowance, holding every handle so
+            // none close cleanly. The 1-byte write makes each stream readable so
+            // the peer actually accepts it.
+            let cap = INITIAL_MAX_STREAMS_BIDI;
+            let mut held = Vec::new();
+            for _ in 0..cap {
+                let s = client.open_stream().await.expect("open within cap");
+                s.write_all(b"x").await.expect("write");
+                held.push(s);
+            }
+            assert_eq!(
+                client.inner.conn.lock().await.peer_streams_left_bidi(),
+                0,
+                "allowance should be exhausted after opening the full cap"
+            );
+
+            // Abandon them all, then DO NOT call open_stream — only the
+            // driver-side drain can get the credit back.
+            drop(held);
+
+            loop {
+                let left = client.inner.conn.lock().await.peer_streams_left_bidi();
+                if left > 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("driver must reclaim abandoned-stream credit without a new open_stream");
+    }
+
     /// Smoke test for concurrent stream multiplexing over a single connection.
     ///
     /// Opens many streams at once and ping-pongs single bytes on each, blocking on
@@ -1734,8 +1824,9 @@ mod tests {
     ///
     /// The previous allocator scanned candidate IDs up to `4 * INITIAL_…` and
     /// never reused them, so it hard-capped a connection at `INITIAL_MAX_STREAMS_BIDI`
-    /// streams *for its entire life* — the ~101st `open_stream` returned
-    /// "no available stream IDs". This opens 250 sequentially and must succeed.
+    /// streams *for its entire life* — the `(cap+1)`th `open_stream` returned
+    /// "no available stream IDs". This opens past the cap sequentially and must
+    /// succeed.
     #[tokio::test]
     async fn test_loopback_streams_beyond_initial_limit() {
         let (client, server) = loopback_pair().await;
@@ -1764,7 +1855,9 @@ mod tests {
 
         // Open well past the 100-stream initial limit, one at a time (each fully
         // closed before the next so credit always replenishes), verifying echoes.
-        const COUNT: u64 = 250;
+        // Exceed the concurrent-stream cap so this keeps guarding the
+        // lifetime-cap regression even as INITIAL_MAX_STREAMS_BIDI changes.
+        const COUNT: u64 = INITIAL_MAX_STREAMS_BIDI + 20;
         for i in 0..COUNT {
             let stream = client
                 .open_stream()
