@@ -18,6 +18,12 @@ crate-type = ["rlib", "cdylib"]
 # feature is self-enforcing — enabling it on any other build fails loudly.
 taskdump = ["tokio/taskdump"]
 
+# TEMP: build libjuice with JUICE_DISABLE_CONSENT_FRESHNESS=1, disabling the RFC
+# 7675 consent-freshness teardown. Used to test whether the ~30s consent-expiry
+# churn on flaky/multi-homed paths is what stalls access. Data-plane liveness is
+# still covered by QUIC's idle timeout + keepalives + the pool.
+disable-consent-freshness = []
+
 [dependencies]
 aes-gcm = "0.10"
 log = "0.4"

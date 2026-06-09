@@ -97,6 +97,14 @@ fn build_libjuice_native(libjuice_dir: &Path) -> BuildResult<()> {
         config.cflag("-fno-stack-check");
     }
 
+    // TEMP: optional libjuice flag (cargo feature `disable-consent-freshness`)
+    // to disable RFC 7675 consent freshness, so we can test whether the ~30s
+    // consent-expiry teardown is what stalls access on flaky/multi-homed paths.
+    if env::var("CARGO_FEATURE_DISABLE_CONSENT_FRESHNESS").is_ok() {
+        config.cflag("-DJUICE_DISABLE_CONSENT_FRESHNESS=1");
+        println!("cargo:warning=libjuice built with JUICE_DISABLE_CONSENT_FRESHNESS=1");
+    }
+
     let dst = config.build();
 
     let lib_dir = dst.join("lib");
