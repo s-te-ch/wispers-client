@@ -50,18 +50,6 @@ const INITIAL_MAX_DATA: u64 = 10_000_000; // 10 MB
 const INITIAL_MAX_STREAM_DATA: u64 = 1_000_000; // 1 MB
 
 /// Maximum concurrent bidirectional streams.
-///
-/// waclient opens one stream per HTTP request (`Connection: close`), so a
-/// browser reload storm — many parallel requests, plus cancelled in-flight ones
-/// whose MAX_STREAMS credit is only reclaimed a round-trip later — churns
-/// through streams fast. A low ceiling makes `open_stream` block on credit under
-/// bursts (transient stalls that clear once the churn stops). The cap is cheap:
-/// quiche allocates per-stream state lazily and the real backpressure is the
-/// connection-level data limit (`INITIAL_MAX_DATA`), so this just buys burst
-/// headroom. Kept modest because each concurrent stream the peer opens costs a
-/// spawned task and a fresh upstream TCP connection on the answerer — and a
-/// connection serves a single user, so the realistic burst ceiling is low
-/// hundreds (a ~25-request page reload-stormed a few times over).
 const INITIAL_MAX_STREAMS_BIDI: u64 = 256;
 
 /// Length of the derived PSK in bytes.
@@ -1775,7 +1763,7 @@ mod tests {
             }
         });
 
-        // Open well past the 100-stream initial limit, one at a time (each fully
+        // Open well past the initial stream limit, one at a time (each fully
         // closed before the next so credit always replenishes), verifying echoes.
         // Exceed the concurrent-stream cap so this keeps guarding the
         // lifetime-cap regression even as INITIAL_MAX_STREAMS_BIDI changes.
