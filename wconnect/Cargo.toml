@@ -1,6 +1,6 @@
 [package]
 name = "wconnect"
-version = "0.9.1"
+version = "0.9.2"
 edition = "2024"
 license = "MIT"
 authors = ["Matthias Scheidegger <mbs@s-te.ch>"]
@@ -29,7 +29,7 @@ serde_json = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "fs", "signal"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-wispers-connect = { path = "../wispers-connect", version = "0.9.1" }
+wispers-connect = { path = "../wispers-connect", version = "0.9.2" }
 
 [target.'cfg(unix)'.dependencies]
 daemonize = "0.5"
