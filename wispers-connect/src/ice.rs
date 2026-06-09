@@ -29,6 +29,16 @@ pub enum IceError {
     InvalidPort,
 }
 
+impl IceError {
+    /// True if a send failed only because the socket send buffer was full
+    /// (libjuice returned `JUICE_ERR_AGAIN`/EWOULDBLOCK). This is transient
+    /// backpressure — the caller should slow down and retry, not treat the
+    /// connection as broken.
+    pub fn is_would_block(&self) -> bool {
+        matches!(self, IceError::Juice(JuiceError::Again))
+    }
+}
+
 pub type Result<T> = std::result::Result<T, IceError>;
 
 /// Convert hub's StunTurnConfig to juice's IceServersConfig.
