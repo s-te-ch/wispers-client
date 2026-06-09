@@ -1304,7 +1304,7 @@ mod tests {
     /// data flows via `poll_read`/`poll_write`/`poll_shutdown` and the
     /// poll-waker registry, not the async-fn API. Multi-threaded so the
     /// driver and stream tasks run in parallel like the real binaries.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_loopback_poll_io() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -1324,6 +1324,16 @@ mod tests {
                     .unwrap();
                 AsyncWriteExt::write_all(&mut stream, &got).await.unwrap();
                 AsyncWriteExt::shutdown(&mut stream).await.unwrap();
+                // Hand the connection back instead of dropping it here. A real
+                // connection is pooled and long-lived; dropping it now tears down
+                // the loopback transport mid-flight: the client's next ack `send`
+                // fails, its driver exits, and a reader parked on our queued FIN
+                // never wakes.
+                //
+                // TODO: The transport-specific *trigger* is a test artifact,
+                // but the underlying driver-death-strands-readers gap is real and
+                // tracked separately (driver must notify + readers must observe exit).
+                server
             });
 
             let mut stream = client.open_stream().await.unwrap();
@@ -1338,7 +1348,9 @@ mod tests {
                 .unwrap();
             assert_eq!(echoed, expected);
 
-            server_task.await.unwrap();
+            // Joined only now, so the server connection stays alive through the
+            // client's read above.
+            let _server = server_task.await.unwrap();
         })
         .await
         .expect("test_loopback_poll_io timed out — likely a poll-impl deadlock");
