@@ -581,6 +581,9 @@ impl<T: IceTransport + 'static> Connection<T> {
     /// handles the actual packet exchange.
     pub async fn handshake(&self) -> Result<(), QuicError> {
         loop {
+            let mut notified = std::pin::pin!(self.inner.state_notify.notified());
+            notified.as_mut().enable();
+
             // Check current state
             {
                 let conn = self.inner.conn.lock().await;
@@ -591,9 +594,14 @@ impl<T: IceTransport + 'static> Connection<T> {
                     return Err(QuicError::HandshakeFailed);
                 }
             }
+            // Without the driver, the handshake never completes. Fail now
+            // instead of waiting.
+            if self.inner.driver_exited.load(Ordering::Acquire) {
+                return Err(QuicError::HandshakeFailed);
+            }
 
             // Wait for state change
-            self.inner.state_notify.notified().await;
+            notified.await;
         }
     }
 
@@ -655,6 +663,12 @@ impl<T: IceTransport + 'static> Connection<T> {
                 if conn.is_closed() {
                     return Err(QuicError::ConnectionClosed);
                 }
+                // A dead driver will never flush this stream's opening frame nor
+                // pull in the peer's MAX_STREAMS. Bail before handing back a
+                // doomed stream.
+                if self.inner.driver_exited.load(Ordering::Acquire) {
+                    return Err(QuicError::ConnectionClosed);
+                }
                 if conn.peer_streams_left_bidi() == 0 {
                     // No credit right now — fall through to wait for MAX_STREAMS.
                     None
@@ -696,6 +710,9 @@ impl<T: IceTransport + 'static> Connection<T> {
     /// Either side can accept streams opened by the other.
     pub async fn accept_stream(&self) -> Result<Stream<T>, QuicError> {
         loop {
+            let mut notified = std::pin::pin!(self.inner.state_notify.notified());
+            notified.as_mut().enable();
+
             // Check for readable streams (peer has opened and sent data)
             {
                 let mut conn = self.inner.conn.lock().await;
@@ -720,10 +737,15 @@ impl<T: IceTransport + 'static> Connection<T> {
                     return Err(QuicError::ConnectionClosed);
                 }
             }
+            // A dead driver will never surface a new peer stream, so don't wait
+            // for one that can't arrive.
+            if self.inner.driver_exited.load(Ordering::Acquire) {
+                return Err(QuicError::ConnectionClosed);
+            }
 
             // Push out any queued resets, then wait for the next state change.
             self.inner.flush_send().await?;
-            self.inner.state_notify.notified().await;
+            notified.await;
         }
     }
 }
@@ -1434,6 +1456,76 @@ mod tests {
         })
         .await
         .expect("poll_read must return promptly once the driver exits, not hang");
+    }
+
+    /// `open_stream` must fail — not hand back a doomed stream, nor park waiting
+    /// for MAX_STREAMS credit — once the driver has exited. This is the liveness
+    /// signal a connection pool needs to evict and re-establish a connection
+    /// whose transport died. The peer is kept alive so a `send` would still
+    /// succeed, isolating the driver-exit bail from transport/closed errors.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_open_stream_errors_when_driver_exits() {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let (client, _server) = loopback_pair().await;
+            // Simulate the driver dying (as it would on a transport failure)
+            // while the quiche connection is still nominally open.
+            client.inner.driver_exited.store(true, Ordering::SeqCst);
+            let res = client.open_stream().await;
+            assert!(
+                res.is_err(),
+                "open_stream must fail once the driver has exited, got a stream"
+            );
+        })
+        .await
+        .expect("open_stream must return promptly once the driver exits, not hang");
+    }
+
+    /// `accept_stream` must likewise fail rather than wait forever for a peer
+    /// stream that a dead driver can never surface.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_accept_stream_errors_when_driver_exits() {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let (_client, server) = loopback_pair().await;
+            server.inner.driver_exited.store(true, Ordering::SeqCst);
+            let res = server.accept_stream().await;
+            assert!(
+                res.is_err(),
+                "accept_stream must fail once the driver has exited, got a stream"
+            );
+        })
+        .await
+        .expect("accept_stream must return promptly once the driver exits, not hang");
+    }
+
+    /// A pending `handshake` must fail once the driver exits instead of waiting
+    /// out the full idle timeout. No peer ever answers here, so the handshake is
+    /// stuck until we mark the driver gone.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_handshake_errors_when_driver_exits() {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let psk = derive_psk(&[7u8; 32]);
+            let scid = quiche::ConnectionId::from_vec(vec![9, 9, 9, 9]);
+            // Hold both far ends so the transport's send/recv don't error — only
+            // the driver-exit bail should end the handshake.
+            let (a_tx, _a_rx) = tokio::sync::mpsc::unbounded_channel();
+            let (_b_tx, b_rx) = tokio::sync::mpsc::unbounded_channel();
+            let transport = ChannelTransport {
+                tx: a_tx,
+                rx: tokio::sync::Mutex::new(b_rx),
+            };
+            let client = Connection::new_client(transport, psk, scid)
+                .await
+                .expect("client created");
+
+            client.inner.driver_exited.store(true, Ordering::SeqCst);
+            let res = client.handshake().await;
+            assert!(
+                res.is_err(),
+                "handshake must fail once the driver has exited, got Ok"
+            );
+        })
+        .await
+        .expect("handshake must return promptly once the driver exits, not hang");
     }
 
     /// Smoke test for concurrent stream multiplexing over a single connection.
