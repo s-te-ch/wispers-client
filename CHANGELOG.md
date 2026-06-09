@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.9.2 — Native stream I/O and dead-connection liveness
+
+Improvements triggered by work on integrating `hyper`. `QuicStream` gains native
+poll-based I/O, and a dead transport now surfaces as a prompt error everywhere
+instead of hanging. No breaking changes.
+
+- **`QuicStream` now implements tokio's `AsyncRead`/`AsyncWrite` directly.** It
+  can be handed to hyper (via `TokioIo`) or any tokio I/O consumer without a
+  wrapper, replacing the boxed-future adapter callers previously had to write.
+  The existing async `read`/`write`/`finish` methods are unchanged.
+- **A dead background driver no longer hangs callers.** If the driver stops (for
+  example because the ICE transport fails), parked reads, writes as well as
+  `open_stream`, `accept_stream`, and `handshake` calls now return a terminal
+  error promptly instead of waiting forever.
+- **More concurrent-stream headroom.** The per-connection bidirectional stream
+  limit is raised from 100 to 256. This is a compromise value arrived at with
+  local load testing.
+
 ## v0.9.1 — Stream-handling robustness under load
 
 Stability release hardening the QUIC stream lifecycle and send backpressure
