@@ -102,7 +102,7 @@ mavenPublishing {
     )
     signAllPublications()
 
-    coordinates("dev.wispers", "connect", findProperty("VERSION_NAME") as String? ?: "0.9.0")
+    coordinates("dev.wispers", "connect", findProperty("VERSION_NAME") as String? ?: "0.9.1")
 
     pom {
         name.set("Wispers Connect")
