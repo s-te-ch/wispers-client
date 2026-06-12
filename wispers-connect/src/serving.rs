@@ -155,7 +155,9 @@ impl EndorsingState {
             expires_at: Instant::now() + ttl,
         });
 
-        log::info!("Generated pairing code: {}", code.format());
+        // Never log the formatted code: the secret half grants pairing within
+        // the TTL window to anyone with log access.
+        log::info!("Generated pairing code for node {}", code.node_number);
         Ok(code)
     }
 
