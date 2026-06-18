@@ -10,8 +10,9 @@ class TypesTest {
     fun `WispersStatus fromCode returns correct status`() {
         assertEquals(WispersStatus.SUCCESS, WispersStatus.fromCode(0))
         assertEquals(WispersStatus.NULL_POINTER, WispersStatus.fromCode(1))
-        assertEquals(WispersStatus.HUB_ERROR, WispersStatus.fromCode(12))
-        assertEquals(WispersStatus.INVALID_STATE, WispersStatus.fromCode(15))
+        assertEquals(WispersStatus.HUB_ERROR, WispersStatus.fromCode(11))
+        assertEquals(WispersStatus.INVALID_STATE, WispersStatus.fromCode(14))
+        assertEquals(WispersStatus.REVOKED, WispersStatus.fromCode(18))
     }
 
     @Test
@@ -54,13 +55,15 @@ class TypesTest {
         assertTrue(WispersException.fromStatus(3) is WispersException.StoreError)
         assertTrue(WispersException.fromStatus(4) is WispersException.AlreadyRegistered)
         assertTrue(WispersException.fromStatus(5) is WispersException.NotRegistered)
-        assertTrue(WispersException.fromStatus(7) is WispersException.NotFound)
-        assertTrue(WispersException.fromStatus(10) is WispersException.InvalidActivationCode)
-        assertTrue(WispersException.fromStatus(11) is WispersException.ActivationFailed)
-        assertTrue(WispersException.fromStatus(12) is WispersException.HubError)
-        assertTrue(WispersException.fromStatus(13) is WispersException.ConnectionFailed)
-        assertTrue(WispersException.fromStatus(14) is WispersException.Timeout)
-        assertTrue(WispersException.fromStatus(15) is WispersException.InvalidState)
+        assertTrue(WispersException.fromStatus(6) is WispersException.NotFound)
+        assertTrue(WispersException.fromStatus(9) is WispersException.InvalidActivationCode)
+        assertTrue(WispersException.fromStatus(10) is WispersException.ActivationFailed)
+        assertTrue(WispersException.fromStatus(11) is WispersException.HubError)
+        assertTrue(WispersException.fromStatus(12) is WispersException.ConnectionFailed)
+        assertTrue(WispersException.fromStatus(13) is WispersException.Timeout)
+        assertTrue(WispersException.fromStatus(14) is WispersException.InvalidState)
+        assertTrue(WispersException.fromStatus(15) is WispersException.Unauthenticated)
+        assertTrue(WispersException.fromStatus(18) is WispersException.Revoked)
     }
 
     @Test
@@ -81,6 +84,7 @@ class TypesTest {
         val info = NodeInfo(
             nodeNumber = 1,
             name = "Test Node",
+            metadata = "{\"platform\":\"test\"}",
             isSelf = true,
             activationStatus = ActivationStatus.ACTIVATED,
             lastSeenAtMillis = 1234567890L,
@@ -89,6 +93,7 @@ class TypesTest {
 
         assertEquals(1, info.nodeNumber)
         assertEquals("Test Node", info.name)
+        assertEquals("{\"platform\":\"test\"}", info.metadata)
         assertTrue(info.isSelf)
         assertEquals(ActivationStatus.ACTIVATED, info.activationStatus)
         assertEquals(1234567890L, info.lastSeenAtMillis)
@@ -99,11 +104,13 @@ class TypesTest {
     fun `RegistrationInfo data class works correctly`() {
         val info = RegistrationInfo(
             connectivityGroupId = "test-group-id",
-            nodeNumber = 42
+            nodeNumber = 42,
+            attestationJwt = "test-jwt"
         )
 
         assertEquals("test-group-id", info.connectivityGroupId)
         assertEquals(42, info.nodeNumber)
+        assertEquals("test-jwt", info.attestationJwt)
     }
 
     @Test

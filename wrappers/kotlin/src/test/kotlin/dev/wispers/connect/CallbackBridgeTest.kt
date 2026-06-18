@@ -70,7 +70,7 @@ class CallbackBridgeTest {
             kotlinx.coroutines.runBlocking {
                 suspendCancellableCoroutine { cont: CancellableContinuation<Unit> ->
                     val ctx = CallbackBridge.register(cont)
-                    CallbackBridge.resumeWithStatus(ctx, 12) // HUB_ERROR = 12
+                    CallbackBridge.resumeWithStatus(ctx, 11) // HUB_ERROR = 11
                 }
             }
         }

@@ -46,6 +46,10 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
     testImplementation("org.mockito:mockito-core:5.8.0")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.2.1")
+    // Host JVM unit tests that exercise JNA need the desktop jar (it bundles
+    // libjnidispatch for the host platform). The `implementation` dependency
+    // above is the `@aar` variant, which only ships Android ABI natives.
+    testImplementation("net.java.dev.jna:jna:5.17.0")
 
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test:runner:1.5.2")
