@@ -806,6 +806,15 @@ impl ServingSession {
                     .await;
                 return;
             }
+            Err(crate::hub::HubError::RosterVerification(
+                crate::roster::RosterVerificationError::VerifierRevoked(_),
+            )) => {
+                // We've been revoked from the roster — can no longer serve.
+                log::info!("  Node has been revoked, cannot accept P2P connections");
+                self.send_error_response(request_id, "node has been revoked")
+                    .await;
+                return;
+            }
             Err(e) => {
                 log::error!("  Failed to fetch/verify roster: {}", e);
                 self.send_error_response(request_id, "internal error").await;

@@ -46,6 +46,32 @@ class Node(Handle):
         ptr = self._consume()
         call_async(get_lib().wispers_node_logout_async, ptr, cb=BASIC_CB)
 
+    def revoke_node(self, target_node_number: int) -> None:
+        """Revoke _another_ node from the connectivity group's roster.
+
+        Requires ACTIVATED state. The caller stays active and the handle
+        remains valid. Unilateral and irreversible — a revoked node number is
+        permanently retired. To revoke yourself, use logout() instead.
+        """
+        from ._library import get_lib
+        import ctypes
+        ptr = self._require_open()
+        call_async(
+            get_lib().wispers_node_revoke_node_async, ptr,
+            ctypes.c_int32(target_node_number), cb=BASIC_CB,
+        )
+
+    def refresh_membership(self) -> None:
+        """Re-fetch and re-verify the roster, updating cached state to match.
+
+        Use on a long-running node to proactively detect a revocation that
+        happened while it was active. The handle remains valid; query state
+        afterwards to read the (possibly changed) state.
+        """
+        from ._library import get_lib
+        ptr = self._require_open()
+        call_async(get_lib().wispers_node_refresh_membership_async, ptr, cb=BASIC_CB)
+
     def group_info(self) -> GroupInfo:
         """Get group activation state and node list. Requires REGISTERED or ACTIVATED."""
         from ._library import get_lib

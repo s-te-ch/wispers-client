@@ -357,6 +357,104 @@ pub extern "C" fn wispers_node_logout_async(
     WispersStatus::Success
 }
 
+/// Revoke another node from the connectivity group's roster.
+///
+/// Unlike logout, this revokes a *different* node and leaves the caller fully
+/// active; the handle is NOT consumed. Requires Activated state.
+///
+/// Returns (via callback) INVALID_STATE if not activated, REVOKED if this node
+/// has itself been revoked, or an error if the target is this node
+/// (use logout instead) or is not an active roster member.
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_node_revoke_node_async(
+    handle: *mut WispersNodeHandle,
+    target_node_number: i32,
+    ctx: *mut c_void,
+    callback: WispersCallback,
+) -> WispersStatus {
+    if handle.is_null() {
+        return WispersStatus::NullPointer;
+    }
+
+    let callback = match callback {
+        Some(cb) => cb,
+        None => return WispersStatus::MissingCallback,
+    };
+
+    let ctx = CallbackContext(ctx);
+    let handle_clone = unsafe { &*handle }.clone();
+
+    runtime::spawn(async move {
+        let result = {
+            let node = handle_clone.lock().await;
+            node.revoke_node(target_node_number).await
+        };
+
+        match result {
+            Ok(()) => unsafe {
+                callback(ctx.ptr(), WispersStatus::Success, std::ptr::null());
+            },
+            Err(e) => {
+                let detail = CString::new(e.to_string()).unwrap_or_default();
+                let status: WispersStatus = e.into();
+                unsafe {
+                    callback(ctx.ptr(), status, detail.as_ptr());
+                }
+            }
+        }
+    });
+
+    WispersStatus::Success
+}
+
+/// Re-fetch and re-verify this node's roster from the hub, updating cached
+/// state to match. Use on a long-running node to proactively detect a
+/// revocation that happened while it was active.
+///
+/// The handle is NOT consumed. After the callback reports success, query
+/// `wispers_node_state()` to read the (possibly changed) state — in particular
+/// REVOKED if this node has been revoked.
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_node_refresh_membership_async(
+    handle: *mut WispersNodeHandle,
+    ctx: *mut c_void,
+    callback: WispersCallback,
+) -> WispersStatus {
+    if handle.is_null() {
+        return WispersStatus::NullPointer;
+    }
+
+    let callback = match callback {
+        Some(cb) => cb,
+        None => return WispersStatus::MissingCallback,
+    };
+
+    let ctx = CallbackContext(ctx);
+    let handle_clone = unsafe { &*handle }.clone();
+
+    runtime::spawn(async move {
+        let result = {
+            let mut node = handle_clone.lock().await;
+            node.refresh_membership().await
+        };
+
+        match result {
+            Ok(_state) => unsafe {
+                callback(ctx.ptr(), WispersStatus::Success, std::ptr::null());
+            },
+            Err(e) => {
+                let detail = CString::new(e.to_string()).unwrap_or_default();
+                let status: WispersStatus = e.into();
+                unsafe {
+                    callback(ctx.ptr(), status, detail.as_ptr());
+                }
+            }
+        }
+    });
+
+    WispersStatus::Success
+}
+
 /// Get the group's activation state and node list.
 ///
 /// Returns INVALID_STATE if the node is in Pending state.
@@ -399,6 +497,7 @@ fn node_state_to_ffi(state: NodeState) -> WispersNodeState {
         NodeState::Pending => WispersNodeState::Pending,
         NodeState::Registered => WispersNodeState::Registered,
         NodeState::Activated => WispersNodeState::Activated,
+        NodeState::Revoked => WispersNodeState::Revoked,
     }
 }
 

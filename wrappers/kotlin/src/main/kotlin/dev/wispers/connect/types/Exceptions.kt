@@ -78,6 +78,10 @@ sealed class WispersException(
     class PeerUnavailable(message: String = "Peer unavailable") :
         WispersException(message, WispersStatus.PEER_UNAVAILABLE)
 
+    /** This node has been revoked from the connectivity group's roster. */
+    class Revoked(message: String = "Node has been revoked") :
+        WispersException(message, WispersStatus.REVOKED)
+
     /** Unknown error status. */
     class Unknown(status: WispersStatus, message: String = "Unknown error: $status") :
         WispersException(message, status)
@@ -122,6 +126,7 @@ sealed class WispersException(
             WispersStatus.UNAUTHENTICATED -> Unauthenticated(detail ?: "Node removed from connectivity group")
             WispersStatus.PEER_REJECTED -> PeerRejected(detail ?: "Peer rejected request")
             WispersStatus.PEER_UNAVAILABLE -> PeerUnavailable(detail ?: "Peer unavailable")
+            WispersStatus.REVOKED -> Revoked(detail ?: "Node has been revoked")
         }
     }
 }

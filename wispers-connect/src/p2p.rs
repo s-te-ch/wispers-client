@@ -63,6 +63,7 @@ impl ConnectionState {
 
 /// Error type for P2P connection operations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum P2pError {
     #[error("hub error: {0}")]
     Hub(#[from] crate::hub::HubError),
@@ -87,6 +88,9 @@ pub enum P2pError {
 
     #[error("node not activated")]
     NotActivated,
+
+    #[error("node has been revoked from the roster")]
+    Revoked,
 }
 
 //-- UDP connections -------------------------------------------------------------------------------

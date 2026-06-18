@@ -118,6 +118,25 @@ interface NativeLibrary : Library {
     ): Int
 
     /**
+     * Revoke another node from the connectivity group's roster (does not consume handle).
+     */
+    fun wispers_node_revoke_node_async(
+        handle: Pointer?,
+        targetNodeNumber: Int,
+        ctx: Pointer?,
+        callback: NativeCallbacks.WispersCallback?
+    ): Int
+
+    /**
+     * Re-fetch and re-verify this node's roster, updating cached state (does not consume handle).
+     */
+    fun wispers_node_refresh_membership_async(
+        handle: Pointer?,
+        ctx: Pointer?,
+        callback: NativeCallbacks.WispersCallback?
+    ): Int
+
+    /**
      * Get the group's activation state and node list.
      */
     fun wispers_node_group_info_async(

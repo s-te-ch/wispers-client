@@ -87,6 +87,51 @@ func (n *Node) Logout() error {
 	return nil
 }
 
+// RevokeNode revokes _another_ node from the connectivity group's roster. The
+// caller stays active and the handle remains usable. Revocation is unilateral
+// and irreversible. To revoke yourself, use Logout instead.
+// Requires Activated state.
+func (n *Node) RevokeNode(targetNodeNumber int32) error {
+	ptr := n.requireOpen()
+	call := newPendingCall()
+	defer call.cancel()
+	status := C.callRevokeNodeAsync(
+		(*C.WispersNodeHandle)(ptr),
+		C.int32_t(targetNodeNumber),
+		call.ctx(),
+	)
+	if err := errorFromStatus(int(status)); err != nil {
+		return err
+	}
+	runtime.KeepAlive(n)
+	if err, ok := call.wait().(error); ok {
+		return err
+	}
+	return nil
+}
+
+// RefreshMembership re-fetches and re-verifies this node's roster and updates
+// cached state to match. Use on a long-running node to proactively detect a
+// revocation that happened while it was active; query State afterward to read
+// the (possibly changed) state. The handle remains usable.
+func (n *Node) RefreshMembership() error {
+	ptr := n.requireOpen()
+	call := newPendingCall()
+	defer call.cancel()
+	status := C.callRefreshMembershipAsync(
+		(*C.WispersNodeHandle)(ptr),
+		call.ctx(),
+	)
+	if err := errorFromStatus(int(status)); err != nil {
+		return err
+	}
+	runtime.KeepAlive(n)
+	if err, ok := call.wait().(error); ok {
+		return err
+	}
+	return nil
+}
+
 // GroupInfo returns the group's activation state and node list.
 // Requires Registered or Activated state.
 func (n *Node) GroupInfo() (*GroupInfo, error) {

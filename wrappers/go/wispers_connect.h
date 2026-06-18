@@ -29,6 +29,7 @@ typedef enum {
     WISPERS_STATUS_UNAUTHENTICATED = 15,
     WISPERS_STATUS_PEER_REJECTED = 16,
     WISPERS_STATUS_PEER_UNAVAILABLE = 17,
+    WISPERS_STATUS_REVOKED = 18,
 } WispersStatus;
 
 // Node state values.
@@ -36,6 +37,7 @@ typedef enum {
     WISPERS_NODE_STATE_PENDING = 0,
     WISPERS_NODE_STATE_REGISTERED = 1,
     WISPERS_NODE_STATE_ACTIVATED = 2,
+    WISPERS_NODE_STATE_REVOKED = 3,
 } WispersNodeState;
 
 // Activation status values for WispersNode.
@@ -284,6 +286,32 @@ WispersStatus wispers_node_activate_async(
 // The node handle is CONSUMED by this call and must not be used afterward.
 // Returns SUCCESS immediately if the async operation was started.
 WispersStatus wispers_node_logout_async(
+    WispersNodeHandle *handle,
+    void *ctx,
+    WispersCallback callback
+);
+
+// Revoke another node from the connectivity group's roster.
+// Requires: Activated state. The caller stays active; the handle is NOT consumed.
+// Unilateral and irreversible — a revoked node number is permanently retired.
+// To revoke yourself, use wispers_node_logout_async instead.
+// The callback reports INVALID_STATE if not activated, REVOKED if this node has
+// itself been revoked, or an error if the target is this node or not an active
+// roster member.
+// Returns SUCCESS immediately if the async operation was started.
+WispersStatus wispers_node_revoke_node_async(
+    WispersNodeHandle *handle,
+    int32_t target_node_number,
+    void *ctx,
+    WispersCallback callback
+);
+
+// Re-fetch and re-verify this node's roster, updating cached state to match.
+// Use on a long-running node to proactively detect a revocation that happened
+// while it was active. The node handle is NOT consumed; query
+// wispers_node_state() after success to read the (possibly changed) state.
+// Returns SUCCESS immediately if the async operation was started.
+WispersStatus wispers_node_refresh_membership_async(
     WispersNodeHandle *handle,
     void *ctx,
     WispersCallback callback

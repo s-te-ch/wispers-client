@@ -445,6 +445,13 @@ async fn activate(hub_override: Option<&str>, profile: &str, activation_code: &s
                 node.connectivity_group_id().unwrap()
             );
         }
+        NodeState::Revoked => {
+            anyhow::bail!(
+                "This node has been revoked from its group and cannot re-activate \
+                 (a revoked node number is permanently retired). Use 'wconnect logout' \
+                 to clean up, then register for a fresh node number."
+            );
+        }
     }
 
     // Check for self-endorsement (code format is "node_number-secret")

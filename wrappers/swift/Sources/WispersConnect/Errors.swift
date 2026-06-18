@@ -19,6 +19,7 @@ public enum WispersError: Error, LocalizedError, Sendable {
     case unauthenticated(String?)
     case peerRejected(String?)
     case peerUnavailable(String?)
+    case revoked(String?)
     case unknown(code: Int32, detail: String?)
 
     static func fromStatus(_ status: WispersStatus, detail: String? = nil) -> WispersError {
@@ -40,6 +41,7 @@ public enum WispersError: Error, LocalizedError, Sendable {
         case WISPERS_STATUS_UNAUTHENTICATED.rawValue:       return .unauthenticated(detail)
         case WISPERS_STATUS_PEER_REJECTED.rawValue:         return .peerRejected(detail)
         case WISPERS_STATUS_PEER_UNAVAILABLE.rawValue:      return .peerUnavailable(detail)
+        case WISPERS_STATUS_REVOKED.rawValue:               return .revoked(detail)
         default:                                            return .unknown(code: Int32(status.rawValue), detail: detail)
         }
     }
@@ -63,6 +65,7 @@ public enum WispersError: Error, LocalizedError, Sendable {
         case .unauthenticated(let d):       return d ?? "Unauthenticated"
         case .peerRejected(let d):          return d ?? "Peer rejected"
         case .peerUnavailable(let d):       return d ?? "Peer unavailable"
+        case .revoked(let d):               return d ?? "Revoked"
         case .unknown(let code, let d):     return d ?? "Unknown error (\(code))"
         }
     }

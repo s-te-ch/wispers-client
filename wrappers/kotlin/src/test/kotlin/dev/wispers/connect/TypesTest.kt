@@ -114,6 +114,7 @@ class TypesTest {
             NodeState.Pending -> "pending"
             NodeState.Registered -> "registered"
             NodeState.Activated -> "activated"
+            NodeState.Revoked -> "revoked"
         }
 
         assertEquals("registered", result)

@@ -88,6 +88,10 @@ class PeerUnavailableError(WispersError):
     pass
 
 
+class RevokedError(WispersError):
+    pass
+
+
 _STATUS_EXCEPTIONS: dict[Status, type[WispersError]] = {
     Status.NULL_POINTER: NullPointerError,
     Status.INVALID_UTF8: InvalidUtf8Error,
@@ -106,6 +110,7 @@ _STATUS_EXCEPTIONS: dict[Status, type[WispersError]] = {
     Status.UNAUTHENTICATED: UnauthenticatedError,
     Status.PEER_REJECTED: PeerRejectedError,
     Status.PEER_UNAVAILABLE: PeerUnavailableError,
+    Status.REVOKED: RevokedError,
 }
 
 
