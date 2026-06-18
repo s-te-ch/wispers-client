@@ -4,6 +4,7 @@ public enum NodeState: Int32, Sendable {
     case pending = 0
     case registered = 1
     case activated = 2
+    case revoked = 3
 
     init(cValue: WispersNodeState) {
         self = NodeState(rawValue: Int32(cValue.rawValue)) ?? .pending

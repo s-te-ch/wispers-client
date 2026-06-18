@@ -60,6 +60,42 @@ public final class Node: WispersHandle, @unchecked Sendable {
         }
     }
 
+    /// Revoke another node from the group.
+    ///
+    /// Removes the node identified by `targetNodeNumber` from the roster. This
+    /// caller stays active — to revoke yourself, use `logout()` instead. The
+    /// action is unilateral and irreversible. The handle is not consumed and
+    /// remains usable after the call.
+    /// Requires: Activated state.
+    public func revokeNode(_ targetNodeNumber: Int32) async throws {
+        let ptr = try requireOpen()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            let ctx = CallbackBridge.register(continuation)
+            let status = wispers_node_revoke_node_async(ptr, targetNodeNumber, ctx, wispersCallback)
+            if status.rawValue != WISPERS_STATUS_SUCCESS.rawValue {
+                CallbackBridge.cancel(ctx)
+                continuation.resume(throwing: WispersError.fromStatus(status))
+            }
+        }
+    }
+
+    /// Re-fetch and re-verify the roster, updating cached state to match.
+    ///
+    /// Use on a long-running node to proactively detect being revoked while it
+    /// is active. The handle is not consumed and remains usable; query `state`
+    /// after success to read the (possibly changed) node state.
+    public func refreshMembership() async throws {
+        let ptr = try requireOpen()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            let ctx = CallbackBridge.register(continuation)
+            let status = wispers_node_refresh_membership_async(ptr, ctx, wispersCallback)
+            if status.rawValue != WISPERS_STATUS_SUCCESS.rawValue {
+                CallbackBridge.cancel(ctx)
+                continuation.resume(throwing: WispersError.fromStatus(status))
+            }
+        }
+    }
+
     /// Get the group's activation state and node list.
     /// Requires: Registered or Activated state.
     public func groupInfo() async throws -> GroupInfo {

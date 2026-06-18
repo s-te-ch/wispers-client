@@ -89,6 +89,8 @@ pub enum WispersNodeState {
     Registered = 1,
     /// Node is activated and ready for P2P connections.
     Activated = 2,
+    /// Node has been revoked from the roster. Still registered with the hub.
+    Revoked = 3,
 }
 
 // =============================================================================
@@ -471,6 +473,9 @@ impl From<NodeStateError> for WispersStatus {
             NodeStateError::MissingEndorserResponse => WispersStatus::ActivationFailed,
             NodeStateError::RosterVerificationFailed(_) => WispersStatus::ActivationFailed,
             NodeStateError::LastActiveNode => WispersStatus::InvalidState,
+            NodeStateError::CannotRevokeSelf => WispersStatus::InvalidState,
+            NodeStateError::NodeNotActive(_) => WispersStatus::InvalidState,
+            NodeStateError::Revoked => WispersStatus::Revoked,
             NodeStateError::InvalidState { .. } => WispersStatus::InvalidState,
         }
     }

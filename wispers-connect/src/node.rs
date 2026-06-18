@@ -153,21 +153,27 @@ impl NodeStorage {
             .any(|n| n.node_number == registration.node_number);
 
         if is_activated {
-            // Verify the roster cryptographically before trusting it
+            // Verify the roster cryptographically before trusting it.
             let signing_key = SigningKeyPair::derive_from_root_key(state.root_key.as_bytes());
-            verify_roster(
+            match verify_roster(
                 &roster,
                 registration.node_number,
                 &signing_key.public_key_spki(),
-            )
-            .map_err(NodeStateError::RosterVerificationFailed)?;
-
-            Ok(Node::new_activated(
-                state,
-                self.store.clone(),
-                self.config.clone(),
-                roster,
-            ))
+            ) {
+                Ok(_) => Ok(Node::new_activated(
+                    state,
+                    self.store.clone(),
+                    self.config.clone(),
+                    roster,
+                )),
+                // Revoked while we were away. Hand back a usable node in the
+                // Revoked state, rather than an opaque verification error, so
+                // the caller can tell the user and clean up via logout().
+                Err(crate::roster::RosterVerificationError::VerifierRevoked(_)) => Ok(
+                    Node::new_revoked(state, self.store.clone(), self.config.clone()),
+                ),
+                Err(e) => Err(NodeStateError::RosterVerificationFailed(e)),
+            }
         } else {
             Node::new_registered(state, self.store.clone(), self.config.clone())
         }
@@ -183,6 +189,8 @@ pub enum NodeState {
     Registered,
     /// Node is activated and ready for P2P connections.
     Activated,
+    /// Node was activated but has since been revoked from the roster.
+    Revoked,
 }
 
 impl fmt::Display for NodeState {
@@ -191,6 +199,7 @@ impl fmt::Display for NodeState {
             NodeState::Pending => write!(f, "Pending"),
             NodeState::Registered => write!(f, "Registered"),
             NodeState::Activated => write!(f, "Activated"),
+            NodeState::Revoked => write!(f, "Revoked"),
         }
     }
 }
@@ -206,6 +215,8 @@ enum InnerState {
         registration: NodeRegistration,
         roster: std::sync::RwLock<proto::roster::Roster>,
     },
+    /// Node was activated but has been revoked from the roster.
+    Revoked { registration: NodeRegistration },
 }
 
 /// A unified node type that can be in any state (Pending, Registered, Activated).
@@ -282,12 +293,35 @@ impl Node {
         }
     }
 
+    /// Create a revoked node (registered with the hub, but revoked in the
+    /// roster). Reached when a node discovers it has been revoked by another
+    /// node, e.g. on restore or via `refresh_membership`.
+    pub(crate) fn new_revoked(
+        persisted: PersistedNodeState,
+        store: SharedStore,
+        config: SharedConfig,
+    ) -> Self {
+        let registration = persisted
+            .registration
+            .clone()
+            .expect("revoked node must have registration");
+        let root_key = persisted.root_key.as_bytes();
+        Self {
+            signing_key: SigningKeyPair::derive_from_root_key(root_key),
+            inner: InnerState::Revoked { registration },
+            persisted,
+            store,
+            config,
+        }
+    }
+
     /// Get the current state of this node.
     pub fn state(&self) -> NodeState {
         match &self.inner {
             InnerState::Pending => NodeState::Pending,
             InnerState::Registered(_) => NodeState::Registered,
             InnerState::Activated { .. } => NodeState::Activated,
+            InnerState::Revoked { .. } => NodeState::Revoked,
         }
     }
 
@@ -306,7 +340,9 @@ impl Node {
         match &self.inner {
             InnerState::Pending => None,
             InnerState::Registered(reg) => Some(reg),
-            InnerState::Activated { registration, .. } => Some(registration),
+            InnerState::Activated { registration, .. } | InnerState::Revoked { registration } => {
+                Some(registration)
+            }
         }
     }
 
@@ -355,12 +391,29 @@ impl Node {
         }
     }
 
+    /// Accepts any state that holds a registration (`Registered`, `Activated`,
+    /// or `Revoked`). Used for read-only inspection like `group_info`.
     fn require_at_least_registered(&self) -> Result<&NodeRegistration, NodeStateError> {
         match &self.inner {
             InnerState::Registered(reg)
             | InnerState::Activated {
                 registration: reg, ..
+            }
+            | InnerState::Revoked { registration: reg } => Ok(reg),
+            InnerState::Pending => Err(NodeStateError::InvalidState {
+                current: NodeState::Pending,
+                required: "Registered or Activated",
+            }),
+        }
+    }
+
+    fn require_registered_or_activated(&self) -> Result<&NodeRegistration, NodeStateError> {
+        match &self.inner {
+            InnerState::Registered(reg)
+            | InnerState::Activated {
+                registration: reg, ..
             } => Ok(reg),
+            InnerState::Revoked { .. } => Err(NodeStateError::Revoked),
             InnerState::Pending => Err(NodeStateError::InvalidState {
                 current: NodeState::Pending,
                 required: "Registered or Activated",
@@ -538,7 +591,7 @@ impl Node {
 
     /// Start a serving session.
     ///
-    /// Requires: Registered or Activated state.
+    /// Requires: Registered (for bootstrap activation) or Activated (full P2P).
     ///
     /// P2P connection requests are only accepted once the node is activated (appears
     /// in the roster). The incoming connection channels are always created; they will
@@ -555,7 +608,7 @@ impl Node {
     > {
         use crate::serving::P2pConfig;
 
-        let registration = self.require_at_least_registered()?;
+        let registration = self.require_registered_or_activated()?;
         let hub_addr = self.hub_addr();
 
         let is_activated = self.state() == NodeState::Activated;
@@ -747,9 +800,17 @@ impl Node {
             "Peer node {} not in cached roster, refetching from hub",
             peer_node_number
         );
-        let fresh_roster = client
+        let fresh_roster = match client
             .get_and_verify_roster(registration, &self.signing_key.public_key_spki())
-            .await?;
+            .await
+        {
+            Ok(r) => r,
+            // Turns out *we* have been revoked. Surface a clean error.
+            Err(crate::hub::HubError::RosterVerification(
+                crate::roster::RosterVerificationError::VerifierRevoked(_),
+            )) => return Err(crate::p2p::P2pError::Revoked),
+            Err(e) => return Err(e.into()),
+        };
 
         let peer_node = fresh_roster
             .nodes
@@ -911,6 +972,173 @@ impl Node {
     }
 
     // -------------------------------------------------------------------------
+    // Revocation
+    // -------------------------------------------------------------------------
+
+    /// Revoke another node from the connectivity group's roster.
+    ///
+    /// Unlike [`logout`](Self::logout), this revokes a *different* node and
+    /// leaves the caller fully active. Revocation is unilateral and
+    /// irreversible: a revoked node number is permanently retired, so the
+    /// removed device can only rejoin by registering for a fresh number.
+    ///
+    /// To revoke yourself, use [`logout`](Self::logout) instead (it also
+    /// deregisters and wipes local state).
+    ///
+    /// Requires: Activated state. Takes `&self` — the cached roster lives
+    /// behind a lock and the node's variant doesn't change — so a shared
+    /// `Node` (e.g. an `Arc<Node>` proxy) can revoke without exclusive access.
+    ///
+    /// # Errors
+    /// - [`InvalidState`](NodeStateError::InvalidState) if not Activated.
+    /// - [`CannotRevokeSelf`](NodeStateError::CannotRevokeSelf) if the target
+    ///   is this node.
+    /// - [`NodeNotActive`](NodeStateError::NodeNotActive) if the target is not
+    ///   an active node in the verified local roster.
+    /// - [`Hub`](NodeStateError::Hub) for transport/hub failures. A stale local
+    ///   roster yields a version conflict here; refresh (reload the node or
+    ///   call [`refresh_membership`](Self::refresh_membership)) and retry.
+    pub async fn revoke_node(&self, target_node_number: i32) -> Result<(), NodeStateError> {
+        use crate::hub::HubClient;
+        use crate::roster::active_nodes;
+
+        let (registration, roster_lock) = match &self.inner {
+            InnerState::Activated {
+                registration,
+                roster,
+            } => (registration, roster),
+            // We've been revoked ourselves — can't revoke anyone. Distinct from
+            // the generic wrong-state error so callers can detect it.
+            InnerState::Revoked { .. } => return Err(NodeStateError::Revoked),
+            _ => {
+                return Err(NodeStateError::InvalidState {
+                    current: self.state(),
+                    required: "Activated",
+                });
+            }
+        };
+
+        // Guard: self-revocation goes through logout (which also cleans up
+        // locally); doing it here would leave us in an inconsistent state.
+        if target_node_number == registration.node_number {
+            return Err(NodeStateError::CannotRevokeSelf);
+        }
+
+        let base_roster = roster_lock.read().unwrap().clone();
+
+        // Guard: the target must be an active node in our verified roster.
+        // Catches typos and already-revoked/unknown numbers before we submit.
+        if !active_nodes(&base_roster).any(|n| n.node_number == target_node_number) {
+            return Err(NodeStateError::NodeNotActive(target_node_number));
+        }
+
+        let client = HubClient::connect(self.hub_addr())
+            .await
+            .map_err(NodeStateError::hub)?;
+
+        let new_roster = self
+            .submit_revocation(&client, registration, &base_roster, target_node_number)
+            .await?;
+
+        *roster_lock.write().unwrap() = new_roster;
+        Ok(())
+    }
+
+    /// Build, sign, and submit a revocation of `revoked_node_number` by this
+    /// node, returning the new fully-signed roster. Does not touch local state.
+    ///
+    /// Shared by `revoke_node` (revoking another node) and `logout` (self-
+    /// revocation, where `revoked_node_number == self`).
+    async fn submit_revocation(
+        &self,
+        client: &crate::hub::HubClient,
+        registration: &NodeRegistration,
+        base_roster: &proto::roster::Roster,
+        revoked_node_number: i32,
+    ) -> Result<proto::roster::Roster, NodeStateError> {
+        use crate::roster::{
+            add_revocation_to_roster, build_revocation_payload, set_revoker_signature,
+        };
+
+        let mut new_roster = base_roster.clone();
+        let payload = build_revocation_payload(
+            &new_roster,
+            revoked_node_number,
+            registration.node_number, // revoker (self)
+        );
+        add_revocation_to_roster(&mut new_roster, payload);
+        let signing_hash = compute_signing_hash(&new_roster);
+        let signature = self.signing_key.sign(&signing_hash);
+        set_revoker_signature(&mut new_roster, signature);
+
+        client
+            .update_roster(registration, new_roster.clone())
+            .await
+            .map_err(NodeStateError::hub)?;
+        Ok(new_roster)
+    }
+
+    /// Re-fetch and re-verify this node's roster from the hub, updating cached
+    /// state to match. Use on a long-running node to proactively detect a
+    /// revocation that happened while it was active (detection is otherwise
+    /// lazy — see [`NodeState::Revoked`]).
+    ///
+    /// Requires: any state (no-op for Pending).
+    pub async fn refresh_membership(&mut self) -> Result<NodeState, NodeStateError> {
+        use crate::hub::HubClient;
+        use crate::roster::RosterVerificationError;
+
+        let registration = match &self.inner {
+            InnerState::Pending => return Ok(NodeState::Pending),
+            InnerState::Registered(reg)
+            | InnerState::Activated {
+                registration: reg, ..
+            }
+            | InnerState::Revoked { registration: reg } => reg.clone(),
+        };
+
+        let client = HubClient::connect(self.hub_addr())
+            .await
+            .map_err(NodeStateError::hub)?;
+        let roster = client
+            .get_unverified_roster(&registration)
+            .await
+            .map_err(NodeStateError::hub)?;
+
+        let in_roster = roster
+            .nodes
+            .iter()
+            .any(|n| n.node_number == registration.node_number);
+
+        if !in_roster {
+            // Not in the roster — registered but never (or no longer) activated.
+            self.inner = InnerState::Registered(registration);
+            return Ok(NodeState::Registered);
+        }
+
+        // We appear in the roster; verifying against ourselves tells us whether
+        // we're still active or have been revoked.
+        match verify_roster(
+            &roster,
+            registration.node_number,
+            &self.signing_key.public_key_spki(),
+        ) {
+            Ok(_) => {
+                self.inner = InnerState::Activated {
+                    registration,
+                    roster: RwLock::new(roster),
+                };
+                Ok(NodeState::Activated)
+            }
+            Err(RosterVerificationError::VerifierRevoked(_)) => {
+                self.inner = InnerState::Revoked { registration };
+                Ok(NodeState::Revoked)
+            }
+            Err(e) => Err(NodeStateError::RosterVerificationFailed(e)),
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Logout (works from any state)
     // -------------------------------------------------------------------------
 
@@ -919,6 +1147,9 @@ impl Node {
     /// - Pending: just deletes local state
     /// - Registered: deregisters from hub, then deletes local state
     /// - Activated: self-revokes from roster, deregisters from hub, deletes local state
+    /// - Revoked: deregisters from hub (the registration is still valid), then
+    ///   deletes local state — the clean recovery from being revoked by another
+    ///   node, leaving no zombie registration behind
     ///
     /// Takes `&mut self` rather than `self` so it can be called via a
     /// `MutexGuard` from the FFI layer. This is necessary because the FFI layer
@@ -936,7 +1167,11 @@ impl Node {
             NodeState::Pending => {
                 self.store.delete().map_err(NodeStateError::store)?;
             }
-            NodeState::Registered => {
+            // Registered and Revoked are both "registered with the hub but not
+            // an active roster member": deregister, then wipe locally. (A
+            // revoked node's registration is still valid, so this clears it
+            // rather than orphaning it.)
+            NodeState::Registered | NodeState::Revoked => {
                 let registration = self.persisted.registration.as_ref().expect("registered");
                 let client = HubClient::connect(self.hub_addr())
                     .await
@@ -950,12 +1185,9 @@ impl Node {
                 self.store.delete().map_err(NodeStateError::store)?;
             }
             NodeState::Activated => {
-                use crate::roster::{
-                    active_nodes, add_revocation_to_roster, build_revocation_payload,
-                    set_revoker_signature,
-                };
+                use crate::roster::active_nodes;
 
-                let (registration, mut new_roster) = match &self.inner {
+                let (registration, base_roster) = match &self.inner {
                     InnerState::Activated {
                         registration,
                         roster,
@@ -964,8 +1196,7 @@ impl Node {
                 };
 
                 // Check: prevent revoking the last active node
-                let active_count = active_nodes(&new_roster).count();
-                if active_count <= 1 {
+                if active_nodes(&base_roster).count() <= 1 {
                     return Err(NodeStateError::LastActiveNode);
                 }
 
@@ -973,19 +1204,17 @@ impl Node {
                     .await
                     .map_err(NodeStateError::hub)?;
 
-                // Step 1: Self-revoke from roster.
-                let revocation_payload = build_revocation_payload(
-                    &new_roster,
-                    registration.node_number, // revoked
-                    registration.node_number, // revoker (self)
-                );
-                add_revocation_to_roster(&mut new_roster, revocation_payload);
-                let signing_hash = compute_signing_hash(&new_roster);
-                let signature = self.signing_key.sign(&signing_hash);
-                set_revoker_signature(&mut new_roster, signature);
-
-                // If unauthenticated, node was already removed server-side — skip to local cleanup.
-                match client.update_roster(&registration, new_roster).await {
+                // Step 1: Self-revoke from roster. If unauthenticated, node was
+                // already removed server-side — skip straight to local cleanup.
+                match self
+                    .submit_revocation(
+                        &client,
+                        &registration,
+                        &base_roster,
+                        registration.node_number,
+                    )
+                    .await
+                {
                     Ok(_) => {
                         // Step 2: Deregister from hub
                         match client.deregister_node(&registration).await {
@@ -995,7 +1224,7 @@ impl Node {
                         }
                     }
                     Err(e) if e.is_unauthenticated() || e.is_not_found() => {}
-                    Err(e) => return Err(NodeStateError::hub(e)),
+                    Err(e) => return Err(e),
                 }
 
                 // Step 3: Delete local state
@@ -1111,6 +1340,136 @@ mod tests {
         assert_eq!(second_node.state(), NodeState::Pending);
         assert_eq!(second_node.root_key_bytes(), &first_key);
         drop(storage2); // silence unused warning
+    }
+
+    /// Build a minimal roster with the given (node_number, revoked) entries.
+    /// `revoke_node`'s guards only consult `active_nodes` (which filters on the
+    /// `revoked` flag), so the keys/addenda don't need to be cryptographically
+    /// valid for guard tests.
+    fn test_roster(nodes: &[(i32, bool)]) -> proto::roster::Roster {
+        proto::roster::Roster {
+            version: 1,
+            nodes: nodes
+                .iter()
+                .map(|&(node_number, revoked)| proto::roster::Node {
+                    node_number,
+                    public_key_spki: Vec::new(),
+                    revoked,
+                })
+                .collect(),
+            addenda: Vec::new(),
+        }
+    }
+
+    fn activated_test_node(roster: proto::roster::Roster) -> Node {
+        Node::new_activated_for_test(
+            [7u8; 32],
+            roster,
+            crate::types::registration_fixture(), // node_number == 1
+            "http://localhost:1".to_string(),
+        )
+    }
+
+    #[test]
+    fn node_state_revoked_displays() {
+        assert_eq!(NodeState::Revoked.to_string(), "Revoked");
+    }
+
+    #[tokio::test]
+    async fn revoke_node_requires_activated() {
+        let store: SharedStore = Arc::new(InMemoryNodeStateStore::new());
+        let config = Arc::new(RwLock::new(RuntimeConfig::new()));
+        let node = Node::new_pending(PersistedNodeState::new(), store, config);
+
+        let err = node.revoke_node(2).await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                NodeStateError::InvalidState {
+                    current: NodeState::Pending,
+                    ..
+                }
+            ),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn revoke_node_rejects_self() {
+        // Self-revocation must go through logout(), not revoke_node().
+        let node = activated_test_node(test_roster(&[(1, false), (2, false)]));
+        let err = node.revoke_node(1).await.unwrap_err();
+        assert!(
+            matches!(err, NodeStateError::CannotRevokeSelf),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn revoke_node_rejects_inactive_target() {
+        // Target absent from the roster → typed error before any hub contact.
+        let node = activated_test_node(test_roster(&[(1, false)]));
+        let err = node.revoke_node(99).await.unwrap_err();
+        assert!(
+            matches!(err, NodeStateError::NodeNotActive(99)),
+            "got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn revoke_node_rejects_already_revoked_target() {
+        // Target present but already revoked → not an active node.
+        let node = activated_test_node(test_roster(&[(1, false), (2, true)]));
+        let err = node.revoke_node(2).await.unwrap_err();
+        assert!(
+            matches!(err, NodeStateError::NodeNotActive(2)),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn revoked_node_reports_revoked_state() {
+        let store: SharedStore = Arc::new(InMemoryNodeStateStore::new());
+        let config = Arc::new(RwLock::new(RuntimeConfig::new()));
+        let mut persisted = PersistedNodeState::new();
+        persisted.set_registration(crate::types::registration_fixture());
+
+        let node = Node::new_revoked(persisted, store, config);
+        assert_eq!(node.state(), NodeState::Revoked);
+        assert!(node.is_registered());
+        assert_eq!(node.node_number(), Some(1));
+    }
+
+    #[tokio::test]
+    async fn revoke_node_from_revoked_state_is_typed() {
+        let store: SharedStore = Arc::new(InMemoryNodeStateStore::new());
+        let config = Arc::new(RwLock::new(RuntimeConfig::new()));
+        let mut persisted = PersistedNodeState::new();
+        persisted.set_registration(crate::types::registration_fixture());
+        let node = Node::new_revoked(persisted, store, config);
+
+        let err = node.revoke_node(2).await.unwrap_err();
+        assert!(err.is_revoked(), "got {err:?}");
+        assert!(matches!(err, NodeStateError::Revoked));
+    }
+
+    #[tokio::test]
+    async fn start_serving_rejects_revoked() {
+        // A revoked node is out of the group and must not serve. The state
+        // guard runs before any hub contact, so this needs no hub.
+        let store: SharedStore = Arc::new(InMemoryNodeStateStore::new());
+        let config = Arc::new(RwLock::new(RuntimeConfig::new()));
+        let mut persisted = PersistedNodeState::new();
+        persisted.set_registration(crate::types::registration_fixture());
+        let node = Node::new_revoked(persisted, store, config);
+
+        // The Ok variant (the serving tuple) isn't Debug, so match rather than
+        // unwrap_err.
+        let err = match node.start_serving().await {
+            Ok(_) => panic!("expected start_serving to fail for a revoked node"),
+            Err(e) => e,
+        };
+        assert!(err.is_revoked(), "expected Revoked, got {err:?}");
     }
 
     #[tokio::test]

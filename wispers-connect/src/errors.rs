@@ -7,6 +7,7 @@ use std::fmt;
 pub use crate::node::NodeState;
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum NodeStateError {
     Store(StorageError),
     Hub(crate::hub::HubError),
@@ -18,6 +19,13 @@ pub enum NodeStateError {
     RosterVerificationFailed(crate::roster::RosterVerificationError),
     /// Cannot logout: this is the last active node in the roster.
     LastActiveNode,
+    /// Cannot revoke yourself via `revoke_node` (use `logout` instead).
+    CannotRevokeSelf,
+    /// The target of a `revoke_node` call is not an active node in the roster.
+    NodeNotActive(i32),
+    /// This node has been revoked from the roster, but remains registered with
+    /// the hub. To recover, `logout()`.
+    Revoked,
     /// Operation requires a different node state than the current one.
     InvalidState {
         current: NodeState,
@@ -40,6 +48,11 @@ impl NodeStateError {
 
     pub fn is_not_found(&self) -> bool {
         matches!(self, NodeStateError::Hub(e) if e.is_not_found())
+    }
+
+    /// True if this node has been revoked from the roster.
+    pub fn is_revoked(&self) -> bool {
+        matches!(self, NodeStateError::Revoked)
     }
 
     pub fn is_peer_rejected(&self) -> bool {
@@ -71,6 +84,15 @@ impl fmt::Display for NodeStateError {
                     f,
                     "cannot logout: this is the last active node in the roster — use group reset instead"
                 )
+            }
+            NodeStateError::CannotRevokeSelf => {
+                write!(f, "cannot revoke yourself")
+            }
+            NodeStateError::NodeNotActive(n) => {
+                write!(f, "node {n} is not an active node in the roster")
+            }
+            NodeStateError::Revoked => {
+                write!(f, "this node has been revoked from the roster")
             }
             NodeStateError::InvalidState { current, required } => {
                 write!(
@@ -106,4 +128,5 @@ pub enum WispersStatus {
     Unauthenticated = 15,
     PeerRejected = 16,
     PeerUnavailable = 17,
+    Revoked = 18,
 }

@@ -102,6 +102,52 @@ class Node internal constructor(
     }
 
     /**
+     * Revoke another node from the connectivity group's roster.
+     *
+     * This removes the target node identified by [targetNodeNumber] from the roster.
+     * The caller stays active and **the node is not consumed** - this handle remains
+     * usable after the call. To revoke yourself, use [logout] instead.
+     *
+     * Revocation is unilateral and irreversible.
+     *
+     * Requires [NodeState.Activated].
+     *
+     * @param targetNodeNumber The node number to revoke
+     * @throws WispersException.InvalidState if not in Activated state
+     * @throws WispersException.Revoked if this node has itself been revoked
+     * @throws WispersException.HubError on hub communication failure
+     */
+    suspend fun revokeNode(targetNodeNumber: Int): Unit = suspendCancellableCoroutine { cont ->
+        val ptr = requireOpen()
+        val ctx = CallbackBridge.register(cont)
+
+        val status = lib.wispers_node_revoke_node_async(ptr, targetNodeNumber, ctx, Callbacks.basic)
+        if (status != WispersStatus.SUCCESS.code) {
+            CallbackBridge.resumeException(ctx, WispersException.fromStatus(status))
+        }
+    }
+
+    /**
+     * Re-fetch and re-verify this node's roster, updating cached state to match.
+     *
+     * Use on a long-running node to proactively detect a revocation that happened
+     * while it was active. **The node is not consumed** - this handle remains usable
+     * after the call. Query [state] after success to read the (possibly changed) state;
+     * a revoked node transitions to [NodeState.Revoked].
+     *
+     * @throws WispersException.HubError on hub communication failure
+     */
+    suspend fun refreshMembership(): Unit = suspendCancellableCoroutine { cont ->
+        val ptr = requireOpen()
+        val ctx = CallbackBridge.register(cont)
+
+        val status = lib.wispers_node_refresh_membership_async(ptr, ctx, Callbacks.basic)
+        if (status != WispersStatus.SUCCESS.code) {
+            CallbackBridge.resumeException(ctx, WispersException.fromStatus(status))
+        }
+    }
+
+    /**
      * Get the group's activation state and node list.
      *
      * Requires [NodeState.Registered] or [NodeState.Activated].

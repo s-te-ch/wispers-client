@@ -25,12 +25,14 @@ class Status(IntEnum):
     UNAUTHENTICATED = 15
     PEER_REJECTED = 16
     PEER_UNAVAILABLE = 17
+    REVOKED = 18
 
 
 class NodeState(IntEnum):
     PENDING = 0
     REGISTERED = 1
     ACTIVATED = 2
+    REVOKED = 3
 
 
 class ActivationStatus(IntEnum):

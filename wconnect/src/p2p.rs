@@ -22,6 +22,9 @@ pub async fn ping(
         NodeState::Registered => {
             anyhow::bail!("Not activated. Use 'wconnect activate <activation_code>' first.");
         }
+        NodeState::Revoked => {
+            anyhow::bail!("This node has been revoked. Use 'wconnect logout' to clean up.");
+        }
         NodeState::Activated => {}
     }
 
@@ -140,6 +143,9 @@ pub async fn forward(
         }
         NodeState::Registered => {
             anyhow::bail!("Not activated. Use 'wconnect activate <activation_code>' first.");
+        }
+        NodeState::Revoked => {
+            anyhow::bail!("This node has been revoked. Use 'wconnect logout' to clean up.");
         }
         NodeState::Activated => {}
     }

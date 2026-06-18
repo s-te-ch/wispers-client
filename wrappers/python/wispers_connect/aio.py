@@ -75,6 +75,14 @@ class Node:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._inner.logout)
 
+    async def revoke_node(self, target_node_number: int) -> None:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._inner.revoke_node, target_node_number)
+
+    async def refresh_membership(self) -> None:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._inner.refresh_membership)
+
     async def group_info(self) -> GroupInfo:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self._inner.group_info)

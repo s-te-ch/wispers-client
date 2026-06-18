@@ -155,6 +155,16 @@ def declare_functions(lib: ctypes.CDLL) -> None:  # noqa: C901
     lib.wispers_node_logout_async.argtypes = [c_void_p, c_void_p, WispersCallbackType]
     lib.wispers_node_logout_async.restype = c_int
 
+    lib.wispers_node_revoke_node_async.argtypes = [
+        c_void_p, c_int32, c_void_p, WispersCallbackType,
+    ]
+    lib.wispers_node_revoke_node_async.restype = c_int
+
+    lib.wispers_node_refresh_membership_async.argtypes = [
+        c_void_p, c_void_p, WispersCallbackType,
+    ]
+    lib.wispers_node_refresh_membership_async.restype = c_int
+
     lib.wispers_node_group_info_async.argtypes = [c_void_p, c_void_p, WispersGroupInfoCallbackType]
     lib.wispers_node_group_info_async.restype = c_int
 

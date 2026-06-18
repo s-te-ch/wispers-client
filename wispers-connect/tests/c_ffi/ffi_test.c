@@ -428,6 +428,30 @@ static int test_node_logout_null_callback(void) {
     return 0;
 }
 
+static int test_node_revoke_node_null_handle(void) {
+    TEST("node_revoke_node rejects NULL handle");
+
+    SimpleTestCtx ctx = {0};
+    WispersStatus status = wispers_node_revoke_node_async(NULL, 2, &ctx, simple_callback);
+
+    if (status != WISPERS_STATUS_NULL_POINTER) FAIL("expected NULL_POINTER");
+
+    PASS();
+    return 0;
+}
+
+static int test_node_refresh_membership_null_handle(void) {
+    TEST("node_refresh_membership rejects NULL handle");
+
+    SimpleTestCtx ctx = {0};
+    WispersStatus status = wispers_node_refresh_membership_async(NULL, &ctx, simple_callback);
+
+    if (status != WISPERS_STATUS_NULL_POINTER) FAIL("expected NULL_POINTER");
+
+    PASS();
+    return 0;
+}
+
 static int test_node_logout_success(void) {
     TEST("node_logout deletes local state");
 
@@ -1087,6 +1111,8 @@ int main(void) {
     failures += test_node_register_null_callback();
     failures += test_node_logout_null_handle();
     failures += test_node_logout_null_callback();
+    failures += test_node_revoke_node_null_handle();
+    failures += test_node_refresh_membership_null_handle();
     failures += test_node_logout_success();
 
     // Phase 5 tests

@@ -99,6 +99,14 @@ static inline WispersStatus callLogoutAsync(WispersNodeHandle *h, void *ctx) {
 	return wispers_node_logout_async(h, ctx, shimWispersCallback);
 }
 
+static inline WispersStatus callRevokeNodeAsync(WispersNodeHandle *h, int32_t target, void *ctx) {
+	return wispers_node_revoke_node_async(h, target, ctx, shimWispersCallback);
+}
+
+static inline WispersStatus callRefreshMembershipAsync(WispersNodeHandle *h, void *ctx) {
+	return wispers_node_refresh_membership_async(h, ctx, shimWispersCallback);
+}
+
 static inline WispersStatus callGroupInfoAsync(WispersNodeHandle *h, void *ctx) {
 	return wispers_node_group_info_async(h, ctx, shimWispersGroupInfoCallback);
 }

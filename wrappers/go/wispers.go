@@ -24,6 +24,7 @@ const (
 	NodeStatePending    NodeState = 0
 	NodeStateRegistered NodeState = 1
 	NodeStateActivated  NodeState = 2
+	NodeStateRevoked    NodeState = 3
 )
 
 func (s NodeState) String() string {
@@ -34,6 +35,8 @@ func (s NodeState) String() string {
 		return "Registered"
 	case NodeStateActivated:
 		return "Activated"
+	case NodeStateRevoked:
+		return "Revoked"
 	default:
 		return "Unknown"
 	}
