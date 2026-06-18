@@ -181,3 +181,25 @@ jobs:
           LD_LIBRARY_PATH: ${{ github.workspace }}/target/debug
           PYTHONPATH: ${{ github.workspace }}/wrappers/python
         run: pytest tests/
+
+  # The Kotlin wrapper's unit tests are pure host-JVM tests: they exercise the
+  # Kotlin/JNA marshalling layer (via JNA's own libjnidispatch) and never load
+  # the Rust cdylib, so this job needs only a JDK + the Android SDK — no Rust
+  # toolchain, cdylib, or submodules.
+  kotlin:
+    name: Kotlin wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Run Kotlin wrapper unit tests
+        working-directory: wrappers/kotlin
+        run: ./gradlew testDebugUnitTest --console=plain --stacktrace
