@@ -203,3 +203,22 @@ jobs:
       - name: Run Kotlin wrapper unit tests
         working-directory: wrappers/kotlin
         run: ./gradlew testDebugUnitTest --console=plain --stacktrace
+
+  # The Swift wrapper has no test suite, so CI guards the one thing that rots:
+  # whether the Swift sources still compile against the current C ABI. The
+  # `-I` header is a symlink to the canonical wispers-connect/include header,
+  # so this type-checks against the live ABI (no xcframework, no Rust, no link).
+  # It's iOS-only, so it needs an Xcode/macOS runner and an iOS-simulator target.
+  swift:
+    name: Swift wrapper
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Type-check Swift wrapper against the current C ABI
+        working-directory: wrappers/swift
+        run: |
+          xcrun -sdk iphonesimulator swiftc -typecheck \
+            -target arm64-apple-ios15.0-simulator \
+            -I Sources/CWispersConnect/include \
+            Sources/WispersConnect/*.swift
