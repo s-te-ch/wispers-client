@@ -1,0 +1,12 @@
+language = "C"
+
+# This config is consumed by maturin's cffi binding generation (it runs cbindgen
+# over this crate). The canonical, hand-written C header lives in
+# `include/wispers_connect.h` and is NOT generated from this.
+#
+# cffi flattens all enum members into a single namespace, so two `#[repr(C)]`
+# enums that share a member name (e.g. `Revoked`, present in both
+# `WispersNodeState` and `WispersStatus`) collide. Prefixing variants with the
+# enum name keeps them unique.
+[enum]
+prefix_with_name = true
