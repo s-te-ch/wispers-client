@@ -592,7 +592,10 @@ impl Node {
         // Revoked peers don't count as company: a group pared down to just us
         // (everyone else removed) is effectively empty, so we report Alone and the
         // UI prompts to add devices rather than showing only removed ones.
-        let non_revoked = nodes.iter().filter(|n| n.state != NodeState::Revoked).count();
+        let non_revoked = nodes
+            .iter()
+            .filter(|n| n.state != NodeState::Revoked)
+            .count();
         let state = if non_revoked <= 1 {
             GroupState::Alone
         } else if activated_set.is_empty() || is_dead_roster {
