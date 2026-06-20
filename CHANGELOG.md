@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.10.0 — Node revocation
+
+Adds `revoke_node()` in addition to the existing `logout()` and updates
+`group_info` reports accordingly. Breaking for library/FFI consumers, but
+wire-compatible with earlier versions.
+
+- **Node revocation.** `revoke_node` removes a compromised peer from the roster,
+  and a node that has itself been revoked now degrades gracefully. It reports as
+  `Revoked`, stops serving, and can clean up via `logout`. It's a bit of a
+  footgun, so it is not exposed in `wconnect`.
+- **`group_info` now reports each node's lifecycle state.** `NodeInfo.is_activated:
+  Option<bool>` becomes `NodeInfo.state: NodeState` (`Registered` / `Activated` /
+  `Revoked`), dropping the redundant `ActivationStatus` type; the FFI accessor
+  `wispers_node_activation_status` becomes `wispers_group_node_state`. Peer states
+  are now reported even before the local node is activated (so you can tell who can
+  endorse you).
+- **Pairing codes are no longer written to logs.**
+
 ## v0.9.2 — Native stream I/O and dead-connection liveness
 
 Improvements triggered by work on integrating `hyper`. `QuicStream` gains native
