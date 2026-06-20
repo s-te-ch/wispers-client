@@ -42,15 +42,6 @@ func (s NodeState) String() string {
 	}
 }
 
-// ActivationStatus represents the activation status of a node in the group.
-type ActivationStatus int32
-
-const (
-	ActivationUnknown      ActivationStatus = 0
-	ActivationNotActivated ActivationStatus = 1
-	ActivationActivated    ActivationStatus = 2
-)
-
 // GroupState represents the activation state of the connectivity group.
 type GroupState int32
 
@@ -94,11 +85,13 @@ func (s GroupState) String() string {
 
 // NodeInfo contains information about a node in the connectivity group.
 type NodeInfo struct {
-	NodeNumber       int32
-	Name             string
-	Metadata         string
-	IsSelf           bool
-	ActivationStatus ActivationStatus
+	NodeNumber int32
+	Name       string
+	Metadata   string
+	IsSelf     bool
+	// State is this node's lifecycle state observed from the local node.
+	// NodeStatePending never appears for a listed node.
+	State            NodeState
 	LastSeenAtMillis int64
 	IsOnline         bool
 }

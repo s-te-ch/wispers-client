@@ -416,7 +416,7 @@ interface NativeLibrary : Library {
     fun wispers_node_name(node: Pointer?): Pointer?
     fun wispers_node_metadata(node: Pointer?): Pointer?
     fun wispers_node_is_self(node: Pointer?): Byte
-    fun wispers_node_activation_status(node: Pointer?): Int
+    fun wispers_group_node_state(node: Pointer?): Int
     fun wispers_node_last_seen_at_millis(node: Pointer?): Long
     fun wispers_node_is_online(node: Pointer?): Byte
 }

@@ -11,16 +11,6 @@ public enum NodeState: Int32, Sendable {
     }
 }
 
-public enum ActivationStatus: Int32, Sendable {
-    case unknown = 0
-    case notActivated = 1
-    case activated = 2
-
-    init(cValue: Int32) {
-        self = ActivationStatus(rawValue: cValue) ?? .unknown
-    }
-}
-
 public enum GroupState: Int32, Sendable {
     case alone = 0
     case bootstrap = 1
@@ -56,7 +46,9 @@ public struct NodeInfo: Sendable, Identifiable {
     public let name: String
     public let metadata: String
     public let isSelf: Bool
-    public let activationStatus: ActivationStatus
+    /// This node's lifecycle state observed from the local node. `.pending` never
+    /// appears for a listed node.
+    public let state: NodeState
     public let lastSeenAtMillis: Int64
     public let isOnline: Bool
 
@@ -65,7 +57,7 @@ public struct NodeInfo: Sendable, Identifiable {
         self.name = wispers_node_name(cNode).map { String(cString: $0) } ?? ""
         self.metadata = wispers_node_metadata(cNode).map { String(cString: $0) } ?? ""
         self.isSelf = wispers_node_is_self(cNode)
-        self.activationStatus = ActivationStatus(cValue: wispers_node_activation_status(cNode))
+        self.state = NodeState(cValue: wispers_group_node_state(cNode))
         self.lastSeenAtMillis = wispers_node_last_seen_at_millis(cNode)
         self.isOnline = wispers_node_is_online(cNode)
     }

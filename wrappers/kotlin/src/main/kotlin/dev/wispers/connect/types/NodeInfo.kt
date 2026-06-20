@@ -1,30 +1,6 @@
 package dev.wispers.connect.types
 
 /**
- * Activation status of a node in the connectivity group.
- *
- * This reflects whether a node appears in the roster, which is separate from
- * the node lifecycle state (Pending/Registered/Activated).
- */
-enum class ActivationStatus(val code: Int) {
-    /** Caller is not activated, can't see roster details. */
-    UNKNOWN(0),
-
-    /** Node is registered but not in roster (not activated). */
-    NOT_ACTIVATED(1),
-
-    /** Node is in roster and not revoked. */
-    ACTIVATED(2);
-
-    companion object {
-        private val codeMap = entries.associateBy { it.code }
-
-        fun fromCode(code: Int): ActivationStatus =
-            codeMap[code] ?: UNKNOWN
-    }
-}
-
-/**
  * Information about a node in the connectivity group.
  */
 data class NodeInfo(
@@ -40,8 +16,12 @@ data class NodeInfo(
     /** Whether this node is the current node (self). */
     val isSelf: Boolean,
 
-    /** Activation status of this node. */
-    val activationStatus: ActivationStatus,
+    /**
+     * This node's lifecycle state observed from the local node — the same
+     * [NodeState] you'd get from the node directly. `Pending` never appears for a
+     * listed node.
+     */
+    val state: NodeState,
 
     /** Last time the node was seen (milliseconds since epoch), or null if unknown. */
     val lastSeenAtMillis: Long?,

@@ -93,6 +93,17 @@ pub enum WispersNodeState {
     Revoked = 3,
 }
 
+impl From<crate::NodeState> for WispersNodeState {
+    fn from(state: crate::NodeState) -> Self {
+        match state {
+            crate::NodeState::Pending => Self::Pending,
+            crate::NodeState::Registered => Self::Registered,
+            crate::NodeState::Activated => Self::Activated,
+            crate::NodeState::Revoked => Self::Revoked,
+        }
+    }
+}
+
 // =============================================================================
 // Callback type aliases
 // =============================================================================
@@ -187,11 +198,6 @@ pub extern "C" fn wispers_registration_info_free(info: *mut WispersRegistrationI
 // Group status
 // =============================================================================
 
-/// Activation status values for WispersNode.
-pub const WISPERS_ACTIVATION_UNKNOWN: c_int = 0;
-pub const WISPERS_ACTIVATION_NOT_ACTIVATED: c_int = 1;
-pub const WISPERS_ACTIVATION_ACTIVATED: c_int = 2;
-
 /// Group state indicator for FFI.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -221,7 +227,7 @@ pub struct WispersNode {
     name: CString,
     metadata: CString,
     is_self: bool,
-    activation_status: c_int,
+    state: WispersNodeState,
     last_seen_at_millis: i64,
     is_online: bool,
 }
@@ -253,17 +259,12 @@ impl WispersGroupInfo {
                     CString::new(node.name.as_str()).map_err(|_| WispersStatus::InvalidUtf8)?;
                 let metadata =
                     CString::new(node.metadata.as_str()).map_err(|_| WispersStatus::InvalidUtf8)?;
-                let activation_status = match node.is_activated {
-                    None => WISPERS_ACTIVATION_UNKNOWN,
-                    Some(false) => WISPERS_ACTIVATION_NOT_ACTIVATED,
-                    Some(true) => WISPERS_ACTIVATION_ACTIVATED,
-                };
                 Ok(WispersNode {
                     node_number: node.node_number,
                     name,
                     metadata,
                     is_self: node.is_self,
-                    activation_status,
+                    state: WispersNodeState::from(node.state),
                     last_seen_at_millis: node.last_seen_at_millis,
                     is_online: node.is_online,
                 })
@@ -399,12 +400,15 @@ pub extern "C" fn wispers_node_is_self(node: *const WispersNode) -> bool {
     unsafe { (*node).is_self }
 }
 
+/// This node's lifecycle state observed from the local node (the same
+/// `WispersNodeState` you'd get from `wispers_node_state` on that node directly).
+/// `WISPERS_NODE_STATE_PENDING` never occurs for a listed node.
 #[unsafe(no_mangle)]
-pub extern "C" fn wispers_node_activation_status(node: *const WispersNode) -> c_int {
+pub extern "C" fn wispers_group_node_state(node: *const WispersNode) -> WispersNodeState {
     if node.is_null() {
-        return WISPERS_ACTIVATION_UNKNOWN;
+        return WispersNodeState::Pending;
     }
-    unsafe { (*node).activation_status }
+    unsafe { (*node).state }
 }
 
 #[unsafe(no_mangle)]

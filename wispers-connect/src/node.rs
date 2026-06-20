@@ -499,7 +499,6 @@ impl Node {
     /// [`GroupInfo`].
     pub async fn group_info(&self) -> Result<GroupInfo, NodeStateError> {
         use crate::hub::HubClient;
-        use crate::roster::active_nodes;
 
         let registration = self.require_at_least_registered()?;
         let client = HubClient::connect(self.hub_addr())
@@ -513,66 +512,7 @@ impl Node {
         )
         .map_err(NodeStateError::hub)?;
 
-        // Build a set of activated (non-revoked) roster node numbers
-        let activated_set: std::collections::HashSet<i32> =
-            active_nodes(&roster).map(|n| n.node_number).collect();
-
-        // Build a set of hub-registered node numbers
-        let hub_numbers: std::collections::HashSet<i32> =
-            hub_nodes.iter().map(|n| n.node_number).collect();
-
-        // Detect dead roster: version > 0 but no active roster member is still
-        // registered with the hub.
-        let is_dead_roster =
-            roster.version > 0 && !activated_set.iter().any(|n| hub_numbers.contains(n));
-
-        let my_node_number = registration.node_number;
-        let self_activated = activated_set.contains(&my_node_number) && !is_dead_roster;
-
-        let nodes: Vec<NodeInfo> = hub_nodes
-            .into_iter()
-            .map(|hub_node| {
-                let is_activated = if is_dead_roster {
-                    // Dead roster — treat everyone as not activated
-                    Some(false)
-                } else if roster.version == 0 && activated_set.is_empty() {
-                    // Empty roster — we have no activation info yet, but we
-                    // know nobody is activated
-                    Some(false)
-                } else if self_activated {
-                    // We're activated — we can see the roster
-                    Some(activated_set.contains(&hub_node.node_number))
-                } else {
-                    // We're not activated — we can't trust the roster for others
-                    None
-                };
-                NodeInfo {
-                    node_number: hub_node.node_number,
-                    name: hub_node.name,
-                    metadata: hub_node.metadata,
-                    is_self: hub_node.node_number == my_node_number,
-                    is_activated,
-                    last_seen_at_millis: hub_node.last_seen_at_millis,
-                    is_online: hub_node.is_online,
-                }
-            })
-            .collect();
-
-        // Determine the group state
-        let state = if nodes.len() <= 1 {
-            GroupState::Alone
-        } else if activated_set.is_empty() || is_dead_roster {
-            GroupState::Bootstrap
-        } else if !self_activated {
-            GroupState::NeedActivation
-        } else {
-            let all_activated = nodes.iter().all(|n| n.is_activated == Some(true));
-            if all_activated {
-                GroupState::AllActivated
-            } else {
-                GroupState::CanEndorse
-            }
-        };
+        let (nodes, state) = Self::analyze_group(hub_nodes, &roster, registration.node_number);
 
         let name = if metadata.name.is_empty() {
             None
@@ -587,6 +527,91 @@ impl Node {
             state,
             nodes,
         })
+    }
+
+    /// Derive each node's activation status and the overall [`GroupState`] from
+    /// the hub's node list and the (unverified) roster.
+    ///
+    /// Returns the per-node statuses and the group [`GroupState`].
+    fn analyze_group(
+        hub_nodes: Vec<crate::hub::Node>,
+        roster: &crate::hub::proto::roster::Roster,
+        my_node_number: i32,
+    ) -> (Vec<NodeInfo>, GroupState) {
+        use crate::roster::active_nodes;
+        use std::collections::HashSet;
+
+        // Activated (non-revoked) roster members.
+        let activated_set: HashSet<i32> = active_nodes(roster).map(|n| n.node_number).collect();
+        // Roster members that have been explicitly revoked (terminal).
+        let revoked_set: HashSet<i32> = roster
+            .nodes
+            .iter()
+            .filter(|n| n.revoked)
+            .map(|n| n.node_number)
+            .collect();
+
+        // Nodes the hub still has registered.
+        let hub_numbers: HashSet<i32> = hub_nodes.iter().map(|n| n.node_number).collect();
+
+        // Dead roster: it has content (version > 0) but none of its active
+        // members are registered with the hub anymore, so it can't be used.
+        let is_dead_roster =
+            roster.version > 0 && !activated_set.iter().any(|n| hub_numbers.contains(n));
+
+        let self_activated = activated_set.contains(&my_node_number) && !is_dead_roster;
+
+        let nodes: Vec<NodeInfo> = hub_nodes
+            .into_iter()
+            .map(|hub_node| {
+                // In the hub list ⇒ at least Registered. A live roster upgrades
+                // that to Activated/Revoked; a dead roster is ignored (we're
+                // bootstrapping fresh). This does NOT gate on our own activation:
+                // peers' states are reported even from an unverified roster.
+                let node_state = if is_dead_roster {
+                    NodeState::Registered
+                } else if activated_set.contains(&hub_node.node_number) {
+                    NodeState::Activated
+                } else if revoked_set.contains(&hub_node.node_number) {
+                    NodeState::Revoked
+                } else {
+                    NodeState::Registered
+                };
+                NodeInfo {
+                    node_number: hub_node.node_number,
+                    name: hub_node.name,
+                    metadata: hub_node.metadata,
+                    is_self: hub_node.node_number == my_node_number,
+                    state: node_state,
+                    last_seen_at_millis: hub_node.last_seen_at_millis,
+                    is_online: hub_node.is_online,
+                }
+            })
+            .collect();
+
+        // Revoked peers don't count as company: a group pared down to just us
+        // (everyone else removed) is effectively empty, so we report Alone and the
+        // UI prompts to add devices rather than showing only removed ones.
+        let non_revoked = nodes.iter().filter(|n| n.state != NodeState::Revoked).count();
+        let state = if non_revoked <= 1 {
+            GroupState::Alone
+        } else if activated_set.is_empty() || is_dead_roster {
+            GroupState::Bootstrap
+        } else if !self_activated {
+            GroupState::NeedActivation
+        } else {
+            // Revoked peers are terminal — they're not endorsable, so only
+            // genuinely-registered (awaiting-endorsement) peers keep us in
+            // CanEndorse.
+            let has_registered = nodes.iter().any(|n| n.state == NodeState::Registered);
+            if has_registered {
+                GroupState::CanEndorse
+            } else {
+                GroupState::AllActivated
+            }
+        };
+
+        (nodes, state)
     }
 
     /// Start a serving session.
@@ -1305,7 +1330,209 @@ async fn start_serving_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hub::Node as HubNode;
+    use crate::hub::proto::roster::{Node as RosterNode, Roster};
     use crate::storage::InMemoryNodeStateStore;
+
+    // ==================== group analysis (node listing / roster) ====================
+
+    /// A hub-registered node with the given number; other fields are defaults.
+    fn hub_node(node_number: i32) -> HubNode {
+        HubNode {
+            node_number,
+            name: format!("node-{node_number}"),
+            metadata: String::new(),
+            last_seen_at_millis: 0,
+            is_online: false,
+        }
+    }
+
+    /// Build a roster at `version` from `(node_number, revoked)` pairs. The
+    /// signatures/keys are irrelevant to `analyze_group`, which only reads the
+    /// version and the (number, revoked) of each node, so they're left empty.
+    fn make_roster(version: i64, members: &[(i32, bool)]) -> Roster {
+        Roster {
+            version,
+            nodes: members
+                .iter()
+                .map(|&(node_number, revoked)| RosterNode {
+                    node_number,
+                    public_key_spki: Vec::new(),
+                    revoked,
+                })
+                .collect(),
+            addenda: Vec::new(),
+        }
+    }
+
+    fn find(nodes: &[NodeInfo], node_number: i32) -> &NodeInfo {
+        nodes
+            .iter()
+            .find(|n| n.node_number == node_number)
+            .expect("node should be present")
+    }
+
+    #[test]
+    fn group_analysis_alone() {
+        // Only ourselves registered, empty roster.
+        let (nodes, state) = Node::analyze_group(vec![hub_node(1)], &make_roster(0, &[]), 1);
+        assert_eq!(state, GroupState::Alone);
+        assert_eq!(nodes.len(), 1);
+        assert!(nodes[0].is_self);
+        assert_eq!(nodes[0].state, NodeState::Registered);
+    }
+
+    #[test]
+    fn group_analysis_bootstrap_empty_roster() {
+        // Several devices added, nobody activated yet (version-0 roster) — so
+        // everyone is merely Registered.
+        let (nodes, state) =
+            Node::analyze_group(vec![hub_node(1), hub_node(2)], &make_roster(0, &[]), 1);
+        assert_eq!(state, GroupState::Bootstrap);
+        assert!(nodes.iter().all(|n| n.state == NodeState::Registered));
+    }
+
+    #[test]
+    fn group_analysis_bootstrap_dead_roster() {
+        // The roster has content, but none of its active members are still
+        // registered with the hub → unusable, so we fall back to bootstrap and
+        // everyone reads as merely Registered.
+        let (nodes, state) = Node::analyze_group(
+            vec![hub_node(2), hub_node(3)],
+            &make_roster(1, &[(1, false)]), // active member 1 is gone from the hub
+            2,
+        );
+        assert_eq!(state, GroupState::Bootstrap);
+        assert!(nodes.iter().all(|n| n.state == NodeState::Registered));
+    }
+
+    #[test]
+    fn group_analysis_need_activation_reports_endorsers() {
+        // We're a fresh device (node 3, Registered) and not activated, but the
+        // roster's activated members must still be reported as Activated — that's
+        // exactly the "who can give me a code?" set. Peer statuses do NOT depend
+        // on our own activation.
+        let (nodes, state) = Node::analyze_group(
+            vec![hub_node(1), hub_node(2), hub_node(3)],
+            &make_roster(2, &[(1, false), (2, false)]),
+            3,
+        );
+        assert_eq!(state, GroupState::NeedActivation);
+        assert_eq!(find(&nodes, 1).state, NodeState::Activated);
+        assert_eq!(find(&nodes, 2).state, NodeState::Activated);
+        let me = find(&nodes, 3);
+        assert!(me.is_self);
+        assert_eq!(me.state, NodeState::Registered);
+    }
+
+    #[test]
+    fn group_analysis_can_endorse() {
+        // We're activated (node 1); node 3 was added but isn't activated yet.
+        let (nodes, state) = Node::analyze_group(
+            vec![hub_node(1), hub_node(2), hub_node(3)],
+            &make_roster(2, &[(1, false), (2, false)]),
+            1,
+        );
+        assert_eq!(state, GroupState::CanEndorse);
+        assert_eq!(find(&nodes, 1).state, NodeState::Activated);
+        assert_eq!(find(&nodes, 2).state, NodeState::Activated);
+        assert_eq!(find(&nodes, 3).state, NodeState::Registered);
+    }
+
+    #[test]
+    fn group_analysis_all_activated() {
+        let (nodes, state) = Node::analyze_group(
+            vec![hub_node(1), hub_node(2)],
+            &make_roster(2, &[(1, false), (2, false)]),
+            1,
+        );
+        assert_eq!(state, GroupState::AllActivated);
+        assert!(nodes.iter().all(|n| n.state == NodeState::Activated));
+    }
+
+    #[test]
+    fn group_analysis_revoked_peer_is_terminal() {
+        // Node 2 was activated then revoked. Revocation is terminal — it can't be
+        // re-activated, so it reports Revoked (distinct from Registered) and is
+        // NOT endorsable: with no genuinely-registered peers the group is
+        // AllActivated, not CanEndorse.
+        let (nodes, state) = Node::analyze_group(
+            vec![hub_node(1), hub_node(2), hub_node(3)],
+            &make_roster(3, &[(1, false), (2, true), (3, false)]),
+            1,
+        );
+        assert_eq!(state, GroupState::AllActivated);
+        assert_eq!(find(&nodes, 2).state, NodeState::Revoked);
+        assert_eq!(find(&nodes, 3).state, NodeState::Activated);
+    }
+
+    #[test]
+    fn group_analysis_revoked_alongside_registered() {
+        // A revoked peer (2) and a genuinely-registered peer (4) coexist. Only the
+        // registered one drives CanEndorse; the revoked one stays Revoked and
+        // isn't offered for activation.
+        let (nodes, state) = Node::analyze_group(
+            vec![hub_node(1), hub_node(2), hub_node(3), hub_node(4)],
+            &make_roster(3, &[(1, false), (2, true), (3, false)]),
+            1,
+        );
+        assert_eq!(state, GroupState::CanEndorse);
+        assert_eq!(find(&nodes, 2).state, NodeState::Revoked);
+        assert_eq!(find(&nodes, 3).state, NodeState::Activated);
+        assert_eq!(find(&nodes, 4).state, NodeState::Registered);
+    }
+
+    #[test]
+    fn group_analysis_last_active_node_is_alone() {
+        // Everyone else has been revoked, leaving us (node 1) as the only active
+        // node. Revoked peers stay registered with the hub (revocation doesn't
+        // deregister) and still appear as Revoked, but they don't count as
+        // company — so the group is Alone and the UI prompts to add devices
+        // rather than showing only removed ones. (The roster is NOT dead: an
+        // active member, us, is still present in the hub list.)
+        let (nodes, state) = Node::analyze_group(
+            vec![hub_node(1), hub_node(2), hub_node(3)],
+            &make_roster(4, &[(1, false), (2, true), (3, true)]),
+            1,
+        );
+        assert_eq!(state, GroupState::Alone);
+        assert_eq!(find(&nodes, 1).state, NodeState::Activated);
+        assert_eq!(find(&nodes, 2).state, NodeState::Revoked);
+        assert_eq!(find(&nodes, 3).state, NodeState::Revoked);
+    }
+
+    #[test]
+    fn group_analysis_active_and_registered_among_revoked() {
+        // All three states at once: us (node 1, Activated), one registered peer
+        // (node 2) awaiting endorsement, and the rest (3, 4) revoked. The revoked
+        // peers are ignored for the group state, so the lone registered peer still
+        // drives CanEndorse — not Alone (a non-revoked peer exists) and not
+        // AllActivated (someone still needs activating).
+        let (nodes, state) = Node::analyze_group(
+            vec![hub_node(1), hub_node(2), hub_node(3), hub_node(4)],
+            &make_roster(5, &[(1, false), (3, true), (4, true)]),
+            1,
+        );
+        assert_eq!(state, GroupState::CanEndorse);
+        assert_eq!(find(&nodes, 1).state, NodeState::Activated);
+        assert_eq!(find(&nodes, 2).state, NodeState::Registered);
+        assert_eq!(find(&nodes, 3).state, NodeState::Revoked);
+        assert_eq!(find(&nodes, 4).state, NodeState::Revoked);
+    }
+
+    #[test]
+    fn group_analysis_passes_through_node_fields() {
+        let mut hn = hub_node(7);
+        hn.name = "Laptop".to_string();
+        hn.is_online = true;
+        hn.last_seen_at_millis = 12345;
+        let (nodes, _) = Node::analyze_group(vec![hn], &make_roster(0, &[]), 7);
+        let n = &nodes[0];
+        assert_eq!(n.name, "Laptop");
+        assert!(n.is_online);
+        assert_eq!(n.last_seen_at_millis, 12345);
+        assert!(n.is_self);
+    }
 
     #[test]
     fn state_detection_works() {

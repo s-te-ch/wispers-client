@@ -22,7 +22,7 @@ from ._ffi import (
     WispersUdpConnectionCallbackType,
 )
 from .exceptions import raise_for_status
-from .types import ActivationStatus, GroupState, NodeInfo, NodeState
+from .types import GroupState, NodeInfo, NodeState
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +125,7 @@ def GROUP_INFO_CB(ctx: int | None, status: int, detail: bytes | None,  # noqa: N
             name=node_name_bytes.decode("utf-8") if node_name_bytes else "",
             metadata=metadata_bytes.decode("utf-8") if metadata_bytes else "",
             is_self=lib.wispers_node_is_self(n),
-            activation_status=ActivationStatus(lib.wispers_node_activation_status(n)),
+            state=NodeState(lib.wispers_group_node_state(n)),
             last_seen_at_millis=lib.wispers_node_last_seen_at_millis(n),
             is_online=lib.wispers_node_is_online(n),
         ))

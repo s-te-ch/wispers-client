@@ -5,7 +5,6 @@ import dev.wispers.connect.internal.CallbackBridge
 import dev.wispers.connect.internal.Callbacks
 import dev.wispers.connect.internal.NativeLibrary
 import dev.wispers.connect.internal.NativeTypes
-import dev.wispers.connect.types.ActivationStatus
 import dev.wispers.connect.types.GroupInfo
 import dev.wispers.connect.types.GroupState
 import dev.wispers.connect.types.NodeInfo
@@ -188,7 +187,7 @@ class Node internal constructor(
                     name = lib.wispers_node_name(n)?.getString(0, "UTF-8") ?: "",
                     metadata = lib.wispers_node_metadata(n)?.getString(0, "UTF-8") ?: "",
                     isSelf = lib.wispers_node_is_self(n) != 0.toByte(),
-                    activationStatus = ActivationStatus.fromCode(lib.wispers_node_activation_status(n)),
+                    state = NodeState.fromCode(lib.wispers_group_node_state(n)),
                     lastSeenAtMillis = if (lastSeen > 0) lastSeen else null,
                     isOnline = lib.wispers_node_is_online(n) != 0.toByte()
                 )

@@ -73,17 +73,7 @@ static int test_node_state_enum(void) {
     if (WISPERS_NODE_STATE_PENDING != 0) FAIL("PENDING != 0");
     if (WISPERS_NODE_STATE_REGISTERED != 1) FAIL("REGISTERED != 1");
     if (WISPERS_NODE_STATE_ACTIVATED != 2) FAIL("ACTIVATED != 2");
-
-    PASS();
-    return 0;
-}
-
-static int test_activation_status_enum(void) {
-    TEST("activation status enum");
-
-    if (WISPERS_ACTIVATION_UNKNOWN != 0) FAIL("UNKNOWN != 0");
-    if (WISPERS_ACTIVATION_NOT_ACTIVATED != 1) FAIL("NOT_ACTIVATED != 1");
-    if (WISPERS_ACTIVATION_ACTIVATED != 2) FAIL("ACTIVATED != 2");
+    if (WISPERS_NODE_STATE_REVOKED != 3) FAIL("REVOKED != 3");
 
     PASS();
     return 0;
@@ -610,8 +600,8 @@ static int test_group_info_accessors_null(void) {
     if (wispers_node_name(NULL) != NULL) FAIL("node_name(NULL) != NULL");
     if (wispers_node_metadata(NULL) != NULL) FAIL("node_metadata(NULL) != NULL");
     if (wispers_node_is_self(NULL) != false) FAIL("node_is_self(NULL) != false");
-    if (wispers_node_activation_status(NULL) != WISPERS_ACTIVATION_UNKNOWN)
-        FAIL("node_activation_status(NULL) != UNKNOWN");
+    if (wispers_group_node_state(NULL) != WISPERS_NODE_STATE_PENDING)
+        FAIL("group_node_state(NULL) != PENDING");
     if (wispers_node_last_seen_at_millis(NULL) != 0)
         FAIL("node_last_seen_at_millis(NULL) != 0");
     if (wispers_node_is_online(NULL) != false)
@@ -1085,7 +1075,6 @@ int main(void) {
     failures += test_callback_types_compile();
     failures += test_status_codes();
     failures += test_node_state_enum();
-    failures += test_activation_status_enum();
     failures += test_storage_in_memory();
     failures += test_storage_free_null();
     failures += test_handle_free_null();

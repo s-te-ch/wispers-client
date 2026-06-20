@@ -5,7 +5,6 @@ so importing types/exceptions works without the shared library present.
 """
 
 from .types import (
-    ActivationStatus,
     GroupInfo,
     GroupState,
     NodeInfo,
@@ -47,7 +46,6 @@ from .quic import QuicConnection, QuicStream
 
 __all__ = [
     # Types
-    "ActivationStatus",
     "GroupInfo",
     "GroupState",
     "NodeInfo",

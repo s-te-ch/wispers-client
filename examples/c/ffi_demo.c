@@ -69,7 +69,7 @@ static void        print_usage(const char *prog);
 static const char *status_str(WispersStatus s);
 static const char *state_str(WispersNodeState s);
 static const char *group_state_str(WispersGroupState s);
-static const char *activation_status_str(int s);
+static const char *node_state_str(int s);
 
 // --- Serve helpers ---
 static void *serving_run_thread(void *arg);
@@ -562,7 +562,7 @@ static void print_group(WispersNodeHandle *node) {
         printf("  Node %d: %s — %s%s%s\n",
                wispers_node_number(n),
                name ? name : "(unnamed)",
-               activation_status_str(wispers_node_activation_status(n)),
+               node_state_str(wispers_group_node_state(n)),
                wispers_node_is_self(n) ? " (self)" : "",
                wispers_node_is_online(n) ? " [online]" : "");
     }
@@ -622,12 +622,13 @@ static const char *group_state_str(WispersGroupState s) {
     }
 }
 
-static const char *activation_status_str(int s) {
+static const char *node_state_str(int s) {
     switch (s) {
-    case WISPERS_ACTIVATION_UNKNOWN:       return "Unknown";
-    case WISPERS_ACTIVATION_NOT_ACTIVATED: return "NotActivated";
-    case WISPERS_ACTIVATION_ACTIVATED:     return "Activated";
-    default:                               return "Unknown";
+    case WISPERS_NODE_STATE_PENDING:    return "Pending";
+    case WISPERS_NODE_STATE_REGISTERED: return "Registered";
+    case WISPERS_NODE_STATE_ACTIVATED:  return "Activated";
+    case WISPERS_NODE_STATE_REVOKED:    return "Revoked";
+    default:                            return "Unknown";
     }
 }
 

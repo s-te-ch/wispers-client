@@ -57,7 +57,7 @@ func goWispersGroupInfoCallback(ctx unsafe.Pointer, status C.int, detail *C.char
 			Name:             C.GoString(C.wispers_node_name(n)),
 			Metadata:         C.GoString(C.wispers_node_metadata(n)),
 			IsSelf:           bool(C.wispers_node_is_self(n)),
-			ActivationStatus: ActivationStatus(C.wispers_node_activation_status(n)),
+			State:            NodeState(C.wispers_group_node_state(n)),
 			LastSeenAtMillis: int64(C.wispers_node_last_seen_at_millis(n)),
 			IsOnline:         bool(C.wispers_node_is_online(n)),
 		}

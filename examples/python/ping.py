@@ -354,7 +354,7 @@ def print_group(node: Node) -> None:
     for n in info.nodes:
         tag = " (self)" if n.is_self else ""
         online = " [online]" if n.is_online else ""
-        print(f"  Node {n.node_number}: {n.name or '(unnamed)'} — {n.activation_status.name}{tag}{online}")
+        print(f"  Node {n.node_number}: {n.name or '(unnamed)'} — {n.state.name}{tag}{online}")
 
 
 # =============================================================================

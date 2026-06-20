@@ -483,11 +483,13 @@ func printGroup(node *wispersgo.Node) {
 			name = "(unnamed)"
 		}
 		status := "Unknown"
-		switch n.ActivationStatus {
-		case wispersgo.ActivationNotActivated:
-			status = "NotActivated"
-		case wispersgo.ActivationActivated:
+		switch n.State {
+		case wispersgo.NodeStateRegistered:
+			status = "Registered"
+		case wispersgo.NodeStateActivated:
 			status = "Activated"
+		case wispersgo.NodeStateRevoked:
+			status = "Revoked"
 		}
 		fmt.Printf("  Node %d: %s — %s%s%s\n", n.NodeNumber, name, status, tag, online)
 	}

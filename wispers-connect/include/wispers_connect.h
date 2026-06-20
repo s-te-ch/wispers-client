@@ -40,13 +40,6 @@ typedef enum {
     WISPERS_NODE_STATE_REVOKED = 3,
 } WispersNodeState;
 
-// Activation status values for WispersNode.
-typedef enum {
-    WISPERS_ACTIVATION_UNKNOWN = 0,       // Caller is not activated, can't see roster
-    WISPERS_ACTIVATION_NOT_ACTIVATED = 1, // Node is registered but not in roster
-    WISPERS_ACTIVATION_ACTIVATED = 2,     // Node is in roster and not revoked
-} WispersActivationStatus;
-
 // TTL profile for activation codes (selects entropy + validity window).
 typedef enum {
     WISPERS_TTL_PROFILE_INTERACTIVE = 0,  // short-lived, live at-the-keyboard entry
@@ -139,7 +132,7 @@ int32_t      wispers_node_number(const WispersNode *node);
 const char  *wispers_node_name(const WispersNode *node);
 const char  *wispers_node_metadata(const WispersNode *node);
 bool         wispers_node_is_self(const WispersNode *node);
-int32_t      wispers_node_activation_status(const WispersNode *node);   // WispersActivationStatus
+WispersNodeState wispers_group_node_state(const WispersNode *node);    // PENDING never occurs
 int64_t      wispers_node_last_seen_at_millis(const WispersNode *node);
 bool         wispers_node_is_online(const WispersNode *node);
 

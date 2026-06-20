@@ -35,12 +35,6 @@ class NodeState(IntEnum):
     REVOKED = 3
 
 
-class ActivationStatus(IntEnum):
-    UNKNOWN = 0
-    NOT_ACTIVATED = 1
-    ACTIVATED = 2
-
-
 class GroupState(IntEnum):
     ALONE = 0
     BOOTSTRAP = 1
@@ -67,7 +61,9 @@ class NodeInfo:
     name: str
     metadata: str
     is_self: bool
-    activation_status: ActivationStatus
+    #: This node's lifecycle state observed from the local node. NodeState.PENDING
+    #: never appears for a listed node.
+    state: NodeState
     last_seen_at_millis: int
     is_online: bool
 

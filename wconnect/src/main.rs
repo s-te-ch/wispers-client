@@ -574,9 +574,12 @@ async fn nodes(hub_override: Option<&str>, profile: &str) -> Result<()> {
         };
         let tags: Vec<&str> = [
             node_info.is_self.then_some("you"),
-            node_info
-                .is_activated
-                .map(|a| if a { "activated" } else { "not activated" }),
+            match node_info.state {
+                NodeState::Activated => Some("activated"),
+                NodeState::Registered => Some("not activated"),
+                NodeState::Revoked => Some("revoked"),
+                NodeState::Pending => None,
+            },
         ]
         .into_iter()
         .flatten()

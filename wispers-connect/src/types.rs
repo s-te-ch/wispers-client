@@ -1,5 +1,6 @@
 //! Shared data types: `NodeInfo`, `GroupInfo`, `NodeRegistration`, and related structures.
 
+use crate::node::NodeState;
 use rand::{RngCore, rngs::OsRng};
 use std::fmt;
 use zeroize::Zeroize;
@@ -130,9 +131,10 @@ pub struct NodeInfo {
     pub metadata: String,
     /// Whether this is the current node (self).
     pub is_self: bool,
-    /// Whether the node is activated (in the roster and not revoked).
-    /// None if we don't have roster access (not activated ourselves).
-    pub is_activated: Option<bool>,
+    /// The peer node's lifecycle state observed from the local node. Can be
+    /// `Registered`, `Activated`, or `Revoked`. `Pending` never occurs because
+    /// pending nodes aren't visible to others.
+    pub state: NodeState,
     /// Unix timestamp in milliseconds when the node was last seen.
     pub last_seen_at_millis: i64,
     /// Whether the node currently has an active connection to the hub.
@@ -142,7 +144,8 @@ pub struct NodeInfo {
 /// Activation state of the connectivity group from this node's perspective.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GroupState {
-    /// Only node in the group — nothing to activate with.
+    /// No other usable nodes — either we're the only node, or every other node
+    /// has been revoked. Nothing to activate or connect with.
     Alone,
     /// No activated nodes (empty or dead roster). Any node can pair with any
     /// other. The client decides which node generates the pairing code.

@@ -27,6 +27,7 @@ class TypesTest {
         assertEquals(NodeState.Pending, NodeState.fromCode(0))
         assertEquals(NodeState.Registered, NodeState.fromCode(1))
         assertEquals(NodeState.Activated, NodeState.fromCode(2))
+        assertEquals(NodeState.Revoked, NodeState.fromCode(3))
     }
 
     @Test
@@ -34,18 +35,6 @@ class TypesTest {
         assertThrows(IllegalArgumentException::class.java) {
             NodeState.fromCode(99)
         }
-    }
-
-    @Test
-    fun `ActivationStatus fromCode returns correct status`() {
-        assertEquals(ActivationStatus.UNKNOWN, ActivationStatus.fromCode(0))
-        assertEquals(ActivationStatus.NOT_ACTIVATED, ActivationStatus.fromCode(1))
-        assertEquals(ActivationStatus.ACTIVATED, ActivationStatus.fromCode(2))
-    }
-
-    @Test
-    fun `ActivationStatus fromCode returns UNKNOWN for invalid code`() {
-        assertEquals(ActivationStatus.UNKNOWN, ActivationStatus.fromCode(99))
     }
 
     @Test
@@ -86,7 +75,7 @@ class TypesTest {
             name = "Test Node",
             metadata = "{\"platform\":\"test\"}",
             isSelf = true,
-            activationStatus = ActivationStatus.ACTIVATED,
+            state = NodeState.Activated,
             lastSeenAtMillis = 1234567890L,
             isOnline = true
         )
@@ -95,7 +84,7 @@ class TypesTest {
         assertEquals("Test Node", info.name)
         assertEquals("{\"platform\":\"test\"}", info.metadata)
         assertTrue(info.isSelf)
-        assertEquals(ActivationStatus.ACTIVATED, info.activationStatus)
+        assertEquals(NodeState.Activated, info.state)
         assertEquals(1234567890L, info.lastSeenAtMillis)
         assertTrue(info.isOnline)
     }

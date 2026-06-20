@@ -105,8 +105,8 @@ def declare_functions(lib: ctypes.CDLL) -> None:  # noqa: C901
     lib.wispers_node_is_self.argtypes = [c_void_p]
     lib.wispers_node_is_self.restype = c_bool
 
-    lib.wispers_node_activation_status.argtypes = [c_void_p]
-    lib.wispers_node_activation_status.restype = c_int32
+    lib.wispers_group_node_state.argtypes = [c_void_p]
+    lib.wispers_group_node_state.restype = c_int32
 
     lib.wispers_node_last_seen_at_millis.argtypes = [c_void_p]
     lib.wispers_node_last_seen_at_millis.restype = c_int64
