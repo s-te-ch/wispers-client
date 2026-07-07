@@ -61,6 +61,26 @@ public struct NodeInfo: Sendable, Identifiable {
         self.lastSeenAtMillis = wispers_node_last_seen_at_millis(cNode)
         self.isOnline = wispers_node_is_online(cNode)
     }
+
+    /// Memberwise initializer — for tests and SwiftUI previews. The library
+    /// itself builds `NodeInfo` from the C layer via the internal `init(cNode:)`.
+    public init(
+        nodeNumber: Int32,
+        name: String,
+        metadata: String,
+        isSelf: Bool,
+        state: NodeState,
+        lastSeenAtMillis: Int64,
+        isOnline: Bool
+    ) {
+        self.nodeNumber = nodeNumber
+        self.name = name
+        self.metadata = metadata
+        self.isSelf = isSelf
+        self.state = state
+        self.lastSeenAtMillis = lastSeenAtMillis
+        self.isOnline = isOnline
+    }
 }
 
 public struct GroupInfo: Sendable {
@@ -69,6 +89,22 @@ public struct GroupInfo: Sendable {
     public let createdAtMillis: Int64
     public let state: GroupState
     public let nodes: [NodeInfo]
+
+    /// Memberwise initializer — for tests and SwiftUI previews. The library
+    /// itself builds `GroupInfo` from the C layer (see `CallbackBridge`).
+    public init(
+        id: String,
+        name: String?,
+        createdAtMillis: Int64,
+        state: GroupState,
+        nodes: [NodeInfo]
+    ) {
+        self.id = id
+        self.name = name
+        self.createdAtMillis = createdAtMillis
+        self.state = state
+        self.nodes = nodes
+    }
 }
 
 /// Snapshot of a serving session's hub connection and endorsing state.
