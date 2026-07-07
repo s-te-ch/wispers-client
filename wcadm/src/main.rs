@@ -11,6 +11,11 @@ struct Cli {
     #[arg(long, env = "WC_API_KEY", hide_env_values = true)]
     api_key: String,
 
+    /// Base URL of the API server, e.g. http://my-hub:2357. Required for
+    /// standalone API keys. Can also be set via the WC_URL env var.
+    #[arg(long, env = "WC_URL")]
+    url: Option<String>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -66,7 +71,7 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
 
     let api_key = ApiKey::parse(&cli.api_key)?;
-    let base_url = api_key.base_url();
+    let base_url = api_key.base_url(cli.url.as_deref())?;
     let client = Client::new();
 
     match cli.command {
@@ -109,16 +114,22 @@ impl ApiKey {
         })
     }
 
-    /// Map the environment to a base URL.
-    fn base_url(&self) -> String {
+    /// Map the environment to a base URL. An explicit URL (--url / WC_URL)
+    /// wins over the environment-derived default and is mandatory for
+    /// standalone keys, whose endpoint could be anywhere.
+    fn base_url(&self, url_override: Option<&str>) -> Result<String> {
+        if let Some(url) = url_override {
+            return Ok(url.trim_end_matches('/').to_string());
+        }
         match self.env.as_str() {
-            "local" => "http://localhost:3000".to_string(),
-            "staging" => "https://staging.connect.wispers.dev".to_string(),
-            "prod" => "https://connect.wispers.dev".to_string(),
-            other => {
-                eprintln!("warning: unknown environment '{other}', assuming staging");
-                "https://staging.connect.wispers.dev".to_string()
-            }
+            "local" => Ok("http://localhost:3000".to_string()),
+            "staging" => Ok("https://staging.connect.wispers.dev".to_string()),
+            "prod" => Ok("https://connect.wispers.dev".to_string()),
+            "standalone" => bail!(
+                "standalone API keys need the hub's URL: pass --url or set WC_URL \
+                 (e.g. http://my-hub:2357)"
+            ),
+            other => bail!("unknown API key environment '{other}'; pass --url or set WC_URL"),
         }
     }
 }
