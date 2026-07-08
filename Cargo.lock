@@ -2659,7 +2659,7 @@ dependencies = [
 
 [[package]]
 name = "wcadm"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2670,7 +2670,7 @@ dependencies = [
 
 [[package]]
 name = "wconnect"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3005,7 +3005,7 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 
 [[package]]
 name = "wispers-connect"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "aes-gcm",
  "android_logger",
