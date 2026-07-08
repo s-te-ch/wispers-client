@@ -3,7 +3,7 @@
 // subverted by the hub.
 
 syntax = "proto3";
-package connect.roster;
+package wispers.connect.roster;
 option go_package = "connect/client/proto/rosterpb";
 option java_package = "dev.wispers.connect.proto.roster";
 

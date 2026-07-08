@@ -19,11 +19,11 @@ use tonic::transport::{Channel, ClientTlsConfig};
 pub mod proto {
     /// Roster proto types.
     pub mod roster {
-        tonic::include_proto!("connect.roster");
+        tonic::include_proto!("wispers.connect.roster");
     }
     /// Hub proto types.
     pub mod hub {
-        tonic::include_proto!("connect.hub");
+        tonic::include_proto!("wispers.connect.hub");
     }
     pub use hub::*;
 }

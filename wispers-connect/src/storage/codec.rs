@@ -8,7 +8,7 @@ use crate::types::{AuthToken, ConnectivityGroupId, NodeRegistration};
 use prost::Message;
 
 mod proto {
-    tonic::include_proto!("connect.storage");
+    tonic::include_proto!("wispers.connect.storage");
 }
 
 /// Serialize a NodeRegistration to protobuf bytes.
