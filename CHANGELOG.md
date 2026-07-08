@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.11.0 — Proto namespace cleanup and standalone-hub support
+
+Preparation for publishing a standalone, self-hostable hub, plus minor fixes.
+
+- **`wcadm` works with standalone hubs.** API keys from a standalone hub
+  (`wc_standalone_…`) are accepted. Unknown key environments are now an error.
+- **Proto packages renamed to `wispers.connect.*`.** An implementation detail on
+  the wire, meant to prevent name collisions when linking with other proto-based
+  software.
+- **Python wheel: fixed an enum-member collision.** cffi flattens enum members
+  into one namespace, and v0.10.0's `Revoked` appeared twice.  Enum constants
+  are now prefixed with the enum name (`WispersNodeState_Revoked`) — Python code
+  referencing the old bare names must update. The C header is unchanged.
+- **Swift wrapper types gained public initialisers**, enabling Xcode previews
+  during app development.
+
 ## v0.10.0 — Node revocation
 
 Adds `revoke_node()` in addition to the existing `logout()` and updates
