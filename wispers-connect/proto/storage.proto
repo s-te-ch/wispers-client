@@ -3,7 +3,7 @@
 // Field numbers must remain stable across versions.
 
 syntax = "proto3";
-package connect.storage;
+package wispers.connect.storage;
 
 message NodeRegistration {
     string connectivity_group_id = 1;

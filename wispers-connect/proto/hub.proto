@@ -2,7 +2,7 @@
 // External gRPC interface of the Wispers Connect hub.
 
 syntax = "proto3";
-package connect.hub;
+package wispers.connect.hub;
 option go_package = "connect/client/proto/hubpb";
 option java_package = "dev.wispers.connect.proto.hub";
 
