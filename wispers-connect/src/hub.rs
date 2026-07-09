@@ -7,6 +7,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::MetadataValue;
+use tonic::service::interceptor::InterceptedService;
 use tonic::transport::{Channel, ClientTlsConfig};
 
 /// Proto-generated types for the Hub gRPC service.
@@ -32,17 +33,37 @@ use proto::hub_client::HubClient as ProtoHubClient;
 
 /// Error type for hub operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum HubError {
     #[error("invalid URI: {0}")]
     InvalidUri(#[from] http::uri::InvalidUri),
     #[error("connection failed: {0}")]
     Connection(#[from] tonic::transport::Error),
     #[error("RPC failed: {0}")]
-    Rpc(#[from] tonic::Status),
+    Rpc(tonic::Status),
+    #[error("{0}")]
+    IncompatibleVersion(String),
     #[error("invalid metadata: {0}")]
     Metadata(#[from] tonic::metadata::errors::InvalidMetadataValue),
     #[error("roster verification failed: {0}")]
     RosterVerification(#[from] crate::roster::RosterVerificationError),
+}
+
+/// The prefix the hub puts on version-floor rejection messages. Keep in sync
+/// with the hub's version.go.
+const VERSION_REJECTION_PREFIX: &str = "incompatible client version";
+
+impl From<tonic::Status> for HubError {
+    fn from(status: tonic::Status) -> Self {
+        // A hub refusing this client's version is its own error, not a
+        // generic RPC failure.
+        if status.code() == tonic::Code::FailedPrecondition
+            && status.message().starts_with(VERSION_REJECTION_PREFIX)
+        {
+            return HubError::IncompatibleVersion(status.message().to_owned());
+        }
+        HubError::Rpc(status)
+    }
 }
 
 impl HubError {
@@ -87,7 +108,7 @@ impl From<proto::hub::Node> for Node {
 
 /// Client for communicating with the Wispers Connect Hub.
 pub(crate) struct HubClient {
-    client: ProtoHubClient<Channel>,
+    client: ProtoHubClient<InterceptedService<Channel, AddClientVersion>>,
 }
 
 impl HubClient {
@@ -118,7 +139,7 @@ impl HubClient {
 
         let channel = endpoint.connect().await?;
         Ok(Self {
-            client: ProtoHubClient::new(channel),
+            client: ProtoHubClient::with_interceptor(channel, AddClientVersion),
         })
     }
 
@@ -320,6 +341,25 @@ pub(crate) struct ServingConnection {
     pub response_tx: mpsc::Sender<proto::ServingResponse>,
     /// Receive incoming requests.
     pub request_stream: tonic::Streaming<proto::ServingRequest>,
+}
+
+/// Adds the library version to every request, so hubs can reject
+/// incompatible clients with an explicit message (surfaced as
+/// `HubError::IncompatibleVersion`) instead of an obscure failure.
+#[derive(Clone)]
+struct AddClientVersion;
+
+impl tonic::service::Interceptor for AddClientVersion {
+    fn call(
+        &mut self,
+        mut request: tonic::Request<()>,
+    ) -> Result<tonic::Request<()>, tonic::Status> {
+        request.metadata_mut().insert(
+            "wispers-client-version",
+            MetadataValue::from_static(env!("CARGO_PKG_VERSION")),
+        );
+        Ok(request)
+    }
 }
 
 /// Add authentication metadata to a request.

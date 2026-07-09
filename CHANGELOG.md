@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+Compatibility: works with hubs of v0.1.0 or newer (any hub serving the
+`wispers.connect.hub.Hub` service name). Starting with this release, every
+release states the oldest hub it supports here. This is a support
+statement, not something the client verifies against the hub.
+
+- **Version signaling.** The client now sends its version with every hub
+  call (`wispers-client-version` metadata). Should a future hub release
+  drop support for old clients, a too-old client gets an explicit
+  `IncompatibleVersion` error naming both versions, instead of an obscure
+  failure. (No hub rejects anything today.) The hub's own version arrives
+  in the `wispers-hub-version` response header.
+- **Breaking for Rust consumers:** `HubError` gained the
+  `IncompatibleVersion` variant and is now `#[non_exhaustive]` like the
+  other error enums — exhaustive `match`es need a wildcard arm, once. FFI
+  wrappers are unaffected (no new status code).
+
 ## v0.11.0 — Proto namespace cleanup and standalone-hub support
 
 Preparation for publishing a standalone, self-hostable hub, plus minor fixes.
