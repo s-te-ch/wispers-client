@@ -6,6 +6,11 @@ use std::fmt;
 // Re-export NodeState from node module for use in error types
 pub use crate::node::NodeState;
 
+/// Error type for node lifecycle operations.
+///
+/// Non-exhaustive because this aggregates hub, storage, and transport
+/// failures, which grow by discovering corner cases, and we don't want
+/// to break clients every time this happens.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum NodeStateError {

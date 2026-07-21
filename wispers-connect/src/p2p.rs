@@ -62,6 +62,9 @@ impl ConnectionState {
 }
 
 /// Error type for P2P connection operations.
+///
+/// Non-exhaustive: NAT traversal and transport failure modes get
+/// discovered, and we don't want to break clients every time this happens.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum P2pError {

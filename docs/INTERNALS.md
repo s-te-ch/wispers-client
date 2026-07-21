@@ -48,11 +48,11 @@ Each file has a `//!` doc comment at the top with more detail.
 
 ```mermaid
 flowchart TD
-    R["register(token)"] --> Registered
-    Registered --> |"activate(activation_code)"| Activated
+	R["register(token)"] --> Registered
+	Registered --> |"activate(activation_code)"| Activated
 
-    Registered["<b>Registered</b><br/>Can authenticate<br/>Can serve (for bootstrap)<br/>Cannot connect to other nodes"]
-    Activated["<b>Activated</b><br/>On the roster<br/>Can serve<br/>Can connect to other nodes<br/>Can endorse new nodes"]
+	Registered["<b>Registered</b><br/>Can authenticate<br/>Can serve (for bootstrap)<br/>Cannot connect to other nodes"]
+	Activated["<b>Activated</b><br/>On the roster<br/>Can serve<br/>Can connect to other nodes<br/>Can endorse new nodes"]
 ```
 
 ## Key types
@@ -89,29 +89,36 @@ Wrapper equivalents:
 
 Two principles shape the public API:
 
-1. **The library is a real contract.** Any client can build their own
-   `wconnect` equivalent — the in-tree CLI is one example, not the
-   boundary. Anything `pub` and reachable from `lib.rs` is part of the
-   supported API and worth designing deliberately.
+1. **The library is a real contract.** Any client can build their own `wconnect`
+   equivalent — the in-tree CLI is one example, not the boundary. Anything `pub`
+   and reachable from `lib.rs` is part of the supported API and worth designing
+   deliberately.
 
-2. **Forward-compatibility via each language's native idiom.** Adding a
-   field to a public snapshot type (`GroupInfo`, `NodeInfo`,
-   `ServingStatus`, `NodeRegistration`, …) must not break consumers.
-   The mechanism differs because the language constraints do:
+2. **Forward-compatibility via each language's native idiom.** Adding a field to
+   a public snapshot type (`GroupInfo`, `NodeInfo`, `ServingStatus`,
+   `NodeRegistration`, …) must not break consumers.  The mechanism differs
+   because the language constraints do:
    - **Rust:** `#[non_exhaustive]` on the struct.
    - **C ABI:** opaque handle + accessor functions.
-   - **Wrappers (Python/Swift/Go/Kotlin):** expose the data however is
-     idiomatic for the host language — properties, getters, dataclasses
-     — built on top of the C accessors.
+   - **Wrappers (Python/Swift/Go/Kotlin):** expose the data however is idiomatic
+	 for the host language — properties, getters, dataclasses — built on top of
+	 the C accessors.
 
-   The goal is forward-compatibility, not surface symmetry. Each
-   language uses its native mechanism.
+   The goal is forward-compatibility, not surface symmetry. Each language uses
+   its native mechanism.
+
+   For error enums, the same principle applies selectively: `#[non_exhaustive]`
+   only where variants have historically grown by discovering corner cases:
+   `HubError`, `P2pError`, and their aggregate `NodeStateError`. We don't to
+   break clients every time we discover a new corner case. Conversely,
+   `RosterVerificationError`, `ServingError`, and `StorageError` are closed
+   domains where adding a variant is a deliberate design change; they stay
+   exhaustive so consumers keep compiler-checked matching.
 
 ## FFI boundary
 
-The Rust library compiles to a `cdylib` shared library
-(`libwispers_connect.so` / `.dylib`) with a C API defined in
-`include/wispers_connect.h`.
+The Rust library compiles to a `cdylib` shared library (`libwispers_connect.so`
+/ `.dylib`) with a C API defined in `include/wispers_connect.h`.
 
 ### Pattern
 
@@ -119,59 +126,58 @@ All async operations follow a callback pattern:
 
 1. Caller passes a function pointer and an opaque `void *ctx`
 2. Rust spawns the operation on the tokio runtime
-3. On completion, Rust calls the callback with `ctx`, a `WispersStatus`
-   code, an optional error string, and any result values
+3. On completion, Rust calls the callback with `ctx`, a `WispersStatus` code, an
+   optional error string, and any result values
 
 ### Memory ownership
 
 - **Opaque handles** (`WispersNodeHandle *`, `WispersServingHandle *`, etc.)
   are owned by the caller and freed with the corresponding `_free()` function.
-- **Struct arrays** (`WispersNode *` in `WispersGroupInfo`) are freed by
-  their parent's free function (`wispers_group_info_free`).
-- **Strings** returned in callbacks (error details, activation codes) are
-  valid only for the duration of the callback.
+- **Struct arrays** (`WispersNode *` in `WispersGroupInfo`) are freed by their
+  parent's free function (`wispers_group_info_free`).
+- **Strings** returned in callbacks (error details, activation codes) are valid
+  only for the duration of the callback.
 
 ### Known pitfalls
 
-- **JNA Boolean vs Rust bool**: JNA maps `Boolean` to a 4-byte C `int`,
-  but Rust `#[repr(C)]` `bool` is 1 byte. Garbage in padding bytes causes
-  `false` to read as `true`. Fix: use `Byte` in JNA structs, convert with
-  `!= 0.toByte()`.
+- **JNA Boolean vs Rust bool**: JNA maps `Boolean` to a 4-byte C `int`, but Rust
+  `#[repr(C)]` `bool` is 1 byte. Garbage in padding bytes causes `false` to read
+  as `true`. Fix: use `Byte` in JNA structs, convert with `!= 0.toByte()`.
 - **`Structure.toArray()`**: JNA's `toArray()` does not `read()` the first
   element — call `read()` explicitly before `toArray()`.
-- **Callback GC**: JNA holds weak references to callback objects. The host
-  must keep strong references to prevent garbage collection while native
-  code holds the pointer.
+- **Callback GC**: JNA holds weak references to callback objects. The host must
+  keep strong references to prevent garbage collection while native code holds
+  the pointer.
 
 ## Serving architecture
 
 The library's serving API is split into two parts:
 
-- **`ServingSession`** — owns the hub gRPC stream. Runs as a spawned
-  tokio task. Handles incoming `PairNodesMessage` (pairing requests)
-  and `RosterCosignRequest` (endorsement).
-- **`ServingHandle`** — a `Clone`-able handle that communicates with
-  the session via channels. Exposes `status()`,
-  `generate_activation_code()`, and `shutdown()`.
+- **`ServingSession`** — owns the hub gRPC stream. Runs as a spawned tokio
+  task. Handles incoming `PairNodesMessage` (pairing requests) and
+  `RosterCosignRequest` (endorsement).
+- **`ServingHandle`** — a `Clone`-able handle that communicates with the session
+  via channels. Exposes `status()`, `generate_activation_code()`, and
+  `shutdown()`.
 
 ```mermaid
 flowchart BT
-    Handle["<b>ServingHandle</b> (Clone-able)<br/>status() → ServingStatus<br/>generate_activation_code()<br/>shutdown()"]
-    Session["<b>ServingSession</b> (runner task)<br/>Hub gRPC stream<br/>Endorsing state<br/>Handles PairNodesMessage<br/>Handles RosterCosignRequest"]
+	Handle["<b>ServingHandle</b> (Clone-able)<br/>status() → ServingStatus<br/>generate_activation_code()<br/>shutdown()"]
+	Session["<b>ServingSession</b> (runner task)<br/>Hub gRPC stream<br/>Endorsing state<br/>Handles PairNodesMessage<br/>Handles RosterCosignRequest"]
 
-    Handle -- "channel" --> Session
+	Handle -- "channel" --> Session
 ```
 
-Any application that embeds the library uses this split — `wconnect` is
-just one example.
+Any application that embeds the library uses this split — `wconnect` is just one
+example.
 
 ## wconnect IPC
 
-Every `wconnect serve` invocation (foreground or with `-d` to daemonize)
-exposes a local IPC endpoint so other `wconnect` invocations on the same
-machine can talk to it. On Unix it's a Unix socket at
-`~/.wconnect/sockets/{cg_id}-{node}.sock`; on Windows it's a localhost
-TCP port whose number and auth password are written to
+Every `wconnect serve` invocation (foreground or with `-d` to daemonize) exposes
+a local IPC endpoint so other `wconnect` invocations on the same machine can
+talk to it. On Unix it's a Unix socket at
+`~/.wconnect/sockets/{cg_id}-{node}.sock`; on Windows it's a localhost TCP port
+whose number and auth password are written to
 `~/.wconnect/sockets/{cg_id}-{node}.port`.
 
 Commands are newline-delimited JSON:
@@ -194,43 +200,43 @@ CLI commands that use the IPC channel:
 
 ## Activation flow (code path)
 
-From [DESIGN.md](../../DESIGN.md), activation has two phases. Here's how
-they map to code:
+From [DESIGN.md](../../DESIGN.md), activation has two phases. Here's how they
+map to code:
 
 ### Phase 1: Pairing
 
 ```mermaid
 sequenceDiagram
-    participant B as Node B (new)
-    participant Hub
-    participant A as Node A (endorser)
+	participant B as Node B (new)
+	participant Hub
+	participant A as Node A (endorser)
 
-    B->>B: parse code → (node_number, secret)
-    B->>B: build PairNodesMessage (pubkey, nonce, HMAC)
-    B->>Hub: PairNodes()
-    Hub->>A: PairNodesMessage via StartServing stream
-    A->>A: verify HMAC with stored PairingSecret
-    A->>Hub: reply with own pubkey, nonce, HMAC
-    Hub->>B: PairNodesResponse
-    B->>B: verify reply HMAC, store endorser's pubkey
+	B->>B: parse code → (node_number, secret)
+	B->>B: build PairNodesMessage (pubkey, nonce, HMAC)
+	B->>Hub: PairNodes()
+	Hub->>A: PairNodesMessage via StartServing stream
+	A->>A: verify HMAC with stored PairingSecret
+	A->>Hub: reply with own pubkey, nonce, HMAC
+	Hub->>B: PairNodesResponse
+	B->>B: verify reply HMAC, store endorser's pubkey
 ```
 
 ### Phase 2: Roster update
 
 ```mermaid
 sequenceDiagram
-    participant B as Node B (new)
-    participant Hub
-    participant A as Node A (endorser)
+	participant B as Node B (new)
+	participant Hub
+	participant A as Node A (endorser)
 
-    B->>B: create new roster, sign addendum
-    B->>Hub: UpdateRoster()
-    Hub->>Hub: verify
-    Hub->>A: RosterCosignRequest
-    A->>A: verify roster matches pairing
-    A->>Hub: sign & return
-    Hub->>Hub: combine signatures, store roster
-    Hub->>B: done, now activated
+	B->>B: create new roster, sign addendum
+	B->>Hub: UpdateRoster()
+	Hub->>Hub: verify
+	Hub->>A: RosterCosignRequest
+	A->>A: verify roster matches pairing
+	A->>Hub: sign & return
+	Hub->>Hub: combine signatures, store roster
+	Hub->>B: done, now activated
 ```
 
 ## P2P transport internals
@@ -239,12 +245,12 @@ Activated nodes can establish peer-to-peer connections using two transports:
 
 ```mermaid
 flowchart TD
-    App[Application]
-    App --> UDP_C[UdpConnection<br/>raw UDP + AES-GCM]
-    App --> QUIC_C[QuicConnection<br/>QUIC streams]
-    UDP_C --> ICE[IceCaller / IceAnswerer<br/>libjuice FFI]
-    QUIC_C --> ICE
-    ICE --> Socket[UDP Socket]
+	App[Application]
+	App --> UDP_C[UdpConnection<br/>raw UDP + AES-GCM]
+	App --> QUIC_C[QuicConnection<br/>QUIC streams]
+	UDP_C --> ICE[IceCaller / IceAnswerer<br/>libjuice FFI]
+	QUIC_C --> ICE
+	ICE --> Socket[UDP Socket]
 ```
 
 | Transport | Use case | Properties |
@@ -281,9 +287,8 @@ From `proto/hub.proto`:
 | `UpdateRosterRequest` | B -> Hub | Submit new roster for activation |
 | `Welcome` | Hub -> Node | Sent on `StartServing` connect |
 
-From `proto/roster.proto`: `Roster`, `Addendum`, `Revocation` — the
-signed membership structures that nodes verify locally.
+From `proto/roster.proto`: `Roster`, `Addendum`, `Revocation` — the signed
+membership structures that nodes verify locally.
 
-From `proto/storage.proto`: serialization format for `PersistedNodeState`,
-used by the FFI foreign-storage path.
-
+From `proto/storage.proto`: serialization format for `PersistedNodeState`, used
+by the FFI foreign-storage path.

@@ -32,6 +32,9 @@ pub mod proto {
 use proto::hub_client::HubClient as ProtoHubClient;
 
 /// Error type for hub operations.
+///
+/// Non-exhaustive because hub errors have historically grown by discovering
+/// corner cases and we don't want to break clients every time this happens.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum HubError {
