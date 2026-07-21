@@ -834,6 +834,14 @@ impl ServingSession {
             return;
         };
 
+        // Revocations have to be checked explicitly.
+        if caller_node.revoked {
+            log::warn!("  Caller node {} has been revoked", caller_node_number);
+            self.send_error_response(request_id, "caller has been revoked")
+                .await;
+            return;
+        }
+
         let req_payload = match p2p_signing::verify_request(&req, &caller_node.public_key_spki) {
             Ok(p) => p,
             Err(e) => {

@@ -86,6 +86,9 @@ impl FakeHubController {
 pub struct FakeHub {
     state: Arc<Mutex<HubState>>,
     roster: roster::Roster,
+    /// Per-node replacements for `roster`, served to `get_roster` calls from
+    /// that node only.
+    roster_overrides: HashMap<i32, roster::Roster>,
     serve_count: Arc<AtomicUsize>,
     disconnect: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
@@ -104,9 +107,18 @@ impl FakeHub {
         Self {
             state: Arc::new(Mutex::new(HubState::new())),
             roster,
+            roster_overrides: HashMap::new(),
             serve_count: Arc::new(AtomicUsize::new(0)),
             disconnect: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Serve `roster` (instead of the main one) to `get_roster` calls from
+    /// `node_number`. Lets a test hand one node a stale roster while everyone
+    /// else sees the current one.
+    pub fn with_roster_for_node(mut self, node_number: i32, roster: roster::Roster) -> Self {
+        self.roster_overrides.insert(node_number, roster);
+        self
     }
 
     /// Obtain a controller for observing/steering this hub. Call before `start`.
@@ -176,9 +188,17 @@ impl Hub for FakeHub {
 
     async fn get_roster(
         &self,
-        _request: Request<RosterRequest>,
+        request: Request<RosterRequest>,
     ) -> Result<Response<roster::Roster>, Status> {
-        Ok(Response::new(self.roster.clone()))
+        let node_number: Option<i32> = request
+            .metadata()
+            .get("x-node-number")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse().ok());
+        let roster = node_number
+            .and_then(|n| self.roster_overrides.get(&n))
+            .unwrap_or(&self.roster);
+        Ok(Response::new(roster.clone()))
     }
 
     async fn get_group_metadata(

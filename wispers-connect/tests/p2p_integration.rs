@@ -9,8 +9,9 @@ use std::time::Duration;
 use wispers_connect::hub::proto::roster::Roster;
 use wispers_connect::{
     AuthToken, ConnectivityGroupId, Node, NodeRegistration, SigningKeyPair,
-    build_activation_payload, compute_signing_hash, create_bootstrap_roster,
-    set_endorser_signature, set_new_node_signature,
+    add_revocation_to_roster, build_activation_payload, build_revocation_payload,
+    compute_signing_hash, create_bootstrap_roster, set_endorser_signature, set_new_node_signature,
+    set_revoker_signature,
 };
 
 use common::FakeHub;
@@ -116,6 +117,66 @@ async fn test_p2p_connection_via_hub() {
     assert_eq!(received, b"hello from node 2");
 
     // Clean up
+    drop(handle);
+    session_handle.abort();
+}
+
+/// A revoked caller must be rejected by the answerer's own roster check, not
+/// only by the caller's client-side self-check. Simulated by having the hub
+/// serve the caller a stale roster (from before its revocation), so the caller
+/// still believes it is active and proceeds, while the answerer verifies the
+/// current roster and must refuse the connection.
+#[tokio::test]
+async fn test_revoked_caller_rejected_by_answerer() {
+    let root_key_1 = [41u8; 32];
+    let root_key_2 = [42u8; 32];
+    let signing_key_1 = SigningKeyPair::derive_from_root_key(&root_key_1);
+    let signing_key_2 = SigningKeyPair::derive_from_root_key(&root_key_2);
+
+    // Stale roster: both nodes active. Current roster: node 1 revoked by node 2.
+    let stale_roster = create_test_roster(&signing_key_1, 1, &signing_key_2, 2);
+    let mut current_roster = stale_roster.clone();
+    let payload = build_revocation_payload(&current_roster, 1, 2);
+    add_revocation_to_roster(&mut current_roster, payload);
+    let signing_hash = compute_signing_hash(&current_roster);
+    set_revoker_signature(&mut current_roster, signing_key_2.sign(&signing_hash));
+
+    let hub =
+        FakeHub::with_roster(current_roster.clone()).with_roster_for_node(1, stale_roster.clone());
+    let (hub_addr, _hub_handle) = hub.start().await.expect("hub starts");
+    let hub_url = format!("http://{}", hub_addr);
+
+    let group_id = ConnectivityGroupId::from("test-group");
+    let registration_1 =
+        NodeRegistration::new(group_id.clone(), 1, AuthToken::new("token1"), String::new());
+    let registration_2 =
+        NodeRegistration::new(group_id, 2, AuthToken::new("token2"), String::new());
+
+    let node1 =
+        Node::new_activated_for_test(root_key_1, stale_roster, registration_1, hub_url.clone());
+    let node2 = Node::new_activated_for_test(root_key_2, current_roster, registration_2, hub_url);
+
+    // Node 2 (the answerer) starts serving; it sees the current roster.
+    let (handle, session, mut incoming_rx) =
+        node2.start_serving().await.expect("node2 starts serving");
+    let session_handle = tokio::spawn(async move {
+        let _ = session.run().await;
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Node 1 believes it is still active and tries to connect.
+    let Err(err) = node1.connect_udp(2).await else {
+        panic!("revoked caller must be rejected");
+    };
+    assert!(
+        err.to_string().contains("revoked"),
+        "expected a revocation rejection, got: {}",
+        err
+    );
+
+    // Nothing must have surfaced on the answerer's incoming channel.
+    assert!(incoming_rx.udp.try_recv().is_err());
+
     drop(handle);
     session_handle.abort();
 }
