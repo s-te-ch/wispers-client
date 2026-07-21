@@ -131,8 +131,9 @@ pub use types::{
 pub use crypto::SigningKeyPair;
 #[doc(hidden)]
 pub use roster::{
-    build_activation_payload, compute_signing_hash, create_bootstrap_roster,
-    set_endorser_signature, set_new_node_signature,
+    add_revocation_to_roster, build_activation_payload, build_revocation_payload,
+    compute_signing_hash, create_bootstrap_roster, set_endorser_signature, set_new_node_signature,
+    set_revoker_signature,
 };
 #[doc(hidden)]
 pub use types::AuthToken;
