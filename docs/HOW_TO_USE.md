@@ -38,6 +38,11 @@ To get started, you need at least one domain and an API key for it.
    CLI tools accept API keys either as a CLI argument or as the environment
    variable `WC_API_KEY`.
 
+If you're self-hosting the Wispers backend (see the [open source
+repo](https://github.com/s-te-ch/wispers-hub)), an API key is generated for you
+on first start. There's no need to configure a domain in that case either
+—-hosted backends use a single domain.
+
 ### The REST API
 
 Once you have an API key it's time to talk to the REST API, or use the `wcadm`

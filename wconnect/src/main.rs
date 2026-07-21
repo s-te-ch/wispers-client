@@ -13,7 +13,7 @@ use wispers_connect::{FileNodeStateStore, Node, NodeState, NodeStorage};
 #[command(name = "wconnect", version)]
 #[command(about = "CLI for Wispers Connect nodes")]
 struct Cli {
-    /// Override hub address (for testing)
+    /// Override hub address (e.g. to a self-hosted hub)
     #[arg(long, env = "WCONNECT_HUB")]
     hub: Option<String>,
 

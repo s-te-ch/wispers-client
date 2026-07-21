@@ -20,7 +20,8 @@ requires building from source under a commercial license. Even then, you still
 need to trust ZeroTier's relay infrastructure unless you also self-host root
 servers — a significantly more involved undertaking. With Wispers, the Hub
 cryptographically cannot read your data or impersonate a node, regardless of who
-operates it.
+operates it. If that's not sufficient, you can also self-host the hub (it's
+available under the AGPL).
 
 **Licensing** — libzt is licensed under the Business Source License (BSL 1.1).
 Building closed-source commercial applications on top of it requires a
@@ -101,7 +102,8 @@ and designed to be self-hosted. Unfortunately, this leaves you with a choice —
 use NetFoundry's managed controller (a US company, subject to the CLOUD Act) or
 run the whole complex stack yourself. With Wispers, you don't have to choose:
 the Hub cryptographically cannot read your data or impersonate a node,
-regardless of who operates it.
+regardless of who operates it. If you do want to self-host the Wispers hub, it's
+a single, easy-to-set-up binary.
 
 **Direct connections** — OpenZiti does not do NAT traversal or peer-to-peer
 connections. All data flows through its fabric of routers. Wispers establishes
@@ -163,9 +165,9 @@ Wispers will get you there faster.
 
 ## Licensing
 
-**Will the Wispers backend be open sourced?** — Maybe. The Wispers Connect
-library is MIT-licensed and will stay that way. The backend is currently closed
-source, but we'd like to open it up if I can find a sustainable business model
-that supports it. In the meantime, the protocol is designed so that the Hub is a
-stateless signaling server — if Wispers the company disappeared tomorrow,
-running a replacement would be a realistic undertaking, not a moonshot.
+**Will the Wispers backend be open sourced?** — It is as of 2026-07-20! You can
+find the open-source, self-hostable implementation of the backend at
+https://github.com/s-te-ch/wispers-hub. The repo contains the same hub server as
+used for the managed backend, plus an implementation of the REST API that is
+better suited for self-hosting than the managed version. The Wispers Connect
+library is already MIT-licensed and will stay that way.

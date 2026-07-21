@@ -14,7 +14,9 @@ connections.
 A central rendezvous server coordinates connection setup, but unlike other
 NAT-traversal systems, you don't have to trust it. Nodes verify each other using
 a cryptographic roster, so neither the server nor any other infrastructure can
-eavesdrop or tamper with traffic.
+eavesdrop or tamper with traffic. And if you'd rather not rely on Wispers'
+infrastructure at all, the rendezvous server is
+[open source](https://github.com/s-te-ch/wispers-hub) and self-hostable.
 
 You just link the wispers-connect library (or run a sidecar process), and your
 software can now connect to other instances, securely and directly. The library
@@ -74,6 +76,11 @@ case. To do that,
 2. Create an **API key** for the "Default" domain. Click on the domain in the
    web UI and the form is right there. Give it a name like "test" and make sure
    to copy down the key! Wispers doesn't store it.
+
+**Want to self-host instead?** The hub is
+[open source](https://github.com/s-te-ch/wispers-hub). If you're using an API
+key of a self-hosted hub, you'll also need to tell the tools about your backend,
+using `wcadm --url=…` and `wconnect --hub=…`.
 
 ### 2. Create a connectivity group
 
