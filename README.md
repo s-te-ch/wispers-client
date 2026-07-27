@@ -69,8 +69,8 @@ Establishing connections using NAT-traversal requires a rendezvous server, which
 we call the "hub" in Wispers. We need to tell the hub about you and your use
 case. To do that,
 
-1. Get an account at https://connect.wispers.dev. You'll get a personal account
-   with a **domain** named "Default" already set up for you. Domains map to use
+1. Get an account at https://connect.wispers.dev. You'll get a free personal
+   account with a **domain** named "Default" already set up for you. Domains map to use
    cases — say you create a new app with Wispers Connect, you'd use a separate
    domain for that.
 2. Create an **API key** for the "Default" domain. Click on the domain in the
