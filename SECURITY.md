@@ -18,5 +18,5 @@ Published advisories appear at
 
 ## Supported versions
 
-Wispers Connect is in open beta, Security fixes land in the latest release
+Wispers Connect is in open beta. Security fixes land in the latest release
 only, so please check that the issue reproduces on the newest version.
