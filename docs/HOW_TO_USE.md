@@ -77,7 +77,7 @@ API:
 #### Node management
 
 * `GET /connectivity-groups/:id` — Get connectivity group state, including its
-  nodes.
+  nodes and the group's node-quota usage (see below).
 * `POST /connectivity-groups/:id/registration-tokens` — Create a registration
   token for a new node.\
   Parameters:
@@ -87,6 +87,37 @@ API:
 * `PATCH /connectivity-groups/:id/nodes/:nodeNumber` — Update a node.\
   Parameters:
   * `name` — New display name.
+* `DELETE /connectivity-groups/:id/nodes/:nodeNumber` — Delete a previously
+  revoked node's registration, freeing the quota it occupies. A node can only be
+  revoked-but-not-removed if it has been revoked by another node in the group.
+  A node preferably uses `logout` to revoke and remove itself.
+
+#### Usage and quotas
+
+Your plan limits how many connectivity groups a domain can have, and how many
+nodes a connectivity group can have. Both limits are visible before you hit
+them:
+
+* `GET /stats` — Domain-wide usage: `connectivityGroups.count` against
+  `connectivityGroups.max`.
+* `GET /connectivity-groups/:id` — The group's `nodeQuota`, with `current`
+  against `limit`. `current` counts registered nodes *plus* unexpired pending
+  registration tokens (a registration token used quota until it expires).
+
+In both cases a `null` limit means unlimited. That's what self-hosted hubs
+report, since plans don't apply to them.
+
+When a request would exceed a quota, it's rejected with HTTP 429 and a body
+like:
+
+```json
+{"error": "quota exceeded", "quota": "nodes_per_group", "limit": 12, "current": 12}
+```
+
+`quota` is `groups_per_domain` (creating a connectivity group) or
+`nodes_per_group` (creating a registration token). Note that the rate limiter
+answers 429 as well, with a different body. Match on the `error` field rather
+than on the status code alone if you want to tell the two apart.
 
 ## Using the library
 

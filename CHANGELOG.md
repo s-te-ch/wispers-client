@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **`wcadm` surfaces quotas.** `wcadm show-group` reports the group's node
+  quota, including how much of it unexpired registration tokens occupy, and
+  `wcadm list-groups` reports the domain's connectivity-group quota. Backends
+  that don't report quotas — a self-hosted hub has no plan limits — say so
+  instead of showing a limit.
+- **Actionable quota errors in `wcadm`.** Creating a connectivity group or a
+  registration token beyond your plan's limits used to print the raw HTTP 429.
+  It now explains which quota is full, how much is used, and how to free some.
+- **`wcadm` can free node quota:** `wcadm remove-node <group-id> <node-number>`
+  deletes the registration of a node that has been revoked in the group's
+  roster, and `wcadm reset-group <group-id>` takes a whole group back to its
+  initial state — all nodes removed *and* the roster cleared, so the group's
+  trust state starts over.
+
 ## v0.12.0
 
 This version marks the release of the standalone, open-source hub. It's
