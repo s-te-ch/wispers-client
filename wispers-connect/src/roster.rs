@@ -185,9 +185,7 @@ pub fn verify_roster(
     // they claim. Membership in `keys` is the active-set test; we fall
     // back to scanning `working_roster.nodes` only to distinguish "never
     // in the roster" from "revoked".
-    let verifier_key_in_state = if let Some(k) = keys.get(&verifier_node_number) {
-        k
-    } else {
+    let Some(verifier_key_in_state) = keys.get(&verifier_node_number) else {
         if working_roster
             .nodes
             .iter()

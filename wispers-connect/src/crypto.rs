@@ -51,8 +51,8 @@ impl TtlProfile {
     #[must_use]
     pub fn ttl(self) -> Duration {
         match self {
-            TtlProfile::Interactive => Duration::from_mins(2),
-            TtlProfile::Asynchronous => Duration::from_hours(24),
+            TtlProfile::Interactive => Duration::from_secs(120),
+            TtlProfile::Asynchronous => Duration::from_secs(24 * 60 * 60),
         }
     }
 
@@ -80,7 +80,7 @@ impl TtlProfile {
 /// stalling pairing to give itself time to derive the pairing code. The
 /// `no_profile_is_weaker_than_interactive` test makes sure we don't introduce
 /// a lower-entropy code in the future for which this deadline is too long.
-pub(crate) const PAIRING_RPC_DEADLINE: Duration = Duration::from_mins(2);
+pub(crate) const PAIRING_RPC_DEADLINE: Duration = Duration::from_secs(120);
 
 /// Length of a nonce in bytes.
 const NONCE_LEN: usize = 16;

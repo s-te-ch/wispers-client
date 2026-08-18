@@ -41,7 +41,7 @@ pub fn ipc_path(connectivity_group_id: &str, node_number: i32) -> PathBuf {
     #[cfg(unix)]
     return dir.join(format!("{connectivity_group_id}-{node_number}.sock"));
     #[cfg(windows)]
-    return dir.join(format!("{}-{}.port", connectivity_group_id, node_number));
+    return dir.join(format!("{connectivity_group_id}-{node_number}.port"));
 }
 
 /// TTL profile parsing.
@@ -221,7 +221,7 @@ impl Server {
             .map(char::from)
             .collect();
 
-        tokio::fs::write(&path, format!("{}:{}", port, password))
+        tokio::fs::write(&path, format!("{port}:{password}"))
             .await
             .context("failed to write port file")?;
 

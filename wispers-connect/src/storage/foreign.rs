@@ -113,9 +113,7 @@ impl ForeignNodeStateStore {
             match status {
                 WispersStatus::Success => {
                     buffer.truncate(required);
-                    if let Ok(reg) = deserialize_registration_opt(&buffer) {
-                        return Ok(reg);
-                    } else {
+                    let Ok(reg) = deserialize_registration_opt(&buffer) else {
                         // Old format (bincode) — discard and let the caller
                         // treat it as missing so restoreOrInit re-registers.
                         log::warn!(
@@ -123,7 +121,8 @@ impl ForeignNodeStateStore {
                         );
                         let _ = self.call_delete_registration();
                         return Ok(None);
-                    }
+                    };
+                    return Ok(reg);
                 }
                 WispersStatus::NotFound => return Ok(None),
                 WispersStatus::BufferTooSmall => {

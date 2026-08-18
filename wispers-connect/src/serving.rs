@@ -835,7 +835,7 @@ impl ServingSession {
 
         // Revocations have to be checked explicitly.
         if caller_node.revoked {
-            log::warn!("  Caller node {} has been revoked", caller_node_number);
+            log::warn!("  Caller node {caller_node_number} has been revoked");
             self.send_error_response(request_id, "caller has been revoked")
                 .await;
             return;
@@ -858,15 +858,14 @@ impl ServingSession {
         );
 
         // Parse caller's X25519 public key from the verified payload
-        let caller_x25519_public: [u8; 32] =
-            if let Ok(key) = req_payload.caller_x25519_public_key.clone().try_into() {
-                key
-            } else {
-                log::warn!("  Invalid X25519 public key length");
-                self.send_error_response(request_id, "invalid X25519 public key")
-                    .await;
-                return;
-            };
+        let Ok(caller_x25519_public) =
+            <[u8; 32]>::try_from(req_payload.caller_x25519_public_key.clone())
+        else {
+            log::warn!("  Invalid X25519 public key length");
+            self.send_error_response(request_id, "invalid X25519 public key")
+                .await;
+            return;
+        };
 
         // Generate connection ID
         let connection_id = self.connection_id_counter.fetch_add(1, Ordering::Relaxed);

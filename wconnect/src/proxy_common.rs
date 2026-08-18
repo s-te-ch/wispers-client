@@ -16,7 +16,7 @@ use wispers_connect::P2pError;
 use wispers_connect::{Node, QuicConnection, QuicStream};
 
 /// Default idle timeout for pooled connections (60 seconds).
-pub const IDLE_TIMEOUT: Duration = Duration::from_mins(1);
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Interval for checking and cleaning up idle connections.
 pub const CLEANUP_INTERVAL: Duration = Duration::from_secs(15);

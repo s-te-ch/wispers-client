@@ -456,9 +456,7 @@ async fn handle_connect_stream(
     }
 
     // Parse host:port
-    let (host, port) = if let Some(hp) = parse_host_port(target) {
-        hp
-    } else {
+    let Some((host, port)) = parse_host_port(target) else {
         warn!(target, "CONNECT invalid target");
         let _ = stream.write_all(b"ERROR invalid target format\n").await;
         let _ = stream.finish().await;

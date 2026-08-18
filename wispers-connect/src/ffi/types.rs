@@ -7,7 +7,7 @@
 use crate::errors::{NodeStateError, WispersStatus};
 use crate::node::{Node, NodeStorage};
 use crate::storage::StorageError;
-use crate::types::{GroupInfo, GroupState, NodeRegistration};
+use crate::types::{AuthToken, GroupInfo, GroupState, NodeRegistration};
 use std::ffi::{CStr, CString, c_void};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
@@ -147,9 +147,7 @@ impl WispersRegistrationInfo {
     pub(crate) fn from_registration(reg: &NodeRegistration) -> Result<Self, WispersStatus> {
         let cg_id = CString::new(reg.connectivity_group_id.to_string())
             .map_err(|_| WispersStatus::InvalidUtf8)?;
-        let token_str = reg
-            .auth_token()
-            .map_or("", super::super::types::AuthToken::as_str);
+        let token_str = reg.auth_token().map_or("", AuthToken::as_str);
         let token = CString::new(token_str).map_err(|_| WispersStatus::InvalidUtf8)?;
         let jwt_ptr = CString::new(reg.attestation_jwt.as_str())
             .map_err(|_| WispersStatus::InvalidUtf8)?
