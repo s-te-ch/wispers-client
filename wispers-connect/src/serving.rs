@@ -88,7 +88,7 @@ struct TimedSecret {
     expires_at: Instant,
 }
 
-/// Internal state for a pending endorsement (keyed by new node number in the HashMap).
+/// Internal state for a pending endorsement (keyed by new node number in the `HashMap`).
 struct PendingEndorsement {
     new_node_pubkey: Vec<u8>,
     new_node_nonce: Vec<u8>,
@@ -161,7 +161,7 @@ impl EndorsingState {
         Ok(code)
     }
 
-    /// Handle a PairNodesMessage. On success, returns the reply message.
+    /// Handle a `PairNodesMessage`. On success, returns the reply message.
     fn pair_nodes(
         &mut self,
         msg: &proto::PairNodesMessage,
@@ -190,13 +190,12 @@ impl EndorsingState {
         let Some(secret_index) = secret_index else {
             if self.pairing_secrets.is_empty() {
                 return Err("no active pairing session".into());
-            } else {
-                log::warn!(
-                    "  MAC verification failed against all {} secrets",
-                    self.pairing_secrets.len()
-                );
-                return Err("MAC verification failed".into());
             }
+            log::warn!(
+                "  MAC verification failed against all {} secrets",
+                self.pairing_secrets.len()
+            );
+            return Err("MAC verification failed".into());
         };
 
         let secret = self.pairing_secrets.swap_remove(secret_index).secret;
@@ -234,7 +233,7 @@ impl EndorsingState {
         })
     }
 
-    /// Handle a RosterCosignRequest. On success, returns the cosign response.
+    /// Handle a `RosterCosignRequest`. On success, returns the cosign response.
     fn roster_cosign(
         &mut self,
         req: &proto::RosterCosignRequest,
@@ -242,14 +241,14 @@ impl EndorsingState {
         signing_key: &SigningKeyPair,
     ) -> Result<proto::RosterCosignResponse, String> {
         let new_node_number = req.new_node_number as i32;
-        log::debug!("  RosterCosignRequest: new_node={}", new_node_number);
+        log::debug!("  RosterCosignRequest: new_node={new_node_number}");
 
         // Look up the pending endorsement — clone fields we need so we
         // don't hold a borrow across the remove at the end.
         let pending = self
             .pending_endorsements
             .get(&new_node_number)
-            .ok_or_else(|| format!("no pending endorsement for node {}", new_node_number))?;
+            .ok_or_else(|| format!("no pending endorsement for node {new_node_number}"))?;
         let expected_pubkey = pending.new_node_pubkey.clone();
         let expected_new_nonce = pending.new_node_nonce.clone();
         let expected_our_nonce = pending.our_nonce.clone();
@@ -387,7 +386,7 @@ pub(crate) async fn open_serving_connection(
 
 //-- ServingHandle + ServingSession --------------------------------------------
 
-/// Commands sent from ServingHandle to ServingSession.
+/// Commands sent from `ServingHandle` to `ServingSession`.
 enum Command {
     Status {
         reply: oneshot::Sender<ServingStatus>,
@@ -399,7 +398,7 @@ enum Command {
     Shutdown,
 }
 
-/// Clone-able handle for interacting with a running ServingSession.
+/// Clone-able handle for interacting with a running `ServingSession`.
 #[derive(Clone)]
 pub struct ServingHandle {
     cmd_tx: mpsc::Sender<Command>,
@@ -644,7 +643,7 @@ impl ServingSession {
         tokio::pin!(sleep);
         loop {
             tokio::select! {
-                _ = &mut sleep => return ControlFlow::Continue(()),
+                () = &mut sleep => return ControlFlow::Continue(()),
                 cmd = self.cmd_rx.recv() => {
                     if self.dispatch_command(cmd).is_break() {
                         return ControlFlow::Break(());
@@ -718,13 +717,13 @@ impl ServingSession {
                             kind: Some(proto::serving_response::Kind::PairNodesMessage(reply)),
                         };
                         if let Err(e) = self.conn.response_tx.send(response).await {
-                            log::error!("  Failed to send response: {}", e);
+                            log::error!("  Failed to send response: {e}");
                         } else {
                             log::debug!("  Sent pairing reply");
                         }
                     }
                     Err(error) => {
-                        log::warn!("  PairNodes failed: {}", error);
+                        log::warn!("  PairNodes failed: {error}");
                         self.send_error_response(request.request_id, &error).await;
                     }
                 }
@@ -743,13 +742,13 @@ impl ServingSession {
                             )),
                         };
                         if let Err(e) = self.conn.response_tx.send(response).await {
-                            log::error!("  Failed to send cosign response: {}", e);
+                            log::error!("  Failed to send cosign response: {e}");
                         } else {
                             log::debug!("  Sent cosign response");
                         }
                     }
                     Err(error) => {
-                        log::warn!("  RosterCosign failed: {}", error);
+                        log::warn!("  RosterCosign failed: {error}");
                         self.send_error_response(request.request_id, &error).await;
                     }
                 }
@@ -777,13 +776,13 @@ impl ServingSession {
         use crate::hub::HubClient;
         use crate::p2p_signing;
 
-        log::debug!("  StartConnectionRequest from node {}", caller_node_number,);
+        log::debug!("  StartConnectionRequest from node {caller_node_number}");
 
         // Fetch and verify fresh roster from hub
         let client = match HubClient::connect(&self.p2p_config.hub_addr).await {
             Ok(c) => c,
             Err(e) => {
-                log::error!("  Failed to connect to hub: {}", e);
+                log::error!("  Failed to connect to hub: {e}");
                 self.send_error_response(request_id, "internal error").await;
                 return;
             }
@@ -816,7 +815,7 @@ impl ServingSession {
                 return;
             }
             Err(e) => {
-                log::error!("  Failed to fetch/verify roster: {}", e);
+                log::error!("  Failed to fetch/verify roster: {e}");
                 self.send_error_response(request_id, "internal error").await;
                 return;
             }
@@ -828,7 +827,7 @@ impl ServingSession {
             .iter()
             .find(|n| n.node_number == caller_node_number)
         else {
-            log::warn!("  Caller node {} not found in roster", caller_node_number);
+            log::warn!("  Caller node {caller_node_number} not found in roster");
             self.send_error_response(request_id, "caller not in roster")
                 .await;
             return;
@@ -836,7 +835,7 @@ impl ServingSession {
 
         // Revocations have to be checked explicitly.
         if caller_node.revoked {
-            log::warn!("  Caller node {} has been revoked", caller_node_number);
+            log::warn!("  Caller node {caller_node_number} has been revoked");
             self.send_error_response(request_id, "caller has been revoked")
                 .await;
             return;
@@ -845,11 +844,7 @@ impl ServingSession {
         let req_payload = match p2p_signing::verify_request(&req, &caller_node.public_key_spki) {
             Ok(p) => p,
             Err(e) => {
-                log::warn!(
-                    "  Signature verification failed for node {}: {}",
-                    caller_node_number,
-                    e
-                );
+                log::warn!("  Signature verification failed for node {caller_node_number}: {e}");
                 self.send_error_response(request_id, "signature verification failed")
                     .await;
                 return;
@@ -863,16 +858,14 @@ impl ServingSession {
         );
 
         // Parse caller's X25519 public key from the verified payload
-        let caller_x25519_public: [u8; 32] =
-            match req_payload.caller_x25519_public_key.clone().try_into() {
-                Ok(key) => key,
-                Err(_) => {
-                    log::warn!("  Invalid X25519 public key length");
-                    self.send_error_response(request_id, "invalid X25519 public key")
-                        .await;
-                    return;
-                }
-            };
+        let Ok(caller_x25519_public) =
+            <[u8; 32]>::try_from(req_payload.caller_x25519_public_key.clone())
+        else {
+            log::warn!("  Invalid X25519 public key length");
+            self.send_error_response(request_id, "invalid X25519 public key")
+                .await;
+            return;
+        };
 
         // Generate connection ID
         let connection_id = self.connection_id_counter.fetch_add(1, Ordering::Relaxed);
@@ -887,8 +880,8 @@ impl ServingSession {
         let ice_answerer = match IceAnswerer::new(&req_payload.caller_sdp, stun_turn_config) {
             Ok(answerer) => answerer,
             Err(e) => {
-                log::error!("  Failed to create ICE answerer: {}", e);
-                self.send_error_response(request_id, &format!("ICE error: {}", e))
+                log::error!("  Failed to create ICE answerer: {e}");
+                self.send_error_response(request_id, &format!("ICE error: {e}"))
                     .await;
                 return;
             }
@@ -921,14 +914,11 @@ impl ServingSession {
         };
 
         if let Err(e) = self.conn.response_tx.send(response).await {
-            log::error!("  Failed to send StartConnectionResponse: {}", e);
+            log::error!("  Failed to send StartConnectionResponse: {e}");
             return;
         }
 
-        log::debug!(
-            "  Sent StartConnectionResponse, connection_id={}",
-            connection_id
-        );
+        log::debug!("  Sent StartConnectionResponse, connection_id={connection_id}");
 
         // Handle based on requested transport type
         let transport = req_payload.transport();
@@ -938,7 +928,7 @@ impl ServingSession {
                 // The channel receives a fully-connected UdpConnection (or error)
                 let tx = self.incoming_udp_tx.clone();
                 tokio::spawn(async move {
-                    log::debug!("  Starting UDP ICE for connection_id={}", connection_id);
+                    log::debug!("  Starting UDP ICE for connection_id={connection_id}");
                     let result = UdpConnection::connect_answerer(
                         caller_node_number,
                         connection_id,
@@ -949,17 +939,15 @@ impl ServingSession {
 
                     match &result {
                         Ok(_) => {
-                            log::info!("  UDP ICE completed for connection_id={}", connection_id)
+                            log::info!("  UDP ICE completed for connection_id={connection_id}");
                         }
-                        Err(e) => log::error!(
-                            "  UDP ICE failed for connection_id={}: {}",
-                            connection_id,
-                            e
-                        ),
+                        Err(e) => {
+                            log::error!("  UDP ICE failed for connection_id={connection_id}: {e}")
+                        }
                     }
 
                     if let Err(e) = tx.send(result).await {
-                        log::error!("  Failed to deliver incoming UDP connection: {}", e);
+                        log::error!("  Failed to deliver incoming UDP connection: {e}");
                     }
                 });
                 log::debug!("  Spawned UDP ICE task");
@@ -969,10 +957,7 @@ impl ServingSession {
                 // The channel receives a fully-connected QuicConnection (or error)
                 let tx = self.incoming_quic_tx.clone();
                 tokio::spawn(async move {
-                    log::debug!(
-                        "  Starting QUIC handshake for connection_id={}",
-                        connection_id
-                    );
+                    log::debug!("  Starting QUIC handshake for connection_id={connection_id}");
                     let result = QuicConnection::connect_answerer(
                         caller_node_number,
                         connection_id,
@@ -983,18 +968,15 @@ impl ServingSession {
 
                     match &result {
                         Ok(_) => log::info!(
-                            "  QUIC handshake completed for connection_id={}",
-                            connection_id
+                            "  QUIC handshake completed for connection_id={connection_id}"
                         ),
                         Err(e) => log::error!(
-                            "  QUIC handshake failed for connection_id={}: {}",
-                            connection_id,
-                            e
+                            "  QUIC handshake failed for connection_id={connection_id}: {e}"
                         ),
                     }
 
                     if let Err(e) = tx.send(result).await {
-                        log::error!("  Failed to deliver incoming QUIC connection: {}", e);
+                        log::error!("  Failed to deliver incoming QUIC connection: {e}");
                     }
                 });
                 log::debug!("  Spawned QUIC handshake task");
@@ -1033,7 +1015,7 @@ mod tests {
         (state, signing_key)
     }
 
-    /// Build a PairNodesMessage that a new node would send, using the given
+    /// Build a `PairNodesMessage` that a new node would send, using the given
     /// activation code's secret for MAC computation.
     fn build_pair_message(code: &PairingCode, new_node_number: i32) -> proto::PairNodesMessage {
         let new_node_key = SigningKeyPair::derive_from_root_key(&[new_node_number as u8; 32]);
@@ -1087,8 +1069,7 @@ mod tests {
             .unwrap_err();
         assert!(
             matches!(err, ServingError::TooManyActivationSessions),
-            "expected TooManyActivationSessions, got: {}",
-            err
+            "expected TooManyActivationSessions, got: {err}"
         );
     }
 

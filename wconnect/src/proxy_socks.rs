@@ -53,21 +53,15 @@ pub async fn run(
 
     let listener = TcpListener::bind(bind_addr)
         .await
-        .with_context(|| format!("failed to bind to {}", bind_addr))?;
+        .with_context(|| format!("failed to bind to {bind_addr}"))?;
 
-    println!("SOCKS5 proxy listening on {}", bind_addr);
+    println!("SOCKS5 proxy listening on {bind_addr}");
     if let Some(egress) = egress_node {
-        println!("  Internet egress: enabled via node {}", egress);
-        println!(
-            "Example: curl --proxy socks5h://{} https://example.com/",
-            bind_addr
-        );
+        println!("  Internet egress: enabled via node {egress}");
+        println!("Example: curl --proxy socks5h://{bind_addr} https://example.com/");
     } else {
         println!("  Internet egress: disabled (wispers.link only)");
-        println!(
-            "Example: curl --proxy socks5h://{} http://3.wispers.link/",
-            bind_addr
-        );
+        println!("Example: curl --proxy socks5h://{bind_addr} http://3.wispers.link/");
     }
     println!("  (Use socks5h:// so the proxy resolves hostnames, not curl)");
 
@@ -157,7 +151,7 @@ async fn handle_auth(stream: &mut TcpStream) -> Result<(), ProxyError> {
     let n = stream
         .read(&mut buf)
         .await
-        .map_err(|e| ProxyError::BadRequest(format!("failed to read auth request: {}", e)))?;
+        .map_err(|e| ProxyError::BadRequest(format!("failed to read auth request: {e}")))?;
 
     if n < 2 {
         return Err(ProxyError::BadRequest("auth request too short".to_string()));
@@ -166,8 +160,7 @@ async fn handle_auth(stream: &mut TcpStream) -> Result<(), ProxyError> {
     let version = buf[0];
     if version != SOCKS_VERSION {
         return Err(ProxyError::BadRequest(format!(
-            "unsupported SOCKS version: {}",
-            version
+            "unsupported SOCKS version: {version}"
         )));
     }
 
@@ -190,7 +183,7 @@ async fn handle_auth(stream: &mut TcpStream) -> Result<(), ProxyError> {
     stream
         .write_all(&[SOCKS_VERSION, AUTH_NOAUTH])
         .await
-        .map_err(|e| ProxyError::BadRequest(format!("failed to send auth response: {}", e)))?;
+        .map_err(|e| ProxyError::BadRequest(format!("failed to send auth response: {e}")))?;
 
     Ok(())
 }
@@ -202,7 +195,7 @@ async fn handle_connect_request(stream: &mut TcpStream) -> Result<ConnectRequest
     stream
         .read_exact(&mut header)
         .await
-        .map_err(|e| ProxyError::BadRequest(format!("failed to read request header: {}", e)))?;
+        .map_err(|e| ProxyError::BadRequest(format!("failed to read request header: {e}")))?;
 
     let version = header[0];
     let cmd = header[1];
@@ -211,8 +204,7 @@ async fn handle_connect_request(stream: &mut TcpStream) -> Result<ConnectRequest
 
     if version != SOCKS_VERSION {
         return Err(ProxyError::BadRequest(format!(
-            "unsupported SOCKS version: {}",
-            version
+            "unsupported SOCKS version: {version}"
         )));
     }
 
@@ -220,8 +212,7 @@ async fn handle_connect_request(stream: &mut TcpStream) -> Result<ConnectRequest
     if cmd != CMD_CONNECT {
         send_reply(stream, REP_COMMAND_NOT_SUPPORTED).await;
         return Err(ProxyError::BadRequest(format!(
-            "unsupported command: {}",
-            cmd
+            "unsupported command: {cmd}"
         )));
     }
 
@@ -229,37 +220,38 @@ async fn handle_connect_request(stream: &mut TcpStream) -> Result<ConnectRequest
     let host = match atyp {
         ATYP_IPV4 => {
             let mut addr = [0u8; 4];
-            stream.read_exact(&mut addr).await.map_err(|e| {
-                ProxyError::BadRequest(format!("failed to read IPv4 address: {}", e))
-            })?;
+            stream
+                .read_exact(&mut addr)
+                .await
+                .map_err(|e| ProxyError::BadRequest(format!("failed to read IPv4 address: {e}")))?;
             format!("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3])
         }
         ATYP_DOMAIN => {
             let mut len_buf = [0u8; 1];
             stream.read_exact(&mut len_buf).await.map_err(|e| {
-                ProxyError::BadRequest(format!("failed to read domain length: {}", e))
+                ProxyError::BadRequest(format!("failed to read domain length: {e}"))
             })?;
             let len = len_buf[0] as usize;
             let mut domain = vec![0u8; len];
             stream
                 .read_exact(&mut domain)
                 .await
-                .map_err(|e| ProxyError::BadRequest(format!("failed to read domain: {}", e)))?;
+                .map_err(|e| ProxyError::BadRequest(format!("failed to read domain: {e}")))?;
             String::from_utf8(domain)
                 .map_err(|_| ProxyError::BadRequest("invalid domain name encoding".to_string()))?
         }
         ATYP_IPV6 => {
             let mut addr = [0u8; 16];
-            stream.read_exact(&mut addr).await.map_err(|e| {
-                ProxyError::BadRequest(format!("failed to read IPv6 address: {}", e))
-            })?;
+            stream
+                .read_exact(&mut addr)
+                .await
+                .map_err(|e| ProxyError::BadRequest(format!("failed to read IPv6 address: {e}")))?;
             std::net::Ipv6Addr::from(addr).to_string()
         }
         _ => {
             send_reply(stream, REP_ADDRESS_TYPE_NOT_SUPPORTED).await;
             return Err(ProxyError::BadRequest(format!(
-                "unsupported address type: {}",
-                atyp
+                "unsupported address type: {atyp}"
             )));
         }
     };
@@ -269,7 +261,7 @@ async fn handle_connect_request(stream: &mut TcpStream) -> Result<ConnectRequest
     stream
         .read_exact(&mut port_buf)
         .await
-        .map_err(|e| ProxyError::BadRequest(format!("failed to read port: {}", e)))?;
+        .map_err(|e| ProxyError::BadRequest(format!("failed to read port: {e}")))?;
     let port = u16::from_be_bytes(port_buf);
 
     Ok(ConnectRequest { host, port })
@@ -291,23 +283,20 @@ async fn route_connection(
         }
         Err(None) => {
             // Not a wispers.link hostname - try egress if configured
-            match egress_node {
-                Some(egress) => {
-                    debug!(egress_node = egress, "Routing via egress");
-                    egress_to_node(stream, node, pool, egress, &request.host, request.port).await
-                }
-                None => {
-                    warn!(host = %request.host, "Rejected: egress not enabled");
-                    send_reply(stream, REP_NOT_ALLOWED).await;
-                    Err(anyhow::anyhow!("egress not enabled"))
-                }
+            if let Some(egress) = egress_node {
+                debug!(egress_node = egress, "Routing via egress");
+                egress_to_node(stream, node, pool, egress, &request.host, request.port).await
+            } else {
+                warn!(host = %request.host, "Rejected: egress not enabled");
+                send_reply(stream, REP_NOT_ALLOWED).await;
+                Err(anyhow::anyhow!("egress not enabled"))
             }
         }
         Err(Some(e)) => {
             // Invalid wispers.link hostname
             warn!(host = %request.host, error = %e, "Rejected: invalid wispers.link host");
             send_reply(stream, REP_GENERAL_FAILURE).await;
-            Err(anyhow::anyhow!("{}", e))
+            Err(anyhow::anyhow!("{e}"))
         }
     }
 }
@@ -326,7 +315,7 @@ async fn forward_to_node(
             Ok(Err(e)) => {
                 warn!(target_node, error = %e, "Failed to open stream");
                 send_reply(stream, REP_HOST_UNREACHABLE).await;
-                return Err(anyhow::anyhow!("{}", e));
+                return Err(anyhow::anyhow!("{e}"));
             }
             Err(_) => {
                 warn!(target_node, "Timeout opening stream");
@@ -335,11 +324,11 @@ async fn forward_to_node(
             }
         };
 
-    let command = format!("FORWARD {}\n", port);
+    let command = format!("FORWARD {port}\n");
     if let Err(e) = send_command(&quic_stream, &command).await {
         warn!(target_node, port, error = %e, "FORWARD failed");
         send_reply(stream, REP_CONNECTION_REFUSED).await;
-        return Err(anyhow::anyhow!("{}", e));
+        return Err(anyhow::anyhow!("{e}"));
     }
 
     send_reply(stream, REP_SUCCESS).await;
@@ -362,7 +351,7 @@ async fn egress_to_node(
             Ok(Err(e)) => {
                 warn!(egress_node, error = %e, "Failed to open stream to egress");
                 send_reply(stream, REP_HOST_UNREACHABLE).await;
-                return Err(anyhow::anyhow!("{}", e));
+                return Err(anyhow::anyhow!("{e}"));
             }
             Err(_) => {
                 warn!(egress_node, "Timeout opening stream to egress");
@@ -371,11 +360,11 @@ async fn egress_to_node(
             }
         };
 
-    let command = format!("CONNECT {}:{}\n", host, port);
+    let command = format!("CONNECT {host}:{port}\n");
     if let Err(e) = send_command(&quic_stream, &command).await {
         warn!(egress_node, host, port, error = %e, "CONNECT failed");
         send_reply(stream, REP_CONNECTION_REFUSED).await;
-        return Err(anyhow::anyhow!("{}", e));
+        return Err(anyhow::anyhow!("{e}"));
     }
 
     send_reply(stream, REP_SUCCESS).await;

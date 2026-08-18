@@ -14,7 +14,7 @@
 //! [`InMemoryNodeStateStore`] for CLI tools and tests. For more serious
 //! applications, you should implement [`NodeStateStore`] to plug in
 //! platform-specific secure storage (e.g. macOS Keychain, Android
-//! EncryptedSharedPreferences).
+//! `EncryptedSharedPreferences`).
 //!
 //! To initialise Wispers Connect, library clients generally first instantiate
 //! the storage, then call `restore_or_init_node()` to (re)create the `Node` in
