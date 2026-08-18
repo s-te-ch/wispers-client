@@ -447,7 +447,7 @@ pub(crate) fn c_str_to_string(ptr: *const c_char) -> Result<String, WispersStatu
     unsafe {
         CStr::from_ptr(ptr)
             .to_str()
-            .map(std::borrow::ToOwned::to_owned)
+            .map(|s| s.to_owned())
             .map_err(|_| WispersStatus::InvalidUtf8)
     }
 }
