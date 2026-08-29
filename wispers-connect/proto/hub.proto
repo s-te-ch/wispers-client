@@ -138,6 +138,12 @@ message Welcome {
   // Reserved for future use (e.g., roster, display name).
 }
 
+// Regular status update sent by the client. This also serves as an application-
+// level ping to detect a disconnected hub through a reverse proxy.
+message CheckIn {
+  // Reserved for future use (e.g., connection metrics).
+}
+
 message ServingRequest {
   int32 dest_node_number = 1;
   int32 source_node_number = 3;
@@ -159,6 +165,7 @@ message ServingResponse {
     PairNodesMessage pair_nodes_message = 10;
     RosterCosignResponse roster_cosign_response = 11;
     StartConnectionResponse start_connection_response = 12;
+    CheckIn check_in = 13;
   }
 }
 
