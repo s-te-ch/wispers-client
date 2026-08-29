@@ -700,7 +700,7 @@ impl ServingSession {
     }
 
     async fn send_check_in(&mut self) {
-        let check_in = proto::CheckIn{};
+        let check_in = proto::CheckIn {};
         let response = proto::ServingResponse {
             request_id: 0,
             error: String::new(),
