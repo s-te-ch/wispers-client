@@ -1,3 +1,7 @@
+// Error types are intentionally unboxed for ergonomic matching by callers,
+// as in the wispers-connect library.
+#![allow(clippy::result_large_err)]
+
 mod ipc;
 mod p2p;
 mod proxy_common;

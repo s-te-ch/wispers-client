@@ -559,6 +559,9 @@ impl ServingSession {
     /// Serve on the current connection until the hub stream drops, a command
     /// requests shutdown, or a fatal error occurs.
     async fn serve(&mut self) -> ServeOutcome {
+        let mut check_in_timer = tokio::time::interval(Duration::from_secs(30));
+        check_in_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
         loop {
             tokio::select! {
                 // Local commands from ServingHandle.
@@ -567,6 +570,9 @@ impl ServingSession {
                         return ServeOutcome::Shutdown;
                     }
                 }
+
+                // Regular CheckIn message trigger.
+                _ = check_in_timer.tick() => self.send_check_in().await,
 
                 // Incoming hub requests.
                 result = self.conn.request_stream.message() => {
@@ -690,6 +696,20 @@ impl ServingSession {
             connectivity_group_id: self.connectivity_group_id.clone(),
             node_number: self.node_number,
             endorsing: self.endorsing.status(),
+        }
+    }
+
+    async fn send_check_in(&mut self) {
+        let check_in = proto::CheckIn {};
+        let response = proto::ServingResponse {
+            request_id: 0,
+            error: String::new(),
+            kind: Some(proto::serving_response::Kind::CheckIn(check_in)),
+        };
+        if let Err(e) = self.conn.response_tx.send(response).await {
+            log::error!("Failed to send CheckIn message: {e}");
+        } else {
+            log::debug!("Sent CheckIn message");
         }
     }
 
