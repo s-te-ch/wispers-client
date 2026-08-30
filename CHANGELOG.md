@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.14.0
+
+Better failover behaviour when the library is used with the managed backend.
+
+- Wispers Connect clients in serving mode will now send `CheckIn` messages to
+  the hub every 30 seconds. This solves an issue with the reverse proxies of the
+  managed backend that caused connections to turn into zombies instead of
+  failing over if a hub went unhealthy, defeating the whole availability gain of
+  having multiple hub replicas.
+- Style fixes, contributed by killerfoxi@ (thanks!). The library now passes
+  "pedantic" clippy checks.
+
 ## v0.13.0
 
 Better quota handling in `wcadm`, plus security updates. The managed backend now
