@@ -278,7 +278,9 @@ impl Hub for FakeHub {
                 dest_node_number: node_number,
                 source_node_number: 0,
                 request_id: 0,
-                kind: Some(serving_request::Kind::Welcome(Welcome {})),
+                kind: Some(serving_request::Kind::Welcome(
+                    Welcome { ..Default::default() }
+                )),
             });
 
             let mut rx = request_rx;
