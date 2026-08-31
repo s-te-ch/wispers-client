@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.14.1
+
+A small protobuf format preparing the ability to estimate client-server RTT when
+the client calls StartServing.
+
 ## v0.14.0
 
 Better failover behaviour when the library is used with the managed backend.
