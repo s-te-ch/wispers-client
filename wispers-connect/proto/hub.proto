@@ -135,7 +135,9 @@ message GroupMetadata {
 
 // Initial message sent by hub when a node connects to StartServing.
 message Welcome {
-  // Reserved for future use (e.g., roster, display name).
+  // The time the server spent between receiving the StartServing call and
+  // sending this welcome message, used to estimate client-server RTT.
+  int64 server_side_init_latency_usec = 1;
 }
 
 // Regular status update sent by the client. This also serves as an application-
