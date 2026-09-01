@@ -959,7 +959,10 @@ impl ServingSession {
         }
 
         log::debug!("  Sent StartConnectionResponse, connection_id={connection_id}");
-        let delay = self.compute_check_start_delay(req_payload.caller_hub_rtt_usec);
+        let delay = self.compute_check_start_delay(
+            req_payload.caller_hub_rtt_usec,
+            req_payload.caller_ice_start_delay_usec,
+        );
         log::debug!("Delaying {delay:?} before starting ICE checks");
         let start_checks_at = tokio::time::Instant::now() + delay;
 
@@ -1033,23 +1036,36 @@ impl ServingSession {
     /// candidates. The aim is for the caller and answerer to start checking
     /// simultaneously.
     ///
-    /// If we have client-hub RTTs for both sides, the result is the estimated
-    /// time it takes for the caller to receive our message and start checking,
+    /// The delay is the estimated time it takes the caller to start its ICE
+    /// checks:
+    /// (a) the time it takes for our response to reach the caller, plus
+    /// (b) a grace period the caller adds to allow for local housekeeping.
+    ///
+    /// If we have client-hub RTTs for both sides, (a) is the overall RTT/2, or
     /// (rtt_1 + rtt_2) / 2. If only one side is available, we use that value,
     /// assuming rtt_1 = rtt_2 as approximation. If neither is available, we
-    /// simply don't wait.
-    fn compute_check_start_delay(&self, caller_hub_rtt_usec: i64) -> Duration {
+    /// simply use zero.
+    fn compute_check_start_delay(
+        &self,
+        caller_hub_rtt_usec: i64,
+        caller_ice_start_delay_usec: i64,
+    ) -> Duration {
         let their_rtt = u64::try_from(caller_hub_rtt_usec)
             .ok()
             .filter(|&v| v > 0)
             .map(Duration::from_micros);
         let own_rtt = self.p2p_config.rtt.estimate();
-        match (their_rtt, own_rtt) {
+        let caller_wait = u64::try_from(caller_ice_start_delay_usec)
+            .map(Duration::from_micros)
+            .unwrap_or(Duration::ZERO);
+        log::debug!("  hub RTT estimates: own {own_rtt:?}, caller {their_rtt:?}");
+        let signaling = match (their_rtt, own_rtt) {
             (Some(d1), Some(d2)) => (d1 + d2) / 2,
             (Some(d1), None) => d1,
             (None, Some(d2)) => d2,
             (None, None) => Duration::ZERO,
-        }
+        };
+        signaling + caller_wait
     }
 
     async fn send_error_response(&mut self, request_id: i64, error: &str) {

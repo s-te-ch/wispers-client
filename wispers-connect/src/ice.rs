@@ -4,6 +4,7 @@
 //! using the libjuice ICE library.
 
 use std::sync::mpsc;
+use std::time::Duration;
 
 use thiserror::Error;
 use tokio::sync::{Mutex as TokioMutex, mpsc as tokio_mpsc};
@@ -74,6 +75,12 @@ fn parse_host_port(addr: &str, default_port: u16) -> Result<(String, u16)> {
     }
 }
 
+/// How long the caller should wait after receiving a StartConnectionResponse
+/// before starting ICE checks. This allows both caller and answerer some time
+/// for housekeeping before startig the checks, making the start as simultaneous
+/// as possible.
+pub(crate) const CALLER_ICE_START_DELAY: Duration = Duration::from_millis(50);
+
 /// ICE caller - gathers candidates first, then connects when remote SDP is provided.
 pub struct IceCaller {
     agent: JuiceAgent,
@@ -124,10 +131,12 @@ impl IceCaller {
         &self.local_desc
     }
 
-    /// Connect to the remote peer using their SDP description.
+    /// Connect to the remote peer using their SDP description, starting the
+    /// connectivity checks at `start_at`.
     ///
     /// This sets the remote description and waits for the ICE connection to complete.
-    pub async fn connect(&self, remote_desc: &str) -> Result<()> {
+    pub async fn connect(&self, remote_desc: &str, start_at: tokio::time::Instant) -> Result<()> {
+        tokio::time::sleep_until(start_at).await;
         self.agent.set_remote_description(remote_desc)?;
         self.agent.set_remote_gathering_done()?;
         wait_for_connect(&self.state_rx).await

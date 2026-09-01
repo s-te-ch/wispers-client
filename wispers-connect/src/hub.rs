@@ -372,7 +372,9 @@ impl HubClient {
             .and_then(|s| s.parse::<u64>().ok())
             .map(Duration::from_micros)
         {
-            self.rtt.observe(elapsed.saturating_sub(server));
+            let sample = elapsed.saturating_sub(server);
+            log::debug!("hub RTT sample {sample:?} (unary {elapsed:?}, server {server:?})");
+            self.rtt.observe(sample);
         }
         Ok(response)
     }

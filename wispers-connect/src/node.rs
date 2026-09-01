@@ -890,6 +890,9 @@ impl Node {
         // Connect to hub
         let client = HubClient::connect(&hub_addr, self.rtt.clone()).await?;
 
+        // Look up the peer node. This can cause a roster refetch.
+        let peer_node = self.find_peer_in_roster(&client, peer_node_number).await?;
+
         // Get STUN/TURN configuration
         let stun_turn_config = client.get_stun_turn_config(registration).await?;
 
@@ -913,15 +916,15 @@ impl Node {
             transport: proto::Transport::Datagram.into(),
             stun_turn_config: Some(stun_turn_config),
             caller_hub_rtt_usec: rtt_usec,
+            caller_ice_start_delay_usec: crate::ice::CALLER_ICE_START_DELAY.as_micros() as i64,
         };
         let request = p2p_signing::build_signed_request(&self.signing_key, &payload);
 
         // Send to hub
         let response = client.start_connection(registration, request).await?;
+        let answer_received = tokio::time::Instant::now();
 
         // Verify answerer's signature against roster (refetch if peer is unknown)
-        let peer_node = self.find_peer_in_roster(&client, peer_node_number).await?;
-
         let response_payload = p2p_signing::verify_response(&response, &peer_node.public_key_spki)
             .map_err(|_| P2pError::SignatureVerificationFailed)?;
 
@@ -935,7 +938,12 @@ impl Node {
         let shared_secret = encryption_key.diffie_hellman(&peer_x25519_public);
 
         // Complete ICE connection
-        ice_caller.connect(&response_payload.answerer_sdp).await?;
+        ice_caller
+            .connect(
+                &response_payload.answerer_sdp,
+                answer_received + crate::ice::CALLER_ICE_START_DELAY,
+            )
+            .await?;
 
         UdpConnection::new_caller(
             peer_node_number,
@@ -969,6 +977,9 @@ impl Node {
         // Connect to hub
         let client = HubClient::connect(&hub_addr, self.rtt.clone()).await?;
 
+        // Look up the peer node. This can cause a roster refetch.
+        let peer_node = self.find_peer_in_roster(&client, peer_node_number).await?;
+        
         // Get STUN/TURN configuration
         let stun_turn_config = client.get_stun_turn_config(registration).await?;
 
@@ -992,15 +1003,15 @@ impl Node {
             transport: proto::Transport::Stream.into(),
             stun_turn_config: Some(stun_turn_config),
             caller_hub_rtt_usec: rtt_usec,
+            caller_ice_start_delay_usec: crate::ice::CALLER_ICE_START_DELAY.as_micros() as i64,
         };
         let request = p2p_signing::build_signed_request(&self.signing_key, &payload);
 
         // Send to hub
         let response = client.start_connection(registration, request).await?;
+        let answer_received = tokio::time::Instant::now();
 
         // Verify answerer's signature against roster (refetch if peer is unknown)
-        let peer_node = self.find_peer_in_roster(&client, peer_node_number).await?;
-
         let response_payload = p2p_signing::verify_response(&response, &peer_node.public_key_spki)
             .map_err(|_| P2pError::SignatureVerificationFailed)?;
 
@@ -1014,7 +1025,12 @@ impl Node {
         let shared_secret = encryption_key.diffie_hellman(&peer_x25519_public);
 
         // Complete ICE connection
-        ice_caller.connect(&response_payload.answerer_sdp).await?;
+        ice_caller
+            .connect(
+                &response_payload.answerer_sdp,
+                answer_received + crate::ice::CALLER_ICE_START_DELAY,
+            )
+            .await?;
 
         // Complete QUIC handshake
         QuicConnection::connect_caller(

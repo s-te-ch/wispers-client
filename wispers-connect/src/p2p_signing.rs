@@ -153,6 +153,7 @@ mod tests {
             }),
             // Default value: encodes to nothing.
             caller_hub_rtt_usec: 0,
+            caller_ice_start_delay_usec: 0,
         }
     }
 
