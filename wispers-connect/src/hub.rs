@@ -2,8 +2,10 @@
 //!
 //! This module provides the gRPC client for communicating with the Wispers Connect Hub.
 
+use crate::rtt::RttEstimator;
 use crate::types::{AuthToken, ConnectivityGroupId, NodeRegistration};
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::MetadataValue;
@@ -112,13 +114,18 @@ impl From<proto::hub::Node> for Node {
 /// Client for communicating with the Wispers Connect Hub.
 pub(crate) struct HubClient {
     client: ProtoHubClient<InterceptedService<Channel, AddClientVersion>>,
+    /// Node-lifetime RTT estimate that every call through this client feeds.
+    rtt: Arc<RttEstimator>,
 }
 
 impl HubClient {
     /// Connect to a hub at the given address.
     ///
     /// Supports both `http://` (plaintext) and `https://` (TLS) schemes.
-    pub(crate) async fn connect(hub_addr: impl Into<String>) -> Result<Self, HubError> {
+    pub(crate) async fn connect(
+        hub_addr: impl Into<String>,
+        rtt: Arc<RttEstimator>,
+    ) -> Result<Self, HubError> {
         let addr = hub_addr.into();
         let mut endpoint = Channel::from_shared(addr.clone())?;
 
@@ -143,6 +150,7 @@ impl HubClient {
         let channel = endpoint.connect().await?;
         Ok(Self {
             client: ProtoHubClient::with_interceptor(channel, AddClientVersion),
+            rtt,
         })
     }
 
@@ -157,9 +165,7 @@ impl HubClient {
             token: token.into(),
         });
         let response = self
-            .client
-            .clone()
-            .complete_node_registration(request)
+            .timed(self.client.clone().complete_node_registration(request))
             .await?;
         let reg = response.into_inner();
         Ok(NodeRegistration::new(
@@ -178,7 +184,7 @@ impl HubClient {
         let mut request = tonic::Request::new(proto::ListNodesRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        let response = self.client.clone().list_nodes(request).await?;
+        let response = self.timed(self.client.clone().list_nodes(request)).await?;
         let nodes = response
             .into_inner()
             .nodes
@@ -205,7 +211,7 @@ impl HubClient {
         request.set_timeout(crate::crypto::PAIRING_RPC_DEADLINE);
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        let response = self.client.clone().pair_nodes(request).await?;
+        let response = self.timed(self.client.clone().pair_nodes(request)).await?;
         Ok(response.into_inner())
     }
 
@@ -222,7 +228,7 @@ impl HubClient {
         let mut request = tonic::Request::new(proto::RosterRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        let response = self.client.clone().get_roster(request).await?;
+        let response = self.timed(self.client.clone().get_roster(request)).await?;
         Ok(response.into_inner())
     }
 
@@ -234,7 +240,9 @@ impl HubClient {
         let mut request = tonic::Request::new(proto::GroupMetadataRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        let response = self.client.clone().get_group_metadata(request).await?;
+        let response = self
+            .timed(self.client.clone().get_group_metadata(request))
+            .await?;
         Ok(response.into_inner())
     }
 
@@ -264,7 +272,9 @@ impl HubClient {
         });
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        let response = self.client.clone().update_roster(request).await?;
+        let response = self
+            .timed(self.client.clone().update_roster(request))
+            .await?;
         response.into_inner().cosigned_roster.ok_or_else(|| {
             HubError::Rpc(tonic::Status::internal(
                 "missing cosigned_roster in response",
@@ -285,12 +295,16 @@ impl HubClient {
         let mut request = tonic::Request::new(response_stream);
         add_auth_metadata(request.metadata_mut(), registration)?;
 
+        // Record time right before the call, to be combined with the time of
+        // receiving the `Welcome` message to get an RTT estimate.
+        let opened_at = Instant::now();
         let response = self.client.clone().start_serving(request).await?;
         let request_stream = response.into_inner();
 
         Ok(ServingConnection {
             response_tx,
             request_stream,
+            opened_at,
         })
     }
 
@@ -304,7 +318,9 @@ impl HubClient {
         let mut request = tonic::Request::new(proto::StunTurnConfigRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        let response = self.client.clone().get_stun_turn_config(request).await?;
+        let response = self
+            .timed(self.client.clone().get_stun_turn_config(request))
+            .await?;
         Ok(response.into_inner())
     }
 
@@ -319,7 +335,9 @@ impl HubClient {
         let mut grpc_request = tonic::Request::new(request);
         add_auth_metadata(grpc_request.metadata_mut(), registration)?;
 
-        let response = self.client.clone().start_connection(grpc_request).await?;
+        let response = self
+            .timed(self.client.clone().start_connection(grpc_request))
+            .await?;
         Ok(response.into_inner())
     }
 
@@ -333,8 +351,30 @@ impl HubClient {
         let mut request = tonic::Request::new(proto::DeregisterNodeRequest {});
         add_auth_metadata(request.metadata_mut(), registration)?;
 
-        self.client.clone().deregister_node(request).await?;
+        self.timed(self.client.clone().deregister_node(request))
+            .await?;
         Ok(())
+    }
+
+    /// Runs one unary call, measures the latency, and feeds the client-hub
+    /// RTT estimate.
+    async fn timed<T>(
+        &self,
+        call: impl Future<Output = Result<tonic::Response<T>, tonic::Status>>,
+    ) -> Result<tonic::Response<T>, tonic::Status> {
+        let start = Instant::now();
+        let response = call.await?;
+        let elapsed = start.elapsed();
+        if let Some(server) = response
+            .metadata()
+            .get("wispers-server-time-usec")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .map(Duration::from_micros)
+        {
+            self.rtt.observe(elapsed.saturating_sub(server));
+        }
+        Ok(response)
     }
 }
 
@@ -344,6 +384,8 @@ pub(crate) struct ServingConnection {
     pub response_tx: mpsc::Sender<proto::ServingResponse>,
     /// Receive incoming requests.
     pub request_stream: tonic::Streaming<proto::ServingRequest>,
+    /// When the stream was opened.
+    pub opened_at: Instant,
 }
 
 /// Adds the library version to every request, so hubs can reject

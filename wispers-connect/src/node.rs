@@ -9,6 +9,7 @@
 
 use std::fmt;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use crate::crypto::{PairingCode, SigningKeyPair, generate_nonce};
 use crate::errors::NodeStateError;
@@ -17,6 +18,7 @@ use crate::roster::{
     add_activation_to_roster, build_activation_payload, compute_signing_hash,
     create_bootstrap_roster, set_new_node_signature, verify_roster,
 };
+use crate::rtt::RttEstimator;
 use crate::storage::{NodeStateStore, SharedStore};
 use crate::types::{
     ConnectivityGroupId, GroupInfo, GroupState, NodeInfo, NodeRegistration, PersistedNodeState,
@@ -133,7 +135,7 @@ impl NodeStorage {
         let registration = state.registration.as_ref().expect("checked is_registered");
         let hub_addr = self.config.read().unwrap().hub_addr.clone();
 
-        let client = HubClient::connect(hub_addr)
+        let client = HubClient::connect(hub_addr, Arc::new(RttEstimator::new()))
             .await
             .map_err(NodeStateError::hub)?;
 
@@ -230,6 +232,8 @@ pub struct Node {
     config: SharedConfig,
     // Derived from root key at construction time
     signing_key: SigningKeyPair,
+    /// Client-hub RTT estimate, fed by every hub call this node makes.
+    rtt: Arc<RttEstimator>,
 }
 
 impl Node {
@@ -246,6 +250,7 @@ impl Node {
             persisted,
             store,
             config,
+            rtt: Arc::new(RttEstimator::new()),
         }
     }
 
@@ -266,6 +271,7 @@ impl Node {
             persisted,
             store,
             config,
+            rtt: Arc::new(RttEstimator::new()),
         })
     }
 
@@ -290,6 +296,7 @@ impl Node {
             persisted,
             store,
             config,
+            rtt: Arc::new(RttEstimator::new()),
         }
     }
 
@@ -312,6 +319,7 @@ impl Node {
             persisted,
             store,
             config,
+            rtt: Arc::new(RttEstimator::new()),
         }
     }
 
@@ -437,6 +445,12 @@ impl Node {
         &self.signing_key
     }
 
+    /// The node's client-hub RTT estimate, shared with every hub client and
+    /// serving session this node creates.
+    pub(crate) fn rtt_estimator(&self) -> &Arc<RttEstimator> {
+        &self.rtt
+    }
+
     // -------------------------------------------------------------------------
     // Pending operations
     // -------------------------------------------------------------------------
@@ -469,7 +483,7 @@ impl Node {
 
         self.require_pending()?;
 
-        let client = HubClient::connect(self.hub_addr())
+        let client = HubClient::connect(self.hub_addr(), self.rtt.clone())
             .await
             .map_err(NodeStateError::hub)?;
         let registration = client
@@ -501,7 +515,7 @@ impl Node {
         use crate::hub::HubClient;
 
         let registration = self.require_at_least_registered()?;
-        let client = HubClient::connect(self.hub_addr())
+        let client = HubClient::connect(self.hub_addr(), self.rtt.clone())
             .await
             .map_err(NodeStateError::hub)?;
 
@@ -654,6 +668,7 @@ impl Node {
         let p2p_config = P2pConfig {
             hub_addr: hub_addr.clone(),
             registration: registration.clone(),
+            rtt: self.rtt.clone(),
         };
 
         start_serving_impl(
@@ -698,7 +713,7 @@ impl Node {
         };
 
         // Connect and send the pairing request
-        let client = HubClient::connect(self.hub_addr())
+        let client = HubClient::connect(self.hub_addr(), self.rtt.clone())
             .await
             .map_err(NodeStateError::hub)?;
 
@@ -873,7 +888,7 @@ impl Node {
         let hub_addr = self.hub_addr();
 
         // Connect to hub
-        let client = HubClient::connect(&hub_addr).await?;
+        let client = HubClient::connect(&hub_addr, self.rtt.clone()).await?;
 
         // Get STUN/TURN configuration
         let stun_turn_config = client.get_stun_turn_config(registration).await?;
@@ -885,6 +900,11 @@ impl Node {
         // Generate ephemeral X25519 keypair for forward secrecy
         let encryption_key = X25519KeyPair::generate_ephemeral();
 
+        // Get latest client-hub RTT estimate, defaulting to zero, which the
+        // proto interprets as None.
+        let rtt = self.rtt.estimate().unwrap_or(Duration::ZERO);
+        let rtt_usec = i64::try_from(rtt.as_micros()).unwrap_or(0);
+
         // Build and sign the inner payload, then wrap in the envelope.
         let payload = proto::start_connection_request::Payload {
             answerer_node_number: peer_node_number,
@@ -892,6 +912,7 @@ impl Node {
             caller_sdp,
             transport: proto::Transport::Datagram.into(),
             stun_turn_config: Some(stun_turn_config),
+            caller_hub_rtt_usec: rtt_usec,
         };
         let request = p2p_signing::build_signed_request(&self.signing_key, &payload);
 
@@ -946,7 +967,7 @@ impl Node {
         let hub_addr = self.hub_addr();
 
         // Connect to hub
-        let client = HubClient::connect(&hub_addr).await?;
+        let client = HubClient::connect(&hub_addr, self.rtt.clone()).await?;
 
         // Get STUN/TURN configuration
         let stun_turn_config = client.get_stun_turn_config(registration).await?;
@@ -958,6 +979,11 @@ impl Node {
         // Generate ephemeral X25519 keypair for forward secrecy
         let encryption_key = X25519KeyPair::generate_ephemeral();
 
+        // Get latest client-hub RTT estimate, defaulting to zero, which the
+        // proto interprets as None.
+        let rtt = self.rtt.estimate().unwrap_or(Duration::ZERO);
+        let rtt_usec = i64::try_from(rtt.as_micros()).unwrap_or(0);
+
         // Build and sign the inner payload, then wrap in the envelope.
         let payload = proto::start_connection_request::Payload {
             answerer_node_number: peer_node_number,
@@ -965,6 +991,7 @@ impl Node {
             caller_sdp,
             transport: proto::Transport::Stream.into(),
             stun_turn_config: Some(stun_turn_config),
+            caller_hub_rtt_usec: rtt_usec,
         };
         let request = p2p_signing::build_signed_request(&self.signing_key, &payload);
 
@@ -1060,7 +1087,7 @@ impl Node {
             return Err(NodeStateError::NodeNotActive(target_node_number));
         }
 
-        let client = HubClient::connect(self.hub_addr())
+        let client = HubClient::connect(self.hub_addr(), self.rtt.clone())
             .await
             .map_err(NodeStateError::hub)?;
 
@@ -1125,7 +1152,7 @@ impl Node {
             | InnerState::Revoked { registration: reg } => reg.clone(),
         };
 
-        let client = HubClient::connect(self.hub_addr())
+        let client = HubClient::connect(self.hub_addr(), self.rtt.clone())
             .await
             .map_err(NodeStateError::hub)?;
         let roster = client
@@ -1201,7 +1228,7 @@ impl Node {
             // rather than orphaning it.)
             NodeState::Registered | NodeState::Revoked => {
                 let registration = self.persisted.registration.as_ref().expect("registered");
-                let client = HubClient::connect(self.hub_addr())
+                let client = HubClient::connect(self.hub_addr(), self.rtt.clone())
                     .await
                     .map_err(NodeStateError::hub)?;
                 // If unauthenticated, node was already removed server-side — just clean up locally.
@@ -1228,7 +1255,7 @@ impl Node {
                     return Err(NodeStateError::LastActiveNode);
                 }
 
-                let client = HubClient::connect(self.hub_addr())
+                let client = HubClient::connect(self.hub_addr(), self.rtt.clone())
                     .await
                     .map_err(NodeStateError::hub)?;
 
@@ -1297,6 +1324,7 @@ impl Node {
             config: Arc::new(std::sync::RwLock::new(RuntimeConfig::new_with_addr(
                 hub_addr,
             ))),
+            rtt: Arc::new(RttEstimator::new()),
         }
     }
 }
@@ -1317,7 +1345,7 @@ async fn start_serving_impl(
 > {
     use crate::serving::{ServingSession, open_serving_connection};
 
-    let conn = open_serving_connection(hub_addr, registration).await?;
+    let conn = open_serving_connection(hub_addr, registration, p2p_config.rtt.clone()).await?;
 
     let (handle, session, incoming) = ServingSession::new(
         conn,
