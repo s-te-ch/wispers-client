@@ -979,7 +979,7 @@ impl Node {
 
         // Look up the peer node. This can cause a roster refetch.
         let peer_node = self.find_peer_in_roster(&client, peer_node_number).await?;
-        
+
         // Get STUN/TURN configuration
         let stun_turn_config = client.get_stun_turn_config(registration).await?;
 
