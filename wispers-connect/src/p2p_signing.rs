@@ -151,6 +151,9 @@ mod tests {
                 turn_password: "pass".to_string(),
                 expires_at_millis: 1_700_000_000_000,
             }),
+            // Default value: encodes to nothing.
+            caller_hub_rtt_usec: 0,
+            caller_ice_start_delay_usec: 0,
         }
     }
 

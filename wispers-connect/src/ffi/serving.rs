@@ -738,6 +738,7 @@ fn extract_serving_params(node: &Node) -> Result<ServingParams, WispersStatus> {
     let p2p_config = crate::serving::P2pConfig {
         hub_addr: hub_addr.clone(),
         registration: registration.clone(),
+        rtt: node.rtt_estimator().clone(),
     };
 
     Ok(ServingParams {
@@ -753,7 +754,12 @@ async fn start_serving_impl(
 ) -> Result<(ServingHandle, ServingSession, IncomingConnections), crate::hub::HubError> {
     use crate::serving::{ServingSession, open_serving_connection};
 
-    let conn = open_serving_connection(&params.hub_addr, &params.registration).await?;
+    let conn = open_serving_connection(
+        &params.hub_addr,
+        &params.registration,
+        params.p2p_config.rtt.clone(),
+    )
+    .await?;
 
     let (handle, session, incoming) = ServingSession::new(
         conn,

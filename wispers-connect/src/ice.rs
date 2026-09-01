@@ -4,6 +4,7 @@
 //! using the libjuice ICE library.
 
 use std::sync::mpsc;
+use std::time::Duration;
 
 use thiserror::Error;
 use tokio::sync::{Mutex as TokioMutex, mpsc as tokio_mpsc};
@@ -74,6 +75,12 @@ fn parse_host_port(addr: &str, default_port: u16) -> Result<(String, u16)> {
     }
 }
 
+/// How long the caller should wait after receiving a StartConnectionResponse
+/// before starting ICE checks. This allows both caller and answerer some time
+/// for housekeeping before startig the checks, making the start as simultaneous
+/// as possible.
+pub(crate) const CALLER_ICE_START_DELAY: Duration = Duration::from_millis(50);
+
 /// ICE caller - gathers candidates first, then connects when remote SDP is provided.
 pub struct IceCaller {
     agent: JuiceAgent,
@@ -124,10 +131,12 @@ impl IceCaller {
         &self.local_desc
     }
 
-    /// Connect to the remote peer using their SDP description.
+    /// Connect to the remote peer using their SDP description, starting the
+    /// connectivity checks at `start_at`.
     ///
     /// This sets the remote description and waits for the ICE connection to complete.
-    pub async fn connect(&self, remote_desc: &str) -> Result<()> {
+    pub async fn connect(&self, remote_desc: &str, start_at: tokio::time::Instant) -> Result<()> {
+        tokio::time::sleep_until(start_at).await;
         self.agent.set_remote_description(remote_desc)?;
         self.agent.set_remote_gathering_done()?;
         wait_for_connect(&self.state_rx).await
@@ -159,18 +168,29 @@ impl IceCaller {
     }
 }
 
-/// ICE answerer - receives remote SDP first, then gathers and connects.
+/// ICE answerer - receives remote SDP first, then gathers, and starts
+/// connectivity checks only when told to.
+///
+/// libjuice starts probing a candidate pair the moment the remote candidate
+/// is known, so to control *when* the answerer starts punching, the caller's
+/// candidates are held back: `new` gives libjuice only the caller's ICE
+/// credentials (which still makes this side the controlled agent), and
+/// `connect` feeds the candidates at the requested instant.
 pub struct IceAnswerer {
     agent: JuiceAgent,
     state_rx: TokioMutex<tokio_mpsc::UnboundedReceiver<JuiceState>>,
     recv_rx: TokioMutex<tokio_mpsc::UnboundedReceiver<Vec<u8>>>,
     local_desc: String,
+    /// The caller's `a=candidate:` lines, withheld until `connect`.
+    remote_candidates: Vec<String>,
 }
 
 impl IceAnswerer {
     /// Create a new ICE answerer with the caller's SDP description.
     ///
-    /// This sets the remote description, gathers candidates, and blocks until gathering is complete.
+    /// This sets the remote ICE credentials, gathers candidates, and blocks
+    /// until gathering is complete. No connectivity checks run until
+    /// `connect`.
     pub fn new(remote_desc: &str, config: &StunTurnConfig) -> Result<Self> {
         let (state_tx, state_rx) = tokio_mpsc::unbounded_channel();
         let (gather_tx, gather_rx) = mpsc::channel();
@@ -192,8 +212,10 @@ impl IceAnswerer {
             },
         )?;
 
-        agent.set_remote_description(remote_desc)?;
-        agent.set_remote_gathering_done()?;
+        // Credentials before gathering: that order is what makes libjuice
+        // take the controlled role.
+        let (credentials, remote_candidates) = split_remote_description(remote_desc);
+        agent.set_remote_description(&credentials)?;
         agent.gather_candidates()?;
         gather_rx.recv().map_err(|_| IceError::ChannelClosed)?;
         let local_desc = agent.get_local_description()?;
@@ -203,6 +225,7 @@ impl IceAnswerer {
             state_rx: TokioMutex::new(state_rx),
             recv_rx: TokioMutex::new(recv_rx),
             local_desc,
+            remote_candidates,
         })
     }
 
@@ -211,8 +234,21 @@ impl IceAnswerer {
         &self.local_desc
     }
 
-    /// Wait for the ICE connection to complete.
-    pub async fn connect(&self) -> Result<()> {
+    /// Start connectivity checks at `start_at` and wait for the connection.
+    ///
+    /// Feeding the withheld candidates is what starts the checks; the caller
+    /// picks `start_at` so both peers begin punching at the same time.
+    pub async fn connect(&self, start_at: tokio::time::Instant) -> Result<()> {
+        tokio::time::sleep_until(start_at).await;
+        for candidate in &self.remote_candidates {
+            match self.agent.add_remote_candidate(candidate) {
+                // If libjuice ignores a candidate it doesn't support (e.g.
+                // TCP), let it pass.
+                Ok(()) | Err(JuiceError::Ignored) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        self.agent.set_remote_gathering_done()?;
         wait_for_connect(&self.state_rx).await
     }
 
@@ -242,6 +278,26 @@ impl IceAnswerer {
     }
 }
 
+/// Splits a remote SDP into the description libjuice gets up front (ICE
+/// credentials and anything else that isn't a candidate) and the
+/// `a=candidate:` lines to feed later. `a=end-of-candidates` is dropped too:
+/// libjuice rejects candidates added after it has seen that line.
+fn split_remote_description(sdp: &str) -> (String, Vec<String>) {
+    let mut credentials = String::new();
+    let mut candidates = Vec::new();
+    for line in sdp.lines().map(str::trim_end).filter(|l| !l.is_empty()) {
+        if line.starts_with("a=candidate:") {
+            candidates.push(line.to_string());
+        } else if line.starts_with("a=end-of-candidates") {
+            // dropped, see above
+        } else {
+            credentials.push_str(line);
+            credentials.push_str("\r\n");
+        }
+    }
+    (credentials, candidates)
+}
+
 /// Wait for the ICE connection to reach Connected or Completed state.
 async fn wait_for_connect(
     state_rx: &TokioMutex<tokio_mpsc::UnboundedReceiver<JuiceState>>,
@@ -255,4 +311,32 @@ async fn wait_for_connect(
         }
     }
     Err(IceError::ChannelClosed)
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::split_remote_description;
+
+    #[test]
+    fn candidates_and_end_marker_are_held_back() {
+        let sdp = "a=ice-ufrag:abcd\r\na=ice-pwd:secret\r\n\
+                   a=candidate:1 1 UDP 2122317823 192.0.2.1 5000 typ host\r\n\
+                   a=candidate:2 1 UDP 1686109951 198.51.100.1 6000 typ srflx raddr 0.0.0.0 rport 0\r\n\
+                   a=end-of-candidates\r\na=ice-options:ice2\r\n";
+        let (credentials, candidates) = split_remote_description(sdp);
+        assert_eq!(
+            credentials,
+            "a=ice-ufrag:abcd\r\na=ice-pwd:secret\r\na=ice-options:ice2\r\n"
+        );
+        assert_eq!(candidates.len(), 2);
+        assert!(candidates.iter().all(|c| c.starts_with("a=candidate:")));
+    }
+
+    #[test]
+    fn tolerates_bare_newlines() {
+        let (credentials, candidates) =
+            split_remote_description("a=ice-ufrag:u\na=ice-pwd:p\na=candidate:x\n");
+        assert_eq!(credentials, "a=ice-ufrag:u\r\na=ice-pwd:p\r\n");
+        assert_eq!(candidates, vec!["a=candidate:x".to_string()]);
+    }
 }

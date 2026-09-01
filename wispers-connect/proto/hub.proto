@@ -200,6 +200,15 @@ message StartConnectionRequest {
     string caller_sdp = 3;  // ICE candidates + ufrag/pwd (opaque from libjuice)
     Transport transport = 4;
     StunTurnConfig stun_turn_config = 5;
+
+    // Client-side estimate of caller<-> hub RTT, used to optimise timing of NAT
+    // hole punching.
+    int64 caller_hub_rtt_usec = 6;
+
+    // Time the caller will wait after receiving a response before it starts ICE
+    // checks. This allows both caller and answerer time to run required local
+    // processing and synchronise the start as well as possible.
+    int64 caller_ice_start_delay_usec = 7;
   }
 
   // We include the payload as a `bytes` field because not all protobuf

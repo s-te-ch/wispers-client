@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 use std::ops::ControlFlow;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -18,6 +19,7 @@ use crate::hub::ServingConnection;
 use crate::hub::proto;
 use crate::ice::IceAnswerer;
 use crate::p2p::{P2pError, QuicConnection, UdpConnection};
+use crate::rtt::RttEstimator;
 use crate::types::{ConnectivityGroupId, NodeRegistration};
 use prost::Message;
 use rand::Rng;
@@ -54,6 +56,8 @@ pub(crate) struct P2pConfig {
     pub hub_addr: String,
     /// Node registration for authenticating with the hub.
     pub registration: crate::types::NodeRegistration,
+    /// The node's RTT estimate; every hub call from the session feeds it.
+    pub rtt: Arc<RttEstimator>,
 }
 
 /// Information about the current serving session status.
@@ -379,8 +383,9 @@ impl ReconnectBackoff {
 pub(crate) async fn open_serving_connection(
     hub_addr: &str,
     registration: &NodeRegistration,
+    rtt: Arc<RttEstimator>,
 ) -> Result<ServingConnection, crate::hub::HubError> {
-    let client = crate::hub::HubClient::connect(hub_addr).await?;
+    let client = crate::hub::HubClient::connect(hub_addr, rtt).await?;
     client.start_serving(registration).await
 }
 
@@ -528,6 +533,7 @@ impl ServingSession {
         // without conflicting with the `&mut self` command handling.
         let hub_addr = self.p2p_config.hub_addr.clone();
         let registration = self.p2p_config.registration.clone();
+        let rtt = self.p2p_config.rtt.clone();
 
         // The first connection was already established by `start_serving`.
         self.connected = true;
@@ -541,7 +547,7 @@ impl ServingSession {
                 }
             }
 
-            match self.reconnect(&hub_addr, &registration).await {
+            match self.reconnect(&hub_addr, &registration, &rtt).await {
                 ConnectOutcome::Connected(conn) => {
                     self.conn = *conn;
                     self.connected = true;
@@ -602,10 +608,11 @@ impl ServingSession {
         &mut self,
         hub_addr: &str,
         registration: &NodeRegistration,
+        rtt: &Arc<RttEstimator>,
     ) -> ConnectOutcome {
         let mut backoff = ReconnectBackoff::new();
         loop {
-            let attempt = open_serving_connection(hub_addr, registration);
+            let attempt = open_serving_connection(hub_addr, registration, rtt.clone());
             tokio::pin!(attempt);
 
             // Race the connection attempt against incoming commands.
@@ -722,8 +729,16 @@ impl ServingSession {
         );
 
         match request.kind {
-            Some(proto::serving_request::Kind::Welcome(_)) => {
-                log::debug!("  Welcome received");
+            Some(proto::serving_request::Kind::Welcome(welcome)) => {
+                // Opening a stream gives its own RTT estimate, from opening
+                // the stream to receiving the Welcome message, minus the
+                // server's processing time recorded in the message.
+                let server = Duration::from_micros(
+                    u64::try_from(welcome.server_side_init_latency_usec).unwrap_or(0),
+                );
+                let sample = self.conn.opened_at.elapsed().saturating_sub(server);
+                self.p2p_config.rtt.observe(sample);
+                log::debug!("  Welcome received, hub RTT sample {sample:?}");
             }
             Some(proto::serving_request::Kind::PairNodesMessage(msg)) => {
                 match self
@@ -799,7 +814,12 @@ impl ServingSession {
         log::debug!("  StartConnectionRequest from node {caller_node_number}");
 
         // Fetch and verify fresh roster from hub
-        let client = match HubClient::connect(&self.p2p_config.hub_addr).await {
+        let client = match HubClient::connect(
+            &self.p2p_config.hub_addr,
+            self.p2p_config.rtt.clone(),
+        )
+        .await
+        {
             Ok(c) => c,
             Err(e) => {
                 log::error!("  Failed to connect to hub: {e}");
@@ -939,6 +959,12 @@ impl ServingSession {
         }
 
         log::debug!("  Sent StartConnectionResponse, connection_id={connection_id}");
+        let delay = self.compute_check_start_delay(
+            req_payload.caller_hub_rtt_usec,
+            req_payload.caller_ice_start_delay_usec,
+        );
+        log::debug!("Delaying {delay:?} before starting ICE checks");
+        let start_checks_at = tokio::time::Instant::now() + delay;
 
         // Handle based on requested transport type
         let transport = req_payload.transport();
@@ -954,6 +980,7 @@ impl ServingSession {
                         connection_id,
                         ice_answerer,
                         shared_secret,
+                        start_checks_at,
                     )
                     .await;
 
@@ -983,6 +1010,7 @@ impl ServingSession {
                         connection_id,
                         ice_answerer,
                         shared_secret,
+                        start_checks_at,
                     )
                     .await;
 
@@ -1002,6 +1030,42 @@ impl ServingSession {
                 log::debug!("  Spawned QUIC handshake task");
             }
         }
+    }
+
+    /// How much the ICE answerer should delay before starting to check
+    /// candidates. The aim is for the caller and answerer to start checking
+    /// simultaneously.
+    ///
+    /// The delay is the estimated time it takes the caller to start its ICE
+    /// checks:
+    /// (a) the time it takes for our response to reach the caller, plus
+    /// (b) a grace period the caller adds to allow for local housekeeping.
+    ///
+    /// If we have client-hub RTTs for both sides, (a) is the overall RTT/2, or
+    /// (rtt_1 + rtt_2) / 2. If only one side is available, we use that value,
+    /// assuming rtt_1 = rtt_2 as approximation. If neither is available, we
+    /// simply use zero.
+    fn compute_check_start_delay(
+        &self,
+        caller_hub_rtt_usec: i64,
+        caller_ice_start_delay_usec: i64,
+    ) -> Duration {
+        let their_rtt = u64::try_from(caller_hub_rtt_usec)
+            .ok()
+            .filter(|&v| v > 0)
+            .map(Duration::from_micros);
+        let own_rtt = self.p2p_config.rtt.estimate();
+        let caller_wait = u64::try_from(caller_ice_start_delay_usec)
+            .map(Duration::from_micros)
+            .unwrap_or(Duration::ZERO);
+        log::debug!("  hub RTT estimates: own {own_rtt:?}, caller {their_rtt:?}");
+        let signaling = match (their_rtt, own_rtt) {
+            (Some(d1), Some(d2)) => (d1 + d2) / 2,
+            (Some(d1), None) => d1,
+            (None, Some(d2)) => d2,
+            (None, None) => Duration::ZERO,
+        };
+        signaling + caller_wait
     }
 
     async fn send_error_response(&mut self, request_id: i64, error: &str) {

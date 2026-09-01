@@ -177,9 +177,10 @@ impl UdpConnection {
         connection_id: i64,
         ice: IceAnswerer,
         shared_secret: [u8; 32],
+        start_checks_at: tokio::time::Instant,
     ) -> Result<Self, P2pError> {
         // Wait for ICE connection
-        ice.connect().await?;
+        ice.connect(start_checks_at).await?;
 
         let cipher = P2pCipher::new_answerer(&shared_secret, connection_id)?;
         Ok(Self {
@@ -473,9 +474,10 @@ impl QuicConnection {
         connection_id: i64,
         ice: IceAnswerer,
         shared_secret: [u8; 32],
+        start_checks_at: tokio::time::Instant,
     ) -> Result<Self, P2pError> {
         // Wait for ICE connection
-        ice.connect().await?;
+        ice.connect(start_checks_at).await?;
 
         // Create QUIC connection and handshake
         let psk = quic::derive_psk(&shared_secret);
