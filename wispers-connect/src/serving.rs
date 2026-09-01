@@ -959,6 +959,9 @@ impl ServingSession {
         }
 
         log::debug!("  Sent StartConnectionResponse, connection_id={connection_id}");
+        let delay = self.compute_check_start_delay(req_payload.caller_hub_rtt_usec);
+        log::debug!("Delaying {delay:?} before starting ICE checks");
+        let start_checks_at = tokio::time::Instant::now() + delay;
 
         // Handle based on requested transport type
         let transport = req_payload.transport();
@@ -974,6 +977,7 @@ impl ServingSession {
                         connection_id,
                         ice_answerer,
                         shared_secret,
+                        start_checks_at,
                     )
                     .await;
 
@@ -1003,6 +1007,7 @@ impl ServingSession {
                         connection_id,
                         ice_answerer,
                         shared_secret,
+                        start_checks_at,
                     )
                     .await;
 
@@ -1021,6 +1026,29 @@ impl ServingSession {
                 });
                 log::debug!("  Spawned QUIC handshake task");
             }
+        }
+    }
+
+    /// How much the ICE answerer should delay before starting to check
+    /// candidates. The aim is for the caller and answerer to start checking
+    /// simultaneously.
+    ///
+    /// If we have client-hub RTTs for both sides, the result is the estimated
+    /// time it takes for the caller to receive our message and start checking,
+    /// (rtt_1 + rtt_2) / 2. If only one side is available, we use that value,
+    /// assuming rtt_1 = rtt_2 as approximation. If neither is available, we
+    /// simply don't wait.
+    fn compute_check_start_delay(&self, caller_hub_rtt_usec: i64) -> Duration {
+        let their_rtt = u64::try_from(caller_hub_rtt_usec)
+            .ok()
+            .filter(|&v| v > 0)
+            .map(Duration::from_micros);
+        let own_rtt = self.p2p_config.rtt.estimate();
+        match (their_rtt, own_rtt) {
+            (Some(d1), Some(d2)) => (d1 + d2) / 2,
+            (Some(d1), None) => d1,
+            (None, Some(d2)) => d2,
+            (None, None) => Duration::ZERO,
         }
     }
 
