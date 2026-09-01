@@ -1,6 +1,6 @@
 [package]
 name = "wcadm"
-version = "0.14.1"
+version = "0.15.0"
 edition = "2024"
 license = "MIT"
 authors = ["Matthias Scheidegger <mbs@s-te.ch>"]

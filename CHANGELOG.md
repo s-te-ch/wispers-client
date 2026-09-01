@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.15.0
+
+Optimised NAT-traversal performance by synchronising when the nodes start to
+check candidate pairs. Previously, the answerer node started considerably
+before the caller, which led to problems particularly with netfilter-based
+NATs.
+
 ## v0.14.1
 
 A small protobuf format preparing the ability to estimate client-server RTT when
