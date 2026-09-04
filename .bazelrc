@@ -1,0 +1,4 @@
+# Bazel settings for building this repository standalone (CI, development).
+# Consumers depending on the module are unaffected by this file.
+common --enable_platform_specific_config
+test --test_output=errors

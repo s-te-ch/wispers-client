@@ -25,7 +25,7 @@ import (
 	"syscall"
 	"time"
 
-	wispersgo "dev.wispers.dev/connect"
+	wispersgo "github.com/s-te-ch/wispers-client/wrappers/go"
 )
 
 //==============================================================================

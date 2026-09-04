@@ -260,6 +260,21 @@ go run github.com/s-te-ch/wispers-client/wrappers/go/cmd/fetch-lib@latest
 go build ./...
 ```
 
+With Bazel, the repository is a module: add it to `MODULE.bazel` with a
+`git_override` (it is not on the Bazel Central Registry) and depend on
+`@wispers_connect//wrappers/go`. The prebuilt library comes along
+automatically; `--@wispers_connect//bazel:native=cargo` builds it from
+source instead, for working on the library itself.
+
+```starlark
+bazel_dep(name = "wispers_connect", version = "0.15.0")
+git_override(
+    module_name = "wispers_connect",
+    remote = "https://github.com/s-te-ch/wispers-client.git",
+    tag = "v0.15.0",
+)
+```
+
 **Kotlin/Android** (`wrappers/kotlin/`) — uses JNA. Add the dependency from
 Maven Central (native `.so` files are bundled in the AAR):
 

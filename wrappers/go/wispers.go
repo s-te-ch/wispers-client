@@ -3,11 +3,8 @@ package wispersgo
 //go:generate go run ./cmd/fetch-lib
 
 /*
-#cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/lib/darwin_arm64 -lwispers_connect
-#cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/lib/darwin_amd64 -lwispers_connect
-#cgo linux,arm64 LDFLAGS: -L${SRCDIR}/lib/linux_arm64 -lwispers_connect
-#cgo linux,amd64 LDFLAGS: -L${SRCDIR}/lib/linux_amd64 -lwispers_connect
-#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/lib/windows_amd64 -lwispers_connect
+// The library itself is linked per build system: cgo_link_gomod.go for
+// `go build`, cdeps for Bazel. These are the system libraries it needs.
 #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation -liconv -lresolv
 #cgo linux LDFLAGS: -lm -ldl -lpthread
 #cgo windows LDFLAGS: -lws2_32 -lbcrypt -luserenv -lntdll

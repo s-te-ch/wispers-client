@@ -149,6 +149,24 @@ jobs:
         working-directory: examples/go
         run: make
 
+  bazel:
+    name: Bazel module (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # bazelisk is preinstalled on the hosted runners and reads
+      # .bazelversion. The prebuilt archive of the release pinned in
+      # MODULE.bazel is fetched, so no Rust toolchain is needed here.
+      - name: Build and test through Bazel
+        run: |
+          bazel test //wrappers/go:go_test
+          bazel build //examples/go:wconnect-go //wispers-connect/proto:all
+
   python:
     name: Python wrapper
     runs-on: ubuntu-latest
