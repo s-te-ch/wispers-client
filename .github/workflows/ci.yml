@@ -156,27 +156,33 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    env:
-      # Windows: Bazel derives its MinGW toolchain (made eligible by the
-      # platforms .bazelrc selects) from the MSYS2 installation BAZEL_SH
-      # points into; the runner image ships one at C:\msys64.
-      BAZEL_SH: C:\msys64\usr\bin\bash.exe
     steps:
       - uses: actions/checkout@v4
-
-      # The image's MSYS2 comes without compilers; Bazel's MinGW toolchain
-      # expects gcc under <msys root>/mingw64/bin.
-      - name: Install MinGW gcc into MSYS2 (Windows)
-        if: runner.os == 'Windows'
-        run: C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed mingw-w64-x86_64-gcc"
 
       # bazelisk is preinstalled on the hosted runners and reads
       # .bazelversion. The prebuilt archive of the release pinned in
       # MODULE.bazel is fetched, so no Rust toolchain is needed here.
       - name: Build and test through Bazel
+        if: runner.os != 'Windows'
         run: |
           bazel test //wrappers/go:go_test
           bazel build //examples/go:wconnect-go //wispers-connect/proto:all
+
+      # Windows: the image's MSYS2 comes without compilers, and Bazel's
+      # MinGW toolchain expects gcc under <msys root>/mingw64/bin, the root
+      # being derived from BAZEL_SH.
+      - name: Install MinGW gcc into MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        run: C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed mingw-w64-x86_64-gcc"
+
+      - name: Build and test through Bazel (Windows)
+        if: runner.os == 'Windows'
+        env:
+          BAZEL_SH: C:\msys64\usr\bin\bash.exe
+        run: |
+          $env:PATH = "C:\msys64\mingw64\bin;C:\msys64\usr\bin;" + $env:PATH
+          bazel test //wrappers/go:go_test --toolchain_resolution_debug=@bazel_tools//tools/cpp:toolchain_type
+          bazel build //examples/go:wconnect-go
 
   python:
     name: Python wrapper

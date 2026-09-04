@@ -265,12 +265,12 @@ With Bazel, the repository is a module: add it to `MODULE.bazel` with a
 `@wispers_connect//wrappers/go`. The prebuilt library comes along
 automatically; `--@wispers_connect//bazel:native=cargo` builds it from
 source instead, for working on the library itself. On Windows, cgo needs a
-GCC-style toolchain and the archive is a MinGW build: build with
-`--host_platform=@rules_go//go/toolchain:windows_amd64_cgo
---platforms=@rules_go//go/toolchain:windows_amd64_cgo` (that platform is
-what makes Bazel's auto-configured MinGW toolchain eligible), with `BAZEL_SH`
-pointing at the bash of an MSYS2 installation that has
-`mingw-w64-x86_64-gcc` installed.
+GCC-style toolchain and the archive is a MinGW build; the `build:windows`
+section of this repository's `.bazelrc` shows the flags a consumer needs
+(register Bazel's auto-configured MinGW toolchain, build on rules_go's
+`windows_amd64_cgo` platform), with `BAZEL_SH` pointing at the bash of an
+MSYS2 installation that has `mingw-w64-x86_64-gcc` installed and
+`<msys root>\mingw64\bin` on `PATH` for the runtime DLLs.
 
 ```starlark
 bazel_dep(name = "wispers_connect", version = "0.15.0")

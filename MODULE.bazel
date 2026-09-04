@@ -28,6 +28,11 @@ bazel_dep(name = "bazel_skylib", version = "1.9.0")
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk", dev_dependency = True)
 go_sdk.download(version = "1.27.1")
 
+# Makes the auto-configured C toolchains addressable as @local_config_cc,
+# which .bazelrc needs to register the MinGW one on Windows.
+cc_configure = use_extension("@rules_cc//cc:extensions.bzl", "cc_configure_extension", dev_dependency = True)
+use_repo(cc_configure, "local_config_cc")
+
 ## Prebuilt native library, per platform ######################################
 
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
