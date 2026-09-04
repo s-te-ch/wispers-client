@@ -31,6 +31,9 @@ cc_library(
             "-lbcrypt",
             "-luserenv",
             "-lntdll",
+            # Link the MinGW runtime (libwinpthread, libgcc) statically, so
+            # a consumer's binary doesn't need MinGW's DLLs at run time.
+            "-static",
         ],
         "//conditions:default": [],
     }),

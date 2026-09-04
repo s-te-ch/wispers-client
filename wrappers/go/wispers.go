@@ -8,6 +8,9 @@ package wispersgo
 #cgo darwin LDFLAGS: -framework Security -framework CoreFoundation -liconv -lresolv
 #cgo linux LDFLAGS: -lm -ldl -lpthread
 #cgo windows LDFLAGS: -lws2_32 -lbcrypt -luserenv -lntdll
+// -static links the MinGW runtime (libwinpthread, libgcc) into the binary
+// instead of depending on MinGW's DLLs at run time.
+#cgo windows LDFLAGS: -static
 #include "wispers_helpers.h"
 #include <stdlib.h>
 */
