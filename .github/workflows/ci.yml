@@ -181,7 +181,7 @@ jobs:
           BAZEL_SH: C:\msys64\usr\bin\bash.exe
         run: |
           $env:PATH = "C:\msys64\mingw64\bin;C:\msys64\usr\bin;" + $env:PATH
-          bazel test //wrappers/go:go_test --toolchain_resolution_debug=@bazel_tools//tools/cpp:toolchain_type
+          bazel test //wrappers/go:go_test
           bazel build //examples/go:wconnect-go
 
   python:
