@@ -3,7 +3,11 @@
 common --enable_platform_specific_config
 test --test_output=errors
 
-# cgo needs a GCC-style compiler on Windows, and the prebuilt archive is a
-# MinGW build: select the MinGW toolchain Bazel auto-configures from
-# BAZEL_SH's MSYS2 installation (<msys root>/mingw64/bin).
-build:windows --compiler=mingw-gcc
+# cgo needs a GCC-style compiler on Windows. Under toolchain resolution the
+# auto-configured MinGW toolchain is only eligible when the EXECUTION
+# platform carries rules_cc's `mingw` constraint, which rules_go's
+# windows_amd64_cgo platform does; --compiler=mingw-gcc alone selects
+# nothing anymore. Bazel finds MinGW itself under <msys root>/mingw64/bin,
+# with the MSYS2 root taken from BAZEL_SH.
+build:windows --host_platform=@rules_go//go/toolchain:windows_amd64_cgo
+build:windows --platforms=@rules_go//go/toolchain:windows_amd64_cgo

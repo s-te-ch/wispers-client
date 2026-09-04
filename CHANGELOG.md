@@ -7,7 +7,8 @@
   library wired in through `cdeps`, under the same import path as the Go
   module. Prebuilt archives are fetched from this version's release;
   `--@wispers_connect//bazel:native=cargo` builds the host's library from
-  source instead. Windows needs `--compiler=mingw-gcc`. Not on the Bazel
+  source instead. Windows builds run on rules_go's `windows_amd64_cgo`
+  platform (MinGW). Not on the Bazel
   Central Registry: consume with
   `git_override`/`archive_override`. The wrapper's `-L`/`-l` cgo directives
   moved to `cgo_link_gomod.go`; `go build` users see no change.

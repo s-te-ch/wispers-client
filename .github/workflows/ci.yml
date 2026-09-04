@@ -157,9 +157,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     env:
-      # Windows: Bazel derives its MinGW toolchain (selected by
-      # .bazelrc's --compiler=mingw-gcc) from the MSYS2 installation
-      # BAZEL_SH points into; the runner image ships one at C:\msys64.
+      # Windows: Bazel derives its MinGW toolchain (made eligible by the
+      # platforms .bazelrc selects) from the MSYS2 installation BAZEL_SH
+      # points into; the runner image ships one at C:\msys64.
       BAZEL_SH: C:\msys64\usr\bin\bash.exe
     steps:
       - uses: actions/checkout@v4

@@ -39,7 +39,8 @@ config_setting(
 
 # One release archive per (os, arch). The Windows one is a MinGW build
 # (x86_64-pc-windows-gnu), as cgo on Windows needs a GCC-style toolchain
-# anyway: build with --compiler=mingw-gcc, not the MSVC default.
+# anyway: build on rules_go's windows_amd64_cgo platform (see .bazelrc),
+# not with the MSVC default.
 [
     (
         config_setting(
