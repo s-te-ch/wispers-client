@@ -183,7 +183,6 @@ jobs:
           $env:PATH = "C:\msys64\mingw64\bin;C:\msys64\usr\bin;" + $env:PATH
           bazel test //wrappers/go:go_test
           bazel build //examples/go:wconnect-go
-          C:\msys64\usr\bin\bash.exe -lc "/mingw64/bin/objdump -p bazel-bin/examples/go/wconnect-go_/wconnect-go.exe | grep 'DLL Name'"
 
   python:
     name: Python wrapper
