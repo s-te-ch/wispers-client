@@ -76,3 +76,6 @@ wrappers/python/wispers_connect/_native/
 
 # Claude Code
 .claude/
+
+# Bazel output symlinks (MODULE.bazel.lock is committed)
+bazel-*

@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Scheidegger Technology GmbH
+# SPDX-License-Identifier: MIT
+#
+# The Go example as a Bazel consumer of the wrapper: the same source the
+# Makefile builds with `go build`. CI builds it to prove the wiring.
+
+load("@rules_go//go:def.bzl", "go_binary")
+
+go_binary(
+    name = "wconnect-go",
+    srcs = ["main.go"],
+    deps = ["//wrappers/go"],
+)

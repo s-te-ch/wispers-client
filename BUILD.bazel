@@ -1,0 +1,68 @@
+# SPDX-FileCopyrightText: 2026 Scheidegger Technology GmbH
+# SPDX-License-Identifier: MIT
+
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# The native wispers-connect library for the target platform: the prebuilt
+# static archive of this release, or (with --//bazel:native=cargo) the
+# cdylib cargo builds from the tree for the host. The system libraries the
+# archive needs come along, so a C consumer links against this alone; the
+# Go wrapper repeats them in its cgo directives for the non-Bazel build.
+cc_library(
+    name = "native",
+    hdrs = ["wispers-connect/include/wispers_connect.h"],
+    includes = ["wispers-connect/include"],
+    linkopts = select({
+        "@platforms//os:macos": [
+            "-framework Security",
+            "-framework CoreFoundation",
+            "-liconv",
+            "-lresolv",
+        ],
+        "@platforms//os:linux": [
+            "-lm",
+            "-ldl",
+            "-lpthread",
+        ],
+        "@platforms//os:windows": [
+            "-lws2_32",
+            "-lbcrypt",
+            "-luserenv",
+            "-lntdll",
+            # Link the MinGW runtime (libwinpthread, libgcc) statically, so
+            # a consumer's binary doesn't need MinGW's DLLs at run time.
+            "-static",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = select(
+        {
+            "//bazel:native_cargo": ["//bazel:cargo_cdylib"],
+            "//bazel:prebuilt_darwin_arm64": ["//bazel:prebuilt_darwin_arm64_lib"],
+            "//bazel:prebuilt_darwin_amd64": ["//bazel:prebuilt_darwin_amd64_lib"],
+            "//bazel:prebuilt_linux_amd64": ["//bazel:prebuilt_linux_amd64_lib"],
+            "//bazel:prebuilt_linux_arm64": ["//bazel:prebuilt_linux_arm64_lib"],
+            "//bazel:prebuilt_windows_amd64": ["//bazel:prebuilt_windows_amd64_lib"],
+        },
+        no_match_error = "wispers-connect ships no prebuilt library for this platform " +
+                         "(macOS and Linux on x86_64/aarch64 and Windows on x86_64 are covered). " +
+                         "Build from source with --@wispers_connect//bazel:native=cargo on the host platform.",
+    ),
+)
+
+# Everything cargo needs to build the library from the tree (the cargo
+# mode's inputs; see //bazel:cargo_cdylib).
+filegroup(
+    name = "cargo_srcs",
+    srcs = [
+        "Cargo.lock",
+        "Cargo.toml",
+        "cargo_build.sh",
+    ] + glob([
+        "wispers-connect/**",
+        "wcadm/**",
+        "wconnect/**",
+    ]),
+)

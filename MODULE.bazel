@@ -1,0 +1,73 @@
+# Bazel module for wispers-connect. Consumers depend on the Go wrapper as
+# `@wispers_connect//wrappers/go` (importpath
+# github.com/s-te-ch/wispers-client/wrappers/go, the same as the Go module)
+# and get the native library wired in through `//:native`.
+#
+# The native library is the prebuilt static archive of THIS version's
+# GitHub release, one per platform, fetched on demand. The checksums are
+# stamped by scripts/build-release-artifacts.sh together with the version
+# (the same way Package.swift carries the xcframework checksum), so a
+# release commit pins its own archives. `--@wispers_connect//bazel:native=cargo`
+# swaps in a cargo build of the host's cdylib for library development.
+#
+# Not on the Bazel Central Registry; consume with git_override or
+# archive_override, or local_path_override on a checkout.
+
+module(
+    name = "wispers_connect",
+    version = "0.15.0",
+)
+
+bazel_dep(name = "rules_go", version = "0.63.0")
+bazel_dep(name = "rules_cc", version = "0.2.22")
+bazel_dep(name = "platforms", version = "1.1.0")
+bazel_dep(name = "bazel_skylib", version = "1.9.0")
+
+# The Go SDK is only declared when this module is the root (standalone
+# builds and CI); a consumer brings its own.
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk", dev_dependency = True)
+go_sdk.download(version = "1.27.1")
+
+# Makes the auto-configured C toolchains addressable as @local_config_cc,
+# which .bazelrc needs to register the MinGW one on Windows.
+cc_configure = use_extension("@rules_cc//cc:extensions.bzl", "cc_configure_extension", dev_dependency = True)
+use_repo(cc_configure, "local_config_cc")
+
+## Prebuilt native library, per platform ######################################
+
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "wispers_connect_lib_darwin_arm64",
+    downloaded_file_path = "libwispers_connect.a",
+    sha256 = "9b4b8f9f91b67172db81cc8e31ea240156d7d3341738e1ecf98ded59443e8ad0",
+    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.15.0/libwispers_connect-darwin_arm64.a"],
+)
+
+http_file(
+    name = "wispers_connect_lib_darwin_amd64",
+    downloaded_file_path = "libwispers_connect.a",
+    sha256 = "95e7d5507673db9137baf4fe033da42b8d59f4f0d3e360ba98ff342661d68fd7",
+    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.15.0/libwispers_connect-darwin_amd64.a"],
+)
+
+http_file(
+    name = "wispers_connect_lib_linux_amd64",
+    downloaded_file_path = "libwispers_connect.a",
+    sha256 = "b6dcbeb5f492705b0878497c1b0dfc38026da9c5d266f70e589f9f167c15228e",
+    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.15.0/libwispers_connect-linux_amd64.a"],
+)
+
+http_file(
+    name = "wispers_connect_lib_windows_amd64",
+    downloaded_file_path = "libwispers_connect.a",
+    sha256 = "277634311336d4a9072b1b8d7abffc1dfb665efe6bb3b3d5e9a216ee7c04edc3",
+    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.15.0/libwispers_connect-windows_amd64.a"],
+)
+
+http_file(
+    name = "wispers_connect_lib_linux_arm64",
+    downloaded_file_path = "libwispers_connect.a",
+    sha256 = "13f414bead87dbfa82327ec82782dfe32ddd17968ec767f0e519d30eec401f3f",
+    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.15.0/libwispers_connect-linux_arm64.a"],
+)

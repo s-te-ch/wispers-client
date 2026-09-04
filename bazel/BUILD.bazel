@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: 2026 Scheidegger Technology GmbH
+# SPDX-License-Identifier: MIT
+#
+# Where //:native gets its library from. Nothing here is meant to be
+# depended on directly.
+
+load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+
+package(default_visibility = ["//:__pkg__"])
+
+# --@wispers_connect//bazel:native=prebuilt (default) | cargo
+#
+# prebuilt: the release's static archive for the target platform.
+# cargo:    `cargo build` in the source tree, for working on the Rust
+#           library itself. Host platform only, and slow the first time.
+string_flag(
+    name = "native",
+    build_setting_default = "prebuilt",
+    values = [
+        "prebuilt",
+        "cargo",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+config_setting(
+    name = "native_cargo",
+    flag_values = {":native": "cargo"},
+)
+
+config_setting(
+    name = "native_prebuilt",
+    flag_values = {":native": "prebuilt"},
+)
+
+## Prebuilt archives ###########################################################
+
+# One release archive per (os, arch). The Windows one is a MinGW build
+# (x86_64-pc-windows-gnu), as cgo on Windows needs a GCC-style toolchain
+# anyway: build on rules_go's windows_amd64_cgo platform (see .bazelrc),
+# not with the MSVC default.
+[
+    (
+        config_setting(
+            name = os + "_" + arch,
+            constraint_values = [
+                "@platforms//os:" + os_constraint,
+                "@platforms//cpu:" + cpu_constraint,
+            ],
+        ),
+        selects.config_setting_group(
+            name = "prebuilt_" + os + "_" + arch,
+            match_all = [
+                ":native_prebuilt",
+                ":" + os + "_" + arch,
+            ],
+        ),
+        cc_import(
+            name = "prebuilt_" + os + "_" + arch + "_lib",
+            static_library = "@wispers_connect_lib_" + os + "_" + arch + "//file",
+        ),
+    )
+    for os, os_constraint, arch, cpu_constraint in [
+        ("darwin", "macos", "arm64", "aarch64"),
+        ("darwin", "macos", "amd64", "x86_64"),
+        ("linux", "linux", "arm64", "aarch64"),
+        ("linux", "linux", "amd64", "x86_64"),
+        ("windows", "windows", "amd64", "x86_64"),
+    ]
+]
+
+## Cargo build of the host's cdylib ############################################
+
+# Runs cargo in the source tree (local, unsandboxed: cargo keeps its own
+# incremental state under target/) and copies the resulting shared library
+# out. Same recipe the Makefiles and Gradle use.
+genrule(
+    name = "cargo_cdylib_darwin",
+    srcs = ["//:cargo_srcs"],
+    outs = ["libwispers_connect.dylib"],
+    cmd = "$(location //:cargo_build.sh) $@",
+    local = True,
+    tags = ["no-sandbox"],
+    tools = ["//:cargo_build.sh"],
+)
+
+genrule(
+    name = "cargo_cdylib_linux",
+    srcs = ["//:cargo_srcs"],
+    outs = ["libwispers_connect.so"],
+    cmd = "$(location //:cargo_build.sh) $@",
+    local = True,
+    tags = ["no-sandbox"],
+    tools = ["//:cargo_build.sh"],
+)
+
+cc_import(
+    name = "cargo_cdylib",
+    shared_library = select({
+        "@platforms//os:macos": ":cargo_cdylib_darwin",
+        "//conditions:default": ":cargo_cdylib_linux",
+    }),
+)

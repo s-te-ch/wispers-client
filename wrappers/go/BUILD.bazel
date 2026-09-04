@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 Scheidegger Technology GmbH
+# SPDX-License-Identifier: MIT
+
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# The Go wrapper, as `@wispers_connect//wrappers/go`. Same import path as
+# the Go module, so code builds unchanged either way. The native library
+# arrives through cdeps; cgo_link_gomod.go, which tells plain `go build`
+# where fetch-lib put it, is deliberately left out.
+go_library(
+    name = "go",
+    srcs = glob(
+        [
+            "*.go",
+            "*.h",
+        ],
+        exclude = [
+            "*_test.go",
+            "cgo_link_gomod.go",
+        ],
+    ),
+    cdeps = ["//:native"],
+    cgo = True,
+    importpath = "github.com/s-te-ch/wispers-client/wrappers/go",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "go_test",
+    srcs = glob(["*_test.go"]),
+    embed = [":go"],
+)

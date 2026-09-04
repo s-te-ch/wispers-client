@@ -149,6 +149,41 @@ jobs:
         working-directory: examples/go
         run: make
 
+  bazel:
+    name: Bazel module (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # bazelisk is preinstalled on the hosted runners and reads
+      # .bazelversion. The prebuilt archive of the release pinned in
+      # MODULE.bazel is fetched, so no Rust toolchain is needed here.
+      - name: Build and test through Bazel
+        if: runner.os != 'Windows'
+        run: |
+          bazel test //wrappers/go:go_test
+          bazel build //examples/go:wconnect-go //wispers-connect/proto:all
+
+      # Windows: the image's MSYS2 comes without compilers, and Bazel's
+      # MinGW toolchain expects gcc under <msys root>/mingw64/bin, the root
+      # being derived from BAZEL_SH.
+      - name: Install MinGW gcc into MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        run: C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed mingw-w64-x86_64-gcc"
+
+      - name: Build and test through Bazel (Windows)
+        if: runner.os == 'Windows'
+        env:
+          BAZEL_SH: C:\msys64\usr\bin\bash.exe
+        run: |
+          $env:PATH = "C:\msys64\mingw64\bin;C:\msys64\usr\bin;" + $env:PATH
+          bazel test //wrappers/go:go_test
+          bazel build //examples/go:wconnect-go
+
   python:
     name: Python wrapper
     runs-on: ubuntu-latest

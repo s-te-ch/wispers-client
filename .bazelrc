@@ -1,0 +1,16 @@
+# Bazel settings for building this repository standalone (CI, development).
+# Consumers depending on the module are unaffected by this file.
+common --enable_platform_specific_config
+test --test_output=errors
+
+# cgo needs a GCC-style compiler on Windows. Bazel auto-configures a MinGW
+# toolchain (gcc under <msys root>/mingw64/bin, the MSYS2 root taken from
+# BAZEL_SH) but registers only the MSVC ones (bazelbuild/bazel#10529), so it
+# is added here; and it is only eligible when the execution platform carries
+# rules_cc's `mingw` constraint, which rules_go's windows_amd64_cgo platform
+# does. Same recipe as rules_go's own .bazelrc.
+build:windows --extra_toolchains=@local_config_cc//:cc-toolchain-x64_windows_mingw
+build:windows --host_platform=@rules_go//go/toolchain:windows_amd64_cgo
+build:windows --platforms=@rules_go//go/toolchain:windows_amd64_cgo
+# MinGW-linked test binaries need the MinGW runtime DLLs, found via PATH.
+test:windows --test_env=PATH

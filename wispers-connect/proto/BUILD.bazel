@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 Scheidegger Technology GmbH
+# SPDX-License-Identifier: MIT
+#
+# The hub's wire protocol, for consumers that generate their own stubs
+# (the Wispers hub does, in Go). Only proto_library here: no language
+# bindings, so this module pulls in no protoc plugins.
+
+package(default_visibility = ["//visibility:public"])
+
+proto_library(
+    name = "hub_proto",
+    srcs = ["hub.proto"],
+    strip_import_prefix = "/wispers-connect/proto",
+    deps = [":roster_proto"],
+)
+
+proto_library(
+    name = "roster_proto",
+    srcs = ["roster.proto"],
+    strip_import_prefix = "/wispers-connect/proto",
+)

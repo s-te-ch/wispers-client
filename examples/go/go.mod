@@ -2,6 +2,6 @@ module dev.wispers.dev/connect/examples/go
 
 go 1.24
 
-require dev.wispers.dev/connect v0.0.0
+require github.com/s-te-ch/wispers-client/wrappers/go v0.0.0
 
-replace dev.wispers.dev/connect => ../../wrappers/go
+replace github.com/s-te-ch/wispers-client/wrappers/go => ../../wrappers/go
