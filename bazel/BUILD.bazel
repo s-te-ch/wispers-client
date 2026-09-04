@@ -37,6 +37,9 @@ config_setting(
 
 ## Prebuilt archives ###########################################################
 
+# One release archive per (os, arch). The Windows one is a MinGW build
+# (x86_64-pc-windows-gnu), as cgo on Windows needs a GCC-style toolchain
+# anyway: build with --compiler=mingw-gcc, not the MSVC default.
 [
     (
         config_setting(
@@ -58,13 +61,12 @@ config_setting(
             static_library = "@wispers_connect_lib_" + os + "_" + arch + "//file",
         ),
     )
-    for os, os_constraint in [
-        ("darwin", "macos"),
-        ("linux", "linux"),
-    ]
-    for arch, cpu_constraint in [
-        ("arm64", "aarch64"),
-        ("amd64", "x86_64"),
+    for os, os_constraint, arch, cpu_constraint in [
+        ("darwin", "macos", "arm64", "aarch64"),
+        ("darwin", "macos", "amd64", "x86_64"),
+        ("linux", "linux", "arm64", "aarch64"),
+        ("linux", "linux", "amd64", "x86_64"),
+        ("windows", "windows", "amd64", "x86_64"),
     ]
 ]
 

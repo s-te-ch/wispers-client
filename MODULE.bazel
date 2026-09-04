@@ -54,6 +54,13 @@ http_file(
 )
 
 http_file(
+    name = "wispers_connect_lib_windows_amd64",
+    downloaded_file_path = "libwispers_connect.a",
+    sha256 = "277634311336d4a9072b1b8d7abffc1dfb665efe6bb3b3d5e9a216ee7c04edc3",
+    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.15.0/libwispers_connect-windows_amd64.a"],
+)
+
+http_file(
     name = "wispers_connect_lib_linux_arm64",
     downloaded_file_path = "libwispers_connect.a",
     sha256 = "13f414bead87dbfa82327ec82782dfe32ddd17968ec767f0e519d30eec401f3f",

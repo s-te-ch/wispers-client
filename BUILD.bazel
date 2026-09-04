@@ -26,6 +26,12 @@ cc_library(
             "-ldl",
             "-lpthread",
         ],
+        "@platforms//os:windows": [
+            "-lws2_32",
+            "-lbcrypt",
+            "-luserenv",
+            "-lntdll",
+        ],
         "//conditions:default": [],
     }),
     deps = select(
@@ -35,11 +41,11 @@ cc_library(
             "//bazel:prebuilt_darwin_amd64": ["//bazel:prebuilt_darwin_amd64_lib"],
             "//bazel:prebuilt_linux_amd64": ["//bazel:prebuilt_linux_amd64_lib"],
             "//bazel:prebuilt_linux_arm64": ["//bazel:prebuilt_linux_arm64_lib"],
+            "//bazel:prebuilt_windows_amd64": ["//bazel:prebuilt_windows_amd64_lib"],
         },
         no_match_error = "wispers-connect ships no prebuilt library for this platform " +
-                         "(macOS and Linux on x86_64/aarch64 are covered; Windows is not yet " +
-                         "wired up for Bazel). Build from source with --@wispers_connect//bazel:native=cargo " +
-                         "on the host platform.",
+                         "(macOS and Linux on x86_64/aarch64 and Windows on x86_64 are covered). " +
+                         "Build from source with --@wispers_connect//bazel:native=cargo on the host platform.",
     ),
 )
 

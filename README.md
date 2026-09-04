@@ -264,7 +264,10 @@ With Bazel, the repository is a module: add it to `MODULE.bazel` with a
 `git_override` (it is not on the Bazel Central Registry) and depend on
 `@wispers_connect//wrappers/go`. The prebuilt library comes along
 automatically; `--@wispers_connect//bazel:native=cargo` builds it from
-source instead, for working on the library itself.
+source instead, for working on the library itself. On Windows, build with
+`--compiler=mingw-gcc` (cgo needs a GCC-style toolchain there, and the
+archive is a MinGW build); Bazel finds MinGW through the MSYS2 installation
+`BAZEL_SH` points into.
 
 ```starlark
 bazel_dep(name = "wispers_connect", version = "0.15.0")

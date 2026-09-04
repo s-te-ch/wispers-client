@@ -2,3 +2,8 @@
 # Consumers depending on the module are unaffected by this file.
 common --enable_platform_specific_config
 test --test_output=errors
+
+# cgo needs a GCC-style compiler on Windows, and the prebuilt archive is a
+# MinGW build: select the MinGW toolchain Bazel auto-configures from
+# BAZEL_SH's MSYS2 installation (<msys root>/mingw64/bin).
+build:windows --compiler=mingw-gcc
