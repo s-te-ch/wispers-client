@@ -1,19 +1,13 @@
 # Changelog
 
-## Unreleased
+## v0.16.0
+
+Bazel support for Go (no other languages yet, sorry).
 
 - **Bazel module.** The repository is now a Bazel module (`wispers_connect`):
   `@wispers_connect//wrappers/go` is the Go wrapper with the prebuilt native
-  library wired in through `cdeps`, under the same import path as the Go
-  module. Prebuilt archives are fetched from this version's release;
-  `--@wispers_connect//bazel:native=cargo` builds the host's library from
-  source instead. Windows builds run on rules_go's `windows_amd64_cgo`
-  platform (MinGW). Not on the Bazel
-  Central Registry: consume with
-  `git_override`/`archive_override`. The wrapper's `-L`/`-l` cgo directives
-  moved to `cgo_link_gomod.go`; `go build` users see no change.
-- **Go example** now imports `github.com/s-te-ch/wispers-client/wrappers/go`
-  (was the placeholder `dev.wispers.dev/connect`).
+  library wired in through `cdeps`. If you prefer, `--@wispers_connect//bazel:native=cargo`
+  builds from source instead. Consume with `git_override`/`archive_override`.
 
 ## v0.15.0
 

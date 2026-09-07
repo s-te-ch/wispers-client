@@ -260,26 +260,21 @@ go run github.com/s-te-ch/wispers-client/wrappers/go/cmd/fetch-lib@latest
 go build ./...
 ```
 
-With Bazel, the repository is a module: add it to `MODULE.bazel` with a
-`git_override` (it is not on the Bazel Central Registry) and depend on
-`@wispers_connect//wrappers/go`. The prebuilt library comes along
-automatically; `--@wispers_connect//bazel:native=cargo` builds it from
-source instead, for working on the library itself. On Windows, cgo needs a
-GCC-style toolchain and the archive is a MinGW build; the `build:windows`
-section of this repository's `.bazelrc` shows the flags a consumer needs
-(register Bazel's auto-configured MinGW toolchain, build on rules_go's
-`windows_amd64_cgo` platform), with `BAZEL_SH` pointing at the bash of an
-MSYS2 installation that has `mingw-w64-x86_64-gcc` installed and
-`<msys root>\mingw64\bin` on `PATH` for the runtime DLLs.
+There's also Go-only (for now) Bazel support. Add the library to your
+`MODULE.bazel` with a `git_override` like this
 
 ```starlark
 bazel_dep(name = "wispers_connect", version = "0.15.0")
 git_override(
-    module_name = "wispers_connect",
-    remote = "https://github.com/s-te-ch/wispers-client.git",
-    tag = "v0.15.0",
+	module_name = "wispers_connect",
+	remote = "https://github.com/s-te-ch/wispers-client.git",
+	tag = "v0.15.0",
 )
 ```
+
+and depend on `@wispers_connect//wrappers/go`. On Windows, cgo needs a GCC-style
+toolchain. See the `build:windows` section of this repository's `.bazelrc` for
+the flags a consumer needs.
 
 **Kotlin/Android** (`wrappers/kotlin/`) — uses JNA. Add the dependency from
 Maven Central (native `.so` files are bundled in the AAR):
