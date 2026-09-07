@@ -40,34 +40,34 @@ http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_
 http_file(
     name = "wispers_connect_lib_darwin_arm64",
     downloaded_file_path = "libwispers_connect.a",
-    sha256 = "9b4b8f9f91b67172db81cc8e31ea240156d7d3341738e1ecf98ded59443e8ad0",
-    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.15.0/libwispers_connect-darwin_arm64.a"],
+    sha256 = "4a50fcdd59ad25d62c3c4aa717c07369f441acef65d7bfefa131dbcb7d8558e3",
+    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.16.0-rc1/libwispers_connect-darwin_arm64.a"],
 )
 
 http_file(
     name = "wispers_connect_lib_darwin_amd64",
     downloaded_file_path = "libwispers_connect.a",
-    sha256 = "95e7d5507673db9137baf4fe033da42b8d59f4f0d3e360ba98ff342661d68fd7",
-    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.15.0/libwispers_connect-darwin_amd64.a"],
+    sha256 = "ff5fb1d850b68cc9512a2d7c95f4b0fd53b1fcc1af8350d9b89af09c1380fbb7",
+    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.16.0-rc1/libwispers_connect-darwin_amd64.a"],
 )
 
 http_file(
     name = "wispers_connect_lib_linux_amd64",
     downloaded_file_path = "libwispers_connect.a",
-    sha256 = "b6dcbeb5f492705b0878497c1b0dfc38026da9c5d266f70e589f9f167c15228e",
-    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.15.0/libwispers_connect-linux_amd64.a"],
+    sha256 = "2f0a8dc778cfdd7204a1749a8347fc4f73897d49feba48b7d3b1fb9e8357a171",
+    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.16.0-rc1/libwispers_connect-linux_amd64.a"],
 )
 
 http_file(
     name = "wispers_connect_lib_windows_amd64",
     downloaded_file_path = "libwispers_connect.a",
-    sha256 = "277634311336d4a9072b1b8d7abffc1dfb665efe6bb3b3d5e9a216ee7c04edc3",
-    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.15.0/libwispers_connect-windows_amd64.a"],
+    sha256 = "530d40d88832cfa5624ad3bc775f3f851a57fb96f52ea31de5d014fdcc53b866",
+    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.16.0-rc1/libwispers_connect-windows_amd64.a"],
 )
 
 http_file(
     name = "wispers_connect_lib_linux_arm64",
     downloaded_file_path = "libwispers_connect.a",
-    sha256 = "13f414bead87dbfa82327ec82782dfe32ddd17968ec767f0e519d30eec401f3f",
-    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.15.0/libwispers_connect-linux_arm64.a"],
+    sha256 = "c84ce990e31fea14ccc97b7c8afb884b1a94a6ae4937ea32a2a5c719beb8fa81",
+    urls = ["https://github.com/s-te-ch/wispers-client/releases/download/v0.16.0-rc1/libwispers_connect-linux_arm64.a"],
 )
