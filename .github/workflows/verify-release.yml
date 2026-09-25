@@ -1,4 +1,4 @@
-name: Verify release
+name: Verify release (Windows)
 
 # Manually-triggered workflow that exercises the Windows-specific install
 # paths added in 0.8.1: install.ps1, cargo-binstall metadata, direct-download
@@ -6,9 +6,7 @@ name: Verify release
 # Windows static lib via a consumer build.
 #
 # macOS / Linux / Android / iOS verifications are done locally — only the
-# Windows paths are hard to test without a Windows machine. The exception is
-# the Bazel module, checked on all three platforms: its prebuilt archives only
-# match the sources at a release tag, so CI can't check them on every push.
+# Windows paths are hard to test without a Windows machine.
 
 on:
   workflow_dispatch:
@@ -167,44 +165,3 @@ jobs:
           EOF
           go build -o smoke.exe .
           ./smoke.exe
-
-  bazel-prebuilt:
-    name: Bazel module, prebuilt archives (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      # The release tag sits on the commit that stamps MODULE.bazel with this
-      # release's archive URLs and checksums, so sources and archives match.
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.version }}
-
-      # bazelisk is preinstalled on the hosted runners and reads
-      # .bazelversion. The prebuilt archive of the release pinned in
-      # MODULE.bazel is fetched, so no Rust toolchain is needed here.
-      - name: Build and test through Bazel
-        if: runner.os != 'Windows'
-        run: |
-          bazel test //wrappers/go:go_test
-          bazel build //examples/go:wconnect-go //wispers-connect/proto:all
-
-      # Windows: the image's MSYS2 comes without compilers, and Bazel's
-      # MinGW toolchain expects gcc under <msys root>/mingw64/bin, the root
-      # being derived from BAZEL_SH.
-      - name: Install MinGW gcc into MSYS2 (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed mingw-w64-x86_64-gcc"
-
-      - name: Build and test through Bazel (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          BAZEL_SH: C:\msys64\usr\bin\bash.exe
-        run: |
-          $env:PATH = "C:\msys64\mingw64\bin;C:\msys64\usr\bin;" + $env:PATH
-          bazel test //wrappers/go:go_test
-          bazel build //examples/go:wconnect-go

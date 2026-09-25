@@ -178,9 +178,9 @@ jobs:
       # the prebuilt archives pinned in MODULE.bazel belong to the last
       # release, so they lack any C API added since and can't link against
       # the wrapper sources here. The prebuilt path is checked per release by
-      # verify-release.yml instead. Windows is only checked there, because
-      # cargo mode supports the host toolchain only and Bazel's Go on Windows
-      # uses MinGW.
+      # verify-bazel-prebuilt.yml instead. Windows is only checked there,
+      # because cargo mode supports the host toolchain only and Bazel's Go on
+      # Windows uses MinGW.
       - name: Build and test through Bazel
         run: |
           bazel test //wrappers/go:go_test --@wispers_connect//bazel:native=cargo
