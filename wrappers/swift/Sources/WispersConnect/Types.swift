@@ -120,6 +120,16 @@ public struct ServingStatus: Sendable {
     public let nodesAwaitingCosign: [Int32]
 }
 
+/// How the peer closed a QUIC connection.
+public struct QuicCloseInfo: Sendable {
+    /// `true` if the peer's application closed the connection, `false` if its
+    /// QUIC stack did; `errorCode` is then a QUIC transport error code
+    /// (RFC 9000 section 20.1).
+    public let closedByApp: Bool
+    public let errorCode: UInt64
+    public let reason: String
+}
+
 public struct RegistrationInfo: Sendable {
     public let connectivityGroupId: String
     public let nodeNumber: Int32

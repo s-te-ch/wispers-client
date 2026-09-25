@@ -960,6 +960,51 @@ static int test_quic_close_null_handle(void) {
     return 0;
 }
 
+static int test_quic_close_with_error_null_handle(void) {
+    TEST("quic_close_with_error rejects NULL handle");
+
+    WispersStatus status = wispers_quic_connection_close_with_error_async(
+        NULL, 42, "bye", NULL, dummy_callback);
+
+    if (status != WISPERS_STATUS_NULL_POINTER) FAIL("expected NULL_POINTER");
+
+    PASS();
+    return 0;
+}
+
+static int test_quic_ping_null_handle(void) {
+    TEST("quic_ping rejects NULL handle");
+
+    WispersStatus status = wispers_quic_connection_ping_async(
+        NULL, 1000, NULL, dummy_callback);
+
+    if (status != WISPERS_STATUS_NULL_POINTER) FAIL("expected NULL_POINTER");
+
+    PASS();
+    return 0;
+}
+
+static int test_quic_peer_close_info_null_handle(void) {
+    TEST("quic_peer_close_info returns NULL for NULL handle");
+
+    if (wispers_quic_connection_peer_close_info(NULL) != NULL) FAIL("expected NULL");
+
+    PASS();
+    return 0;
+}
+
+static int test_quic_close_info_null_safe(void) {
+    TEST("quic_close_info accessors handle NULL safely");
+
+    if (wispers_quic_close_info_closed_by_app(NULL)) FAIL("expected false");
+    if (wispers_quic_close_info_error_code(NULL) != 0) FAIL("expected 0");
+    if (wispers_quic_close_info_reason(NULL) != NULL) FAIL("expected NULL");
+    wispers_quic_close_info_free(NULL);
+
+    PASS();
+    return 0;
+}
+
 static int test_quic_connection_free_null_safe(void) {
     TEST("quic_connection_free handles NULL safely");
 
@@ -1146,6 +1191,10 @@ int main(void) {
     failures += test_quic_open_stream_null_handle();
     failures += test_quic_accept_stream_null_handle();
     failures += test_quic_close_null_handle();
+    failures += test_quic_close_with_error_null_handle();
+    failures += test_quic_ping_null_handle();
+    failures += test_quic_peer_close_info_null_handle();
+    failures += test_quic_close_info_null_safe();
     failures += test_quic_connection_free_null_safe();
     failures += test_quic_stream_free_null_safe();
 

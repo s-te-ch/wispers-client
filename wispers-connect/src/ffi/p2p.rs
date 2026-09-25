@@ -1,9 +1,9 @@
 //! FFI bindings for P2P connections.
 
 use super::runtime;
-use super::types::{CallbackContext, WispersCallback, WispersNodeHandle};
+use super::types::{CallbackContext, WispersCallback, WispersNodeHandle, c_str_to_string};
 use crate::errors::WispersStatus;
-use crate::p2p::{P2pError, QuicConnection, QuicStream, UdpConnection};
+use crate::p2p::{P2pError, QuicCloseInfo, QuicConnection, QuicStream, UdpConnection};
 use std::ffi::{CString, c_void};
 use std::os::raw::{c_char, c_int};
 use std::ptr;
@@ -18,6 +18,7 @@ fn p2p_error_to_status(e: &P2pError) -> WispersStatus {
         P2pError::Hub(h) if h.is_peer_rejected() => WispersStatus::PeerRejected,
         P2pError::Hub(h) if h.is_not_found() => WispersStatus::NotFound,
         P2pError::NotActivated => WispersStatus::InvalidState,
+        P2pError::Timeout => WispersStatus::Timeout,
         _ => WispersStatus::ConnectionFailed,
     }
 }
@@ -439,7 +440,56 @@ pub extern "C" fn wispers_quic_connection_accept_stream_async(
     WispersStatus::Success
 }
 
+/// Check that the peer of a QUIC connection is still reachable.
+///
+/// Sends a QUIC PING and waits for the peer's transport to acknowledge it.
+/// Fails with `Timeout` if no acknowledgement arrives within `timeout_ms`, and
+/// with `ConnectionFailed` if the connection is closed or closing.
+///
+/// The connection handle is NOT consumed.
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_quic_connection_ping_async(
+    handle: *mut WispersQuicConnectionHandle,
+    timeout_ms: u32,
+    ctx: *mut c_void,
+    callback: WispersCallback,
+) -> WispersStatus {
+    if handle.is_null() {
+        return WispersStatus::NullPointer;
+    }
+
+    let callback = match callback {
+        Some(cb) => cb,
+        None => return WispersStatus::MissingCallback,
+    };
+
+    let ctx = CallbackContext(ctx);
+    let conn_ptr = SendableQuicConnPtr(handle);
+
+    runtime::spawn(async move {
+        let conn = unsafe { conn_ptr.get() };
+        let timeout = std::time::Duration::from_millis(u64::from(timeout_ms));
+        let result = conn.ping(timeout).await;
+
+        match result {
+            Ok(_rtt) => unsafe {
+                callback(ctx.ptr(), WispersStatus::Success, ptr::null());
+            },
+            Err(e) => {
+                let detail = CString::new(e.to_string()).unwrap_or_default();
+                unsafe {
+                    callback(ctx.ptr(), p2p_error_to_status(&e), detail.as_ptr());
+                }
+            }
+        }
+    });
+
+    WispersStatus::Success
+}
+
 /// Close a QUIC connection.
+///
+/// The peer sees error code 0 and no reason.
 ///
 /// The connection handle is CONSUMED by this call.
 /// The callback is invoked when the close operation completes.
@@ -458,13 +508,68 @@ pub extern "C" fn wispers_quic_connection_close_async(
         None => return WispersStatus::MissingCallback,
     };
 
+    spawn_quic_close(handle, ctx, callback, QuicConnection::close);
+
+    WispersStatus::Success
+}
+
+/// Close a QUIC connection, with error code and reason.
+///
+/// `error_code` must be at most 2^62-1 (QUIC's limit). `reason` may be NULL (no
+/// reason) and is truncated to 1024 bytes.
+///
+/// The connection handle is CONSUMED by this call, unless it returns an error
+/// status. The callback is invoked when the close operation completes.
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_quic_connection_close_with_error_async(
+    handle: *mut WispersQuicConnectionHandle,
+    error_code: u64,
+    reason: *const c_char,
+    ctx: *mut c_void,
+    callback: WispersCallback,
+) -> WispersStatus {
+    if handle.is_null() {
+        return WispersStatus::NullPointer;
+    }
+
+    let callback = match callback {
+        Some(cb) => cb,
+        None => return WispersStatus::MissingCallback,
+    };
+
+    let reason = if reason.is_null() {
+        String::new()
+    } else {
+        match c_str_to_string(reason) {
+            Ok(r) => r,
+            Err(status) => return status,
+        }
+    };
+
+    spawn_quic_close(handle, ctx, callback, move |conn| async move {
+        conn.close_with_error(error_code, &reason).await
+    });
+
+    WispersStatus::Success
+}
+
+/// Consume `handle` and run `close` on its connection in the background,
+/// reporting the outcome through `callback`. Arguments must already be
+/// validated. From here on the handle belongs to us.
+fn spawn_quic_close<F, Fut>(
+    handle: *mut WispersQuicConnectionHandle,
+    ctx: *mut c_void,
+    callback: unsafe extern "C" fn(*mut c_void, WispersStatus, *const c_char),
+    close: F,
+) where
+    F: FnOnce(QuicConnection) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<(), P2pError>> + Send,
+{
     let ctx = CallbackContext(ctx);
-    let conn = unsafe { Box::from_raw(handle) };
+    let conn = unsafe { Box::from_raw(handle) }.0;
 
     runtime::spawn(async move {
-        let result = conn.0.close().await;
-
-        match result {
+        match close(conn).await {
             Ok(()) => unsafe {
                 callback(ctx.ptr(), WispersStatus::Success, ptr::null());
             },
@@ -476,8 +581,83 @@ pub extern "C" fn wispers_quic_connection_close_async(
             }
         }
     });
+}
 
-    WispersStatus::Success
+/// How the peer closed a QUIC connection. Opaque; read with the
+/// `wispers_quic_close_info_*` accessors, free with `wispers_quic_close_info_free`.
+pub struct WispersQuicCloseInfo {
+    closed_by_app: bool,
+    error_code: u64,
+    reason: CString,
+}
+
+/// How the peer closed the connection, or NULL if it hasn't (or if `handle` is
+/// NULL).
+///
+/// Non-NULL as soon as the peer's close arrives; stream operations on the
+/// connection then fail with `ConnectionFailed`. The result must be freed with
+/// `wispers_quic_close_info_free`.
+///
+/// The connection handle is NOT consumed.
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_quic_connection_peer_close_info(
+    handle: *mut WispersQuicConnectionHandle,
+) -> *mut WispersQuicCloseInfo {
+    if handle.is_null() {
+        return ptr::null_mut();
+    }
+    let conn = unsafe { &(*handle).0 };
+    match conn.peer_close_info() {
+        Some(info) => Box::into_raw(Box::new(WispersQuicCloseInfo::from_close_info(info))),
+        None => ptr::null_mut(),
+    }
+}
+
+impl WispersQuicCloseInfo {
+    fn from_close_info(info: QuicCloseInfo) -> Self {
+        // The reason came off the wire, so it may contain NULs.
+        let reason = CString::new(info.reason.replace('\0', "\u{FFFD}")).unwrap_or_default();
+        Self {
+            closed_by_app: info.closed_by_app,
+            error_code: info.error_code,
+            reason,
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_quic_close_info_free(info: *mut WispersQuicCloseInfo) {
+    if info.is_null() {
+        return;
+    }
+    // SAFETY: allocated via Box::into_raw in wispers_quic_connection_peer_close_info.
+    drop(unsafe { Box::from_raw(info) });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_quic_close_info_closed_by_app(info: *const WispersQuicCloseInfo) -> bool {
+    if info.is_null() {
+        return false;
+    }
+    unsafe { (*info).closed_by_app }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_quic_close_info_error_code(info: *const WispersQuicCloseInfo) -> u64 {
+    if info.is_null() {
+        return 0;
+    }
+    unsafe { (*info).error_code }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn wispers_quic_close_info_reason(
+    info: *const WispersQuicCloseInfo,
+) -> *const c_char {
+    if info.is_null() {
+        return ptr::null();
+    }
+    unsafe { (*info).reason.as_ptr() }
 }
 
 //------------------------------------------------------------------------------

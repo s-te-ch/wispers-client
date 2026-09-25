@@ -229,6 +229,17 @@ interface NativeLibrary : Library {
     ): Int
 
     /**
+     * Check that the peer is still reachable (QUIC PING + ACK).
+     * A timeoutMs of 0 means no timeout of its own.
+     */
+    fun wispers_quic_connection_ping_async(
+        handle: Pointer?,
+        timeoutMs: Int,
+        ctx: Pointer?,
+        callback: NativeCallbacks.WispersCallback?
+    ): Int
+
+    /**
      * Close a QUIC connection (consumes handle).
      */
     fun wispers_quic_connection_close_async(
@@ -236,6 +247,32 @@ interface NativeLibrary : Library {
         ctx: Pointer?,
         callback: NativeCallbacks.WispersCallback?
     ): Int
+
+    /**
+     * Close a QUIC connection with an application error code and reason
+     * (consumes handle unless the returned status is an error).
+     */
+    fun wispers_quic_connection_close_with_error_async(
+        handle: Pointer?,
+        errorCode: Long,
+        reason: String?,
+        ctx: Pointer?,
+        callback: NativeCallbacks.WispersCallback?
+    ): Int
+
+    /**
+     * How the peer closed the connection, or null if it hasn't.
+     * Free the result with wispers_quic_close_info_free.
+     */
+    fun wispers_quic_connection_peer_close_info(handle: Pointer?): Pointer?
+
+    fun wispers_quic_close_info_free(info: Pointer?)
+
+    // ---- QUIC close info accessors ----------------------------------------
+
+    fun wispers_quic_close_info_closed_by_app(info: Pointer?): Byte
+    fun wispers_quic_close_info_error_code(info: Pointer?): Long
+    fun wispers_quic_close_info_reason(info: Pointer?): Pointer?
 
     /**
      * Free a QUIC connection handle.

@@ -93,6 +93,18 @@ class ServingStatus:
 
 
 @dataclass(frozen=True)
+class QuicCloseInfo:
+    """How the peer closed a QUIC connection."""
+
+    #: True if the peer's application closed the connection; False if its QUIC
+    #: stack did, in which case error_code is a QUIC transport error code
+    #: (RFC 9000 section 20.1).
+    closed_by_app: bool
+    error_code: int
+    reason: str
+
+
+@dataclass(frozen=True)
 class RegistrationInfo:
     connectivity_group_id: str
     node_number: int

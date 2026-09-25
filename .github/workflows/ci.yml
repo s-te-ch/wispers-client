@@ -155,34 +155,43 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler libclang-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
 
       # bazelisk is preinstalled on the hosted runners and reads
-      # .bazelversion. The prebuilt archive of the release pinned in
-      # MODULE.bazel is fetched, so no Rust toolchain is needed here.
+      # .bazelversion. The native library is built from this tree with cargo:
+      # the prebuilt archives pinned in MODULE.bazel belong to the last
+      # release, so they lack any C API added since and can't link against
+      # the wrapper sources here. The prebuilt path is checked per release by
+      # verify-bazel-prebuilt.yml instead. Windows is only checked there,
+      # because cargo mode supports the host toolchain only and Bazel's Go on
+      # Windows uses MinGW.
       - name: Build and test through Bazel
-        if: runner.os != 'Windows'
         run: |
-          bazel test //wrappers/go:go_test
-          bazel build //examples/go:wconnect-go //wispers-connect/proto:all
+          bazel test //wrappers/go:go_test --@wispers_connect//bazel:native=cargo
+          bazel build //examples/go:wconnect-go --@wispers_connect//bazel:native=cargo
 
-      # Windows: the image's MSYS2 comes without compilers, and Bazel's
-      # MinGW toolchain expects gcc under <msys root>/mingw64/bin, the root
-      # being derived from BAZEL_SH.
-      - name: Install MinGW gcc into MSYS2 (Windows)
-        if: runner.os == 'Windows'
-        run: C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed mingw-w64-x86_64-gcc"
-
-      - name: Build and test through Bazel (Windows)
-        if: runner.os == 'Windows'
-        env:
-          BAZEL_SH: C:\msys64\usr\bin\bash.exe
-        run: |
-          $env:PATH = "C:\msys64\mingw64\bin;C:\msys64\usr\bin;" + $env:PATH
-          bazel test //wrappers/go:go_test
-          bazel build //examples/go:wconnect-go
+      # proto_library makes Bazel compile protoc from source, which takes
+      # minutes. The descriptors are platform-independent, so one OS suffices.
+      # Same flag as above, or Bazel would discard its analysis cache.
+      - name: Build proto targets through Bazel
+        if: runner.os == 'Linux'
+        run: bazel build //wispers-connect/proto:all --@wispers_connect//bazel:native=cargo
 
   python:
     name: Python wrapper
@@ -233,7 +242,12 @@ jobs:
           java-version: "17"
           cache: gradle
 
+      # The default packages include the legacy `tools`, which current
+      # cmdline-tools no longer provide. The build only needs the SDK platform
+      # already on the runner.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Run Kotlin wrapper unit tests
         working-directory: wrappers/kotlin

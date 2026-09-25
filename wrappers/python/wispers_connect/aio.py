@@ -9,7 +9,14 @@ from . import quic as _quic_mod
 from . import serving as _serving_mod
 from . import storage as _storage_mod
 from . import udp as _udp_mod
-from .types import GroupInfo, NodeState, RegistrationInfo, ServingStatus, TtlProfile
+from .types import (
+    GroupInfo,
+    NodeState,
+    QuicCloseInfo,
+    RegistrationInfo,
+    ServingStatus,
+    TtlProfile,
+)
 
 
 class NodeStorage:
@@ -220,8 +227,18 @@ class QuicConnection:
         sync_stream = await loop.run_in_executor(None, self._inner.accept_stream)
         return QuicStream(sync_stream)
 
+    async def ping(self, timeout: float) -> None:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._inner.ping, timeout)
+
+    def peer_close_info(self) -> QuicCloseInfo | None:
+        return self._inner.peer_close_info()
+
     def close(self) -> None:
         self._inner.close()
+
+    def close_with_error(self, error_code: int, reason: str = "") -> None:
+        self._inner.close_with_error(error_code, reason)
 
     async def __aenter__(self) -> QuicConnection:
         return self

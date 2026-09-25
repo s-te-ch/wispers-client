@@ -58,6 +58,13 @@ const PSK_LEN: usize = 32;
 /// Maximum UDP packet size for QUIC.
 const MAX_DATAGRAM_SIZE: usize = 1350;
 
+/// Maximum length of a close reason. quiche silently skips CONNECTION_CLOSE
+/// frames that don't fit in a packet, so this must be small enough.
+const MAX_CLOSE_REASON_LEN: usize = 1024;
+
+/// Largest error code QUIC can encode.
+const MAX_ERROR_CODE: u64 = (1 << 62) - 1;
+
 /// QUIC configuration error.
 #[derive(Debug, thiserror::Error)]
 pub enum QuicConfigError {
@@ -247,6 +254,8 @@ pub enum QuicError {
     Stream(String),
     #[error("timeout")]
     Timeout,
+    #[error("error code {0} exceeds the QUIC maximum of 2^62-1")]
+    InvalidErrorCode(u64),
 }
 
 /// QUIC connection state.
@@ -296,6 +305,9 @@ struct ConnectionInner<T> {
     /// a read/write that would otherwise wait sees this and returns a terminal
     /// error instead of hanging forever.
     driver_exited: AtomicBool,
+    /// Copy of the peer's CONNECTION_CLOSE, taken when it arrives, so callers
+    /// can read it without the async connection lock.
+    peer_error: std::sync::Mutex<Option<quiche::ConnectionError>>,
 }
 
 impl<T: IceTransport> ConnectionInner<T> {
@@ -400,11 +412,18 @@ impl<T: IceTransport> ConnectionInner<T> {
             from: self.peer_addr,
             to: self.local_addr,
         };
-        match conn.recv(&mut packet, recv_info) {
+        let result = match conn.recv(&mut packet, recv_info) {
             Ok(_) => Ok(()),
             Err(quiche::Error::Done) => Ok(()),
             Err(e) => Err(QuicError::Quic(e)),
+        };
+        if let Some(err) = conn.peer_error() {
+            let mut peer_error = self.peer_error.lock().unwrap();
+            if peer_error.is_none() {
+                *peer_error = Some(err.clone());
+            }
         }
+        result
     }
 
     /// Handle timeout.
@@ -500,6 +519,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             pending_shutdown: std::sync::Mutex::new(Vec::new()),
             poll_wakers: std::sync::Mutex::new(Vec::new()),
             driver_exited: AtomicBool::new(false),
+            peer_error: std::sync::Mutex::new(None),
         });
 
         // Send Initial packet immediately (don't wait for driver)
@@ -555,6 +575,7 @@ impl<T: IceTransport + 'static> Connection<T> {
             pending_shutdown: std::sync::Mutex::new(Vec::new()),
             poll_wakers: std::sync::Mutex::new(Vec::new()),
             driver_exited: AtomicBool::new(false),
+            peer_error: std::sync::Mutex::new(None),
         });
 
         // Process the initial packet we already received
@@ -624,16 +645,78 @@ impl<T: IceTransport + 'static> Connection<T> {
         self.state().await == QuicState::Established
     }
 
-    /// Close the connection.
-    pub async fn close(&self) -> Result<(), QuicError> {
+    /// Check that the peer is still reachable, and return the round-trip time.
+    ///
+    /// Sends an ack-eliciting packet (a PING frame if nothing else is queued)
+    /// and waits until the peer acknowledges data. An ACK that was already in
+    /// flight also counts (quiche doesn't say which packet an ACK covers): it
+    /// still shows the peer was alive about one round trip before the ping, which
+    /// is close enough for a liveness check. A lost ping is retransmitted by QUIC loss
+    /// recovery; if the peer is gone, the ping fails when the idle timeout
+    /// closes the connection, so callers should apply their own timeout.
+    pub async fn ping(&self) -> Result<std::time::Duration, QuicError> {
+        let start = std::time::Instant::now();
+        let acked_before = {
+            let mut conn = self.inner.conn.lock().await;
+            if conn.is_closed() || conn.is_draining() {
+                return Err(QuicError::ConnectionClosed);
+            }
+            conn.send_ack_eliciting()?;
+            conn.stats().acked_bytes
+        };
+        self.inner.flush_send().await?;
+
+        loop {
+            let mut notified = std::pin::pin!(self.inner.state_notify.notified());
+            notified.as_mut().enable();
+
+            {
+                let conn = self.inner.conn.lock().await;
+                if conn.stats().acked_bytes > acked_before {
+                    return Ok(start.elapsed());
+                }
+                if conn.is_closed() || conn.is_draining() {
+                    return Err(QuicError::ConnectionClosed);
+                }
+            }
+            // If the driver has exited, ACKs can't get processed. Give up.
+            if self.inner.driver_exited.load(Ordering::Acquire) {
+                return Err(QuicError::ConnectionClosed);
+            }
+
+            notified.await;
+        }
+    }
+
+    /// Close the connection with an application error code and reason.
+    ///
+    /// The error code must not exceed `MAX_ERROR_CODE`. The reason is truncated
+    /// to `MAX_CLOSE_REASON_LEN` bytes so that the CONNECTION_CLOSE frame fits
+    /// in a packet.
+    pub async fn close_with_error(&self, error_code: u64, reason: &str) -> Result<(), QuicError> {
+        if error_code > MAX_ERROR_CODE {
+            return Err(QuicError::InvalidErrorCode(error_code));
+        }
+        let mut end = reason.len().min(MAX_CLOSE_REASON_LEN);
+        while !reason.is_char_boundary(end) {
+            end -= 1;
+        }
         {
             let mut conn = self.inner.conn.lock().await;
-            let _ = conn.close(true, 0, b"close");
+            let _ = conn.close(true, error_code, &reason.as_bytes()[..end]);
         }
         self.inner.flush_send().await?;
         self.inner.shutdown.store(true, Ordering::SeqCst);
         self.inner.notify_state_change();
         Ok(())
+    }
+
+    /// The error the peer closed the connection with, if it has.
+    ///
+    /// Set as soon as the peer's CONNECTION_CLOSE arrives, which is typically
+    /// before stream operations start failing.
+    pub fn peer_error(&self) -> Option<quiche::ConnectionError> {
+        self.inner.peer_error.lock().unwrap().clone()
     }
 
     /// Open a new bidirectional stream.
@@ -1844,5 +1927,117 @@ mod tests {
             .expect("credit stalled — dropped streams were not reclaimed");
 
         server_task.abort();
+    }
+
+    /// Poll `conn.peer_error()` until the peer's close arrives.
+    async fn wait_for_peer_error(conn: &Connection<ChannelTransport>) -> quiche::ConnectionError {
+        loop {
+            if let Some(e) = conn.peer_error() {
+                return e;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }
+
+    /// The error code and reason passed to `close_with_error` reach the peer.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_close_error_reaches_peer() {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let (client, server) = loopback_pair().await;
+            assert!(server.peer_error().is_none());
+
+            client.close_with_error(42, "going away").await.unwrap();
+
+            let err = wait_for_peer_error(&server).await;
+            assert!(err.is_app);
+            assert_eq!(err.error_code, 42);
+            assert_eq!(err.reason, b"going away");
+        })
+        .await
+        .expect("peer never saw the close");
+    }
+
+    /// An over-long reason is truncated (at a char boundary) rather than
+    /// making the CONNECTION_CLOSE frame too big to send.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_close_long_reason_is_truncated() {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let (client, server) = loopback_pair().await;
+            // 3-byte chars, so MAX_CLOSE_REASON_LEN falls mid-char.
+            let reason = "€".repeat(2000);
+
+            client.close_with_error(7, &reason).await.unwrap();
+
+            let err = wait_for_peer_error(&server).await;
+            assert_eq!(err.error_code, 7);
+            let got = std::str::from_utf8(&err.reason).expect("valid UTF-8");
+            assert!(got.len() <= MAX_CLOSE_REASON_LEN);
+            assert!(got.len() > MAX_CLOSE_REASON_LEN - 3);
+            assert!(reason.starts_with(got));
+        })
+        .await
+        .expect("peer never saw the close");
+    }
+
+    /// An error code QUIC can't encode is rejected up front, rather than
+    /// panicking inside quiche when the close frame is serialized.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_close_rejects_oversized_error_code() {
+        let (client, _server) = loopback_pair().await;
+        let res = client.close_with_error(MAX_ERROR_CODE + 1, "").await;
+        assert!(
+            matches!(res, Err(QuicError::InvalidErrorCode(_))),
+            "got {res:?}"
+        );
+        client
+            .close_with_error(MAX_ERROR_CODE, "")
+            .await
+            .expect("max code is valid");
+    }
+
+    /// A ping to a live peer is acknowledged.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ping_live_peer() {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let (client, server) = loopback_pair().await;
+            client.ping().await.expect("client ping");
+            server.ping().await.expect("server ping");
+        })
+        .await
+        .expect("ping to a live peer never completed");
+    }
+
+    /// A ping the peer never answers must not succeed. The peer's driver is
+    /// stopped but its transport stays open, so our packets vanish silently,
+    /// as they would with a peer that dropped off the network.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ping_unanswered_does_not_succeed() {
+        let (client, server) = loopback_pair().await;
+        // Let the connection go quiet first. `ping` accepts ACKs that were
+        // already in flight (e.g. for the tail of the handshake), which would
+        // make it succeed even though the peer is gone by the time they land.
+        client.ping().await.expect("settling ping");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        server.driver_handle.abort();
+
+        let res = tokio::time::timeout(std::time::Duration::from_millis(500), client.ping()).await;
+        assert!(res.is_err(), "ping must not complete, got {res:?}");
+        drop(server);
+    }
+
+    /// Pinging a connection the peer has closed fails promptly instead of
+    /// waiting for an ACK that can't come.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ping_after_peer_close_fails() {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let (client, server) = loopback_pair().await;
+            server.close_with_error(0, "").await.unwrap();
+            wait_for_peer_error(&client).await;
+
+            let res = client.ping().await;
+            assert!(res.is_err(), "ping after peer close must fail, got {res:?}");
+        })
+        .await
+        .expect("ping after peer close must fail promptly, not hang");
     }
 }

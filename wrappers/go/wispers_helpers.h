@@ -135,8 +135,16 @@ static inline WispersStatus callQuicAcceptStreamAsync(WispersQuicConnectionHandl
 	return wispers_quic_connection_accept_stream_async(h, ctx, shimWispersQuicStreamCallback);
 }
 
+static inline WispersStatus callQuicPingAsync(WispersQuicConnectionHandle *h, uint32_t timeout_ms, void *ctx) {
+	return wispers_quic_connection_ping_async(h, timeout_ms, ctx, shimWispersCallback);
+}
+
 static inline WispersStatus callQuicCloseAsync(WispersQuicConnectionHandle *h, void *ctx) {
 	return wispers_quic_connection_close_async(h, ctx, shimWispersCallback);
+}
+
+static inline WispersStatus callQuicCloseWithErrorAsync(WispersQuicConnectionHandle *h, uint64_t error_code, const char *reason, void *ctx) {
+	return wispers_quic_connection_close_with_error_async(h, error_code, reason, ctx, shimWispersCallback);
 }
 
 static inline WispersStatus callQuicStreamWriteAsync(WispersQuicStreamHandle *h, const uint8_t *data, size_t len, void *ctx) {
