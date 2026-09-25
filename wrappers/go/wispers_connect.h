@@ -416,12 +416,12 @@ WispersStatus wispers_quic_connection_accept_stream_async(
 );
 
 // Check that the peer of a QUIC connection is still reachable. Sends a QUIC
-// PING and waits for the peer's transport to acknowledge it.
+// PING and waits for the peer's transport to acknowledge it. Completes with
+// TIMEOUT if no acknowledgement arrives, with CONNECTION_FAILED if the
+// connection is closed or closing.
 //
-// Completes with TIMEOUT if no acknowledgement arrives within timeout_ms,
-// CONNECTION_FAILED if the connection is closed or closing. The connection
-// handle is NOT consumed. Returns SUCCESS immediately if the async operation
-// was started.
+// The connection handle is NOT consumed. Returns SUCCESS immediately if the
+// async operation was started.
 WispersStatus wispers_quic_connection_ping_async(
     WispersQuicConnectionHandle *handle,
     uint32_t timeout_ms,
@@ -439,12 +439,12 @@ WispersStatus wispers_quic_connection_close_async(
     WispersCallback callback
 );
 
-// Close a QUIC connection, with error code and reason.
+// Close a QUIC connection with error code and reason.
 //
-// error_code and reason are application-defined; the peer reads them with
-// wispers_quic_connection_peer_close_info. error_code must be at most 2^62-1
-// (QUIC's limit). reason may be NULL, and is truncated to 1024 bytes. The
-// connection handle is CONSUMED by this call, unless it returns an error
+// error_code must be at most 2^62-1 (QUIC's limit). reason may be NULL, and is
+// truncated to 1024 bytes.
+//
+// The connection handle is CONSUMED by this call, unless it returns an error
 // status. Callback is invoked when the close operation completes. Returns
 // SUCCESS immediately if the async operation was started.
 WispersStatus wispers_quic_connection_close_with_error_async(
@@ -455,8 +455,7 @@ WispersStatus wispers_quic_connection_close_with_error_async(
     WispersCallback callback
 );
 
-// How the peer closed the connection, or NULL if it hasn't. Non-NULL as soon as
-// the peer's close arrives; stream operations then fail with CONNECTION_FAILED.
+// How the peer closed the connection, or NULL if it hasn't.
 // The result must be freed with wispers_quic_close_info_free().
 // The connection handle is NOT consumed.
 WispersQuicCloseInfo *wispers_quic_connection_peer_close_info(WispersQuicConnectionHandle *handle);
