@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.17.0
 
 QUIC connection close codes and liveness checks, in Rust, C and all wrappers.
 
@@ -10,7 +10,7 @@ QUIC connection close codes and liveness checks, in Rust, C and all wrappers.
   (previously the reason `"close"`).
 - **Ping.** `QuicConnection::ping(timeout)` checks at the transport layer
   whether the peer is still reachable, e.g. after a mobile app returns to the
-  foreground. A timeout is reported as the new `P2pError::Timeout`.
+  foreground.
 - **Fix.** A close reason too long to fit in a packet used to stop the close
   from being sent at all. Reasons are now truncated to 1024 bytes.
 
