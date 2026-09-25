@@ -184,8 +184,14 @@ jobs:
       - name: Build and test through Bazel
         run: |
           bazel test //wrappers/go:go_test --@wispers_connect//bazel:native=cargo
-          bazel build //examples/go:wconnect-go //wispers-connect/proto:all \
-            --@wispers_connect//bazel:native=cargo
+          bazel build //examples/go:wconnect-go --@wispers_connect//bazel:native=cargo
+
+      # proto_library makes Bazel compile protoc from source, which takes
+      # minutes. The descriptors are platform-independent, so one OS suffices.
+      # Same flag as above, or Bazel would discard its analysis cache.
+      - name: Build proto targets through Bazel
+        if: runner.os == 'Linux'
+        run: bazel build //wispers-connect/proto:all --@wispers_connect//bazel:native=cargo
 
   python:
     name: Python wrapper
