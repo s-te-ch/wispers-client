@@ -233,7 +233,12 @@ jobs:
           java-version: "17"
           cache: gradle
 
+      # The default packages include the legacy `tools`, which current
+      # cmdline-tools no longer provide. The build only needs the SDK platform
+      # already on the runner.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Run Kotlin wrapper unit tests
         working-directory: wrappers/kotlin
