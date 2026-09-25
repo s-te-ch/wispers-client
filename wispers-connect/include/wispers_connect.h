@@ -55,6 +55,7 @@ typedef struct WispersIncomingConnections WispersIncomingConnections;
 typedef struct WispersUdpConnectionHandle WispersUdpConnectionHandle;
 typedef struct WispersQuicConnectionHandle WispersQuicConnectionHandle;
 typedef struct WispersQuicStreamHandle WispersQuicStreamHandle;
+typedef struct WispersQuicCloseInfo WispersQuicCloseInfo;
 typedef struct WispersGroupInfo WispersGroupInfo;
 typedef struct WispersNode WispersNode;
 typedef struct WispersServingStatus WispersServingStatus;
@@ -414,7 +415,21 @@ WispersStatus wispers_quic_connection_accept_stream_async(
     WispersQuicStreamCallback callback
 );
 
-// Close a QUIC connection.
+// Check that the peer of a QUIC connection is still reachable. Sends a QUIC
+// PING and waits for the peer's transport to acknowledge it. Completes with
+// TIMEOUT if no acknowledgement arrives, with CONNECTION_FAILED if the
+// connection is closed or closing.
+//
+// The connection handle is NOT consumed. Returns SUCCESS immediately if the
+// async operation was started.
+WispersStatus wispers_quic_connection_ping_async(
+    WispersQuicConnectionHandle *handle,
+    uint32_t timeout_ms,
+    void *ctx,
+    WispersCallback callback
+);
+
+// Close a QUIC connection. The peer sees error code 0 and no reason.
 // The connection handle is CONSUMED by this call.
 // Callback is invoked when the close operation completes.
 // Returns SUCCESS immediately if the async operation was started.
@@ -423,6 +438,38 @@ WispersStatus wispers_quic_connection_close_async(
     void *ctx,
     WispersCallback callback
 );
+
+// Close a QUIC connection with error code and reason.
+//
+// error_code must be at most 2^62-1 (QUIC's limit). reason may be NULL, and is
+// truncated to 1024 bytes.
+//
+// The connection handle is CONSUMED by this call, unless it returns an error
+// status. Callback is invoked when the close operation completes. Returns
+// SUCCESS immediately if the async operation was started.
+WispersStatus wispers_quic_connection_close_with_error_async(
+    WispersQuicConnectionHandle *handle,
+    uint64_t error_code,
+    const char *reason,
+    void *ctx,
+    WispersCallback callback
+);
+
+// How the peer closed the connection, or NULL if it hasn't.
+// The result must be freed with wispers_quic_close_info_free().
+// The connection handle is NOT consumed.
+WispersQuicCloseInfo *wispers_quic_connection_peer_close_info(WispersQuicConnectionHandle *handle);
+
+// Free a close info handle.
+void wispers_quic_close_info_free(WispersQuicCloseInfo *info);
+
+// Close info accessors. closed_by_app is true if the peer's application
+// closed the connection, false if its QUIC stack did (error_code is then a QUIC
+// transport error code, RFC 9000 section 20.1). The reason string is owned by
+// the close info.
+bool        wispers_quic_close_info_closed_by_app(const WispersQuicCloseInfo *info);
+uint64_t    wispers_quic_close_info_error_code(const WispersQuicCloseInfo *info);
+const char *wispers_quic_close_info_reason(const WispersQuicCloseInfo *info);
 
 // Free a QUIC connection handle (if not already closed).
 void wispers_quic_connection_free(WispersQuicConnectionHandle *handle);

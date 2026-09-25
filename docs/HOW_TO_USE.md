@@ -196,6 +196,19 @@ protocol. Some options:
 * Send and receive JSON objects. This lies somewhere between the first two
   options.
 
+### Checking and closing QUIC connections
+
+A QUIC connection can die without either side noticing right away — for example
+while a mobile app sits in the background. To find out whether a connection is
+still usable, call `ping(timeout)` on it. It sends a QUIC PING and waits for the
+peer's QUIC stack to acknowledge it. A timeout of a few seconds is reasonable —
+without an answer, QUIC itself would only give up after its 30-second idle
+timeout. If the ping fails, open a new connection.
+
+To close a connection, call `close()` or, if you want to tell the peer why
+you're closing the connection, `close_with_error(code, reason)`. The peer can
+read them with `peer_close_info()`.
+
 ### Error handling
 
 Sometimes, things will go awry. Here's how to deal with some common scenarios:

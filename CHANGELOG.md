@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+QUIC connection close codes and liveness checks, in Rust, C and all wrappers.
+
+- **Close codes.** `QuicConnection::close_with_error(code, reason)` sends an
+  application error code and reason to the peer, which reads them with
+  `peer_close_info()`. Plain `close()` now sends code 0 with an empty reason
+  (previously the reason `"close"`).
+- **Ping.** `QuicConnection::ping(timeout)` checks at the transport layer
+  whether the peer is still reachable, e.g. after a mobile app returns to the
+  foreground. A timeout is reported as the new `P2pError::Timeout`.
+- **Fix.** A close reason too long to fit in a packet used to stop the close
+  from being sent at all. Reasons are now truncated to 1024 bytes.
+
 ## v0.16.0
 
 Bazel support for Go (no other languages yet, sorry).

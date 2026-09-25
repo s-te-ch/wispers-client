@@ -4,9 +4,11 @@ import com.sun.jna.Pointer
 import dev.wispers.connect.internal.CallbackBridge
 import dev.wispers.connect.internal.Callbacks
 import dev.wispers.connect.internal.NativeLibrary
+import dev.wispers.connect.types.QuicCloseInfo
 import dev.wispers.connect.types.WispersException
 import dev.wispers.connect.types.WispersStatus
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.time.Duration
 
 /**
  * Handle to a QUIC P2P connection.
@@ -91,6 +93,30 @@ class QuicConnection internal constructor(
     }
 
     /**
+     * Check that the peer is still reachable.
+     *
+     * Sends a QUIC PING and waits for the peer's transport to acknowledge it.
+     *
+     * @param timeout How long to wait for the acknowledgement.
+     * @throws WispersException.Timeout if no acknowledgement arrives in time
+     * @throws WispersException.ConnectionFailed if the connection is closed or closing
+     */
+    suspend fun ping(timeout: Duration): Unit = suspendCancellableCoroutine { cont ->
+        val ptr = requireOpen()
+        val timeoutMs = if (timeout.isPositive()) {
+            timeout.inWholeMilliseconds.coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
+        } else {
+            0
+        }
+        val ctx = CallbackBridge.register(cont)
+
+        val status = lib.wispers_quic_connection_ping_async(ptr, timeoutMs, ctx, Callbacks.basic)
+        if (status != WispersStatus.SUCCESS.code) {
+            CallbackBridge.resumeException(ctx, WispersException.fromStatus(status))
+        }
+    }
+
+    /**
      * Close the connection.
      *
      * **This consumes the handle** - it cannot be used afterward.
@@ -105,6 +131,52 @@ class QuicConnection internal constructor(
         val status = lib.wispers_quic_connection_close_async(ptr, ctx, Callbacks.basic)
         if (status != WispersStatus.SUCCESS.code) {
             CallbackBridge.resumeException(ctx, WispersException.fromStatus(status))
+        }
+    }
+
+    /**
+     * Close the connection, with error code and reason.
+     *
+     * [errorCode] and [reason] are application-defined; the peer reads them
+     * with [peerCloseInfo]. [errorCode] must be in 0 to 2^62-1 (QUIC's limit);
+     * [reason] is truncated to 1024 bytes.
+     *
+     * **This consumes the handle** - it cannot be used afterward.
+     * All open streams will be terminated.
+     *
+     * @throws WispersException.ConnectionFailed on error
+     */
+    suspend fun closeWithErrorAsync(errorCode: Long, reason: String = ""): Unit =
+        suspendCancellableCoroutine { cont ->
+            val ptr = consume() ?: throw IllegalStateException("Handle already consumed")
+            val ctx = CallbackBridge.register(cont)
+
+            val status = lib.wispers_quic_connection_close_with_error_async(
+                ptr, errorCode, reason, ctx, Callbacks.basic
+            )
+            if (status != WispersStatus.SUCCESS.code) {
+                // The async op never started, so the handle wasn't consumed.
+                lib.wispers_quic_connection_free(ptr)
+                CallbackBridge.resumeException(ctx, WispersException.fromStatus(status))
+            }
+        }
+
+    /**
+     * How the peer closed the connection, or `null` if it hasn't.
+     *
+     * Set as soon as the peer's close arrives; stream operations then fail
+     * with [WispersException.ConnectionFailed].
+     */
+    fun peerCloseInfo(): QuicCloseInfo? {
+        val infoPtr = lib.wispers_quic_connection_peer_close_info(requireOpen()) ?: return null
+        try {
+            return QuicCloseInfo(
+                closedByApp = lib.wispers_quic_close_info_closed_by_app(infoPtr) != 0.toByte(),
+                errorCode = lib.wispers_quic_close_info_error_code(infoPtr),
+                reason = lib.wispers_quic_close_info_reason(infoPtr)?.getString(0, "UTF-8") ?: ""
+            )
+        } finally {
+            lib.wispers_quic_close_info_free(infoPtr)
         }
     }
 

@@ -13,6 +13,8 @@ from ctypes import (
     c_int64,
     c_size_t,
     c_uint8,
+    c_uint32,
+    c_uint64,
     c_void_p,
 )
 
@@ -209,6 +211,31 @@ def declare_functions(lib: ctypes.CDLL) -> None:  # noqa: C901
 
     lib.wispers_quic_connection_close_async.argtypes = [c_void_p, c_void_p, WispersCallbackType]
     lib.wispers_quic_connection_close_async.restype = c_int
+
+    lib.wispers_quic_connection_close_with_error_async.argtypes = [
+        c_void_p, c_uint64, c_char_p, c_void_p, WispersCallbackType,
+    ]
+    lib.wispers_quic_connection_close_with_error_async.restype = c_int
+
+    lib.wispers_quic_connection_ping_async.argtypes = [
+        c_void_p, c_uint32, c_void_p, WispersCallbackType,
+    ]
+    lib.wispers_quic_connection_ping_async.restype = c_int
+
+    lib.wispers_quic_connection_peer_close_info.argtypes = [c_void_p]
+    lib.wispers_quic_connection_peer_close_info.restype = c_void_p
+
+    lib.wispers_quic_close_info_free.argtypes = [c_void_p]
+    lib.wispers_quic_close_info_free.restype = None
+
+    lib.wispers_quic_close_info_closed_by_app.argtypes = [c_void_p]
+    lib.wispers_quic_close_info_closed_by_app.restype = c_bool
+
+    lib.wispers_quic_close_info_error_code.argtypes = [c_void_p]
+    lib.wispers_quic_close_info_error_code.restype = c_uint64
+
+    lib.wispers_quic_close_info_reason.argtypes = [c_void_p]
+    lib.wispers_quic_close_info_reason.restype = c_char_p
 
     lib.wispers_quic_connection_free.argtypes = [c_void_p]
     lib.wispers_quic_connection_free.restype = None

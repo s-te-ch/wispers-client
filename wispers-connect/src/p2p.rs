@@ -12,6 +12,7 @@
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -96,6 +97,9 @@ pub enum P2pError {
 
     #[error("node has been revoked from the roster")]
     Revoked,
+
+    #[error("timed out")]
+    Timeout,
 }
 
 //-- UDP connections -------------------------------------------------------------------------------
@@ -256,10 +260,24 @@ impl QuicConnectionInner {
         }
     }
 
-    async fn close(self) -> Result<(), QuicError> {
+    async fn ping(&self) -> Result<Duration, QuicError> {
         match self {
-            Self::Caller(q) => q.close().await,
-            Self::Answerer(q) => q.close().await,
+            Self::Caller(q) => q.ping().await,
+            Self::Answerer(q) => q.ping().await,
+        }
+    }
+
+    async fn close_with_error(self, error_code: u64, reason: &str) -> Result<(), QuicError> {
+        match self {
+            Self::Caller(q) => q.close_with_error(error_code, reason).await,
+            Self::Answerer(q) => q.close_with_error(error_code, reason).await,
+        }
+    }
+
+    fn peer_error(&self) -> Option<quiche::ConnectionError> {
+        match self {
+            Self::Caller(q) => q.peer_error(),
+            Self::Answerer(q) => q.peer_error(),
         }
     }
 }
@@ -444,6 +462,20 @@ pub struct QuicConnection {
     inner: QuicConnectionInner,
 }
 
+/// How the peer closed a [`QuicConnection`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct QuicCloseInfo {
+    /// True if the peer's application closed the connection, false if it it was
+    /// the peer's QUIC stack that closed it. In the former case, the error code
+    /// is application-defined. In the latter, `error_code` is a QUIC transport
+    /// error code (RFC 9000 §20.1).
+    pub closed_by_app: bool,
+
+    pub error_code: u64,
+    pub reason: String,
+}
+
 impl QuicConnection {
     /// Create and establish a new QUIC connection as the caller (internal use).
     ///
@@ -514,9 +546,42 @@ impl QuicConnection {
         self.inner.is_established().await
     }
 
+    /// Check that the peer is still reachable, and return the round-trip time.
+    ///
+    /// This works at the transport layer: it sends a QUIC PING and waits for
+    /// the peer's QUIC stack to acknowledge it, so the peer application needs
+    /// no cooperation. Use it e.g. when a mobile app returns to the
+    /// foreground, to find out whether a connection survived.
+    ///
+    /// Fails with [`P2pError::Timeout`] if no acknowledgement arrives within
+    /// `timeout`, and with another error if the connection is closed or
+    /// closing.
+    pub async fn ping(&self, timeout: Duration) -> Result<Duration, P2pError> {
+        match tokio::time::timeout(timeout, self.inner.ping()).await {
+            Ok(result) => Ok(result?),
+            Err(_) => Err(P2pError::Timeout),
+        }
+    }
+
     /// Close the connection.
     pub async fn close(self) -> Result<(), P2pError> {
-        self.inner.close().await?;
+        self.close_with_error(0, "").await
+    }
+
+    /// Close the connection, with error code and reason.
+    pub async fn close_with_error(self, error_code: u64, reason: &str) -> Result<(), P2pError> {
+        self.inner.close_with_error(error_code, reason).await?;
         Ok(())
+    }
+
+    /// How the peer closed the connection, or `None` if it hasn't.
+    ///
+    /// Available as soon as the closes the connection.
+    pub fn peer_close_info(&self) -> Option<QuicCloseInfo> {
+        self.inner.peer_error().map(|e| QuicCloseInfo {
+            closed_by_app: e.is_app,
+            error_code: e.error_code,
+            reason: String::from_utf8_lossy(&e.reason).into_owned(),
+        })
     }
 }

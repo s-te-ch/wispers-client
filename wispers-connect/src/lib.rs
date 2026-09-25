@@ -110,7 +110,9 @@ pub use crypto::TtlProfile;
 pub use errors::NodeStateError;
 pub use hub::HubError;
 pub use node::{Node, NodeState, NodeStorage};
-pub use p2p::{ConnectionState, P2pError, QuicConnection, QuicStream, UdpConnection};
+pub use p2p::{
+    ConnectionState, P2pError, QuicCloseInfo, QuicConnection, QuicStream, UdpConnection,
+};
 pub use roster::RosterVerificationError;
 pub use serving::{
     EndorsingStatus, IncomingConnections, ServingError, ServingHandle, ServingSession,
