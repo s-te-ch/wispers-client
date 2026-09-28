@@ -13,6 +13,9 @@ QUIC connection close codes and liveness checks, in Rust, C and all wrappers.
   foreground.
 - **Fix.** A close reason too long to fit in a packet used to stop the close
   from being sent at all. Reasons are now truncated to 1024 bytes.
+- **Fix.** Cross-compiling for Android from a Linux host failed to link
+  (`unable to find library -lpthread`): the build script chose link
+  libraries by the host OS instead of the target OS.
 
 ## v0.16.0
 

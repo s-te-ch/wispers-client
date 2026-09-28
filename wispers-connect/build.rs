@@ -111,14 +111,19 @@ fn build_libjuice_native(libjuice_dir: &Path) -> BuildResult<()> {
     println!("cargo:rustc-link-search=native={}", link_dir.display());
     println!("cargo:rustc-link-lib=static=juice");
 
-    if cfg!(target_os = "windows") {
-        println!("cargo:rustc-link-lib=dylib=ws2_32");
-        println!("cargo:rustc-link-lib=dylib=bcrypt");
-    } else if cfg!(target_os = "macos") {
-        // macOS doesn't need extra libs
-    } else {
-        // Linux
-        println!("cargo:rustc-link-lib=pthread");
+    // What libjuice needs beyond libc, by the OS being built for. A build
+    // script's own cfg!() describes the host it runs on, not the target, so
+    // this must come from the environment: a cross-compile from Linux to
+    // Android used to ask for -lpthread, which Bionic doesn't have.
+    match env::var("CARGO_CFG_TARGET_OS").as_deref() {
+        Ok("windows") => {
+            println!("cargo:rustc-link-lib=dylib=ws2_32");
+            println!("cargo:rustc-link-lib=dylib=bcrypt");
+        }
+        // pthread is part of the C library on these.
+        Ok("macos") | Ok("ios") | Ok("android") => {}
+        // Linux and the other unixes.
+        _ => println!("cargo:rustc-link-lib=pthread"),
     }
 
     Ok(())
