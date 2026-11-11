@@ -25,6 +25,8 @@ pub mod proto {
         tonic::include_proto!("wispers.connect.roster");
     }
     /// Hub proto types.
+    // tonic's generated server trait trips clippy's `double_must_use` (Rust 1.99+).
+    #[allow(clippy::double_must_use)]
     pub mod hub {
         tonic::include_proto!("wispers.connect.hub");
     }
